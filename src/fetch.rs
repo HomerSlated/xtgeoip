@@ -13,6 +13,7 @@ use zip::ZipArchive;
 
 use crate::config::Config;
 
+/// Do not clobber MaxMind's servers during development
 const XTGEOIP_OFFLINE: bool = true;
 
 pub fn fetch(config: &Config) -> Result<(TempDir, String)> {
