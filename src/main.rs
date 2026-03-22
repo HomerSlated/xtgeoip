@@ -1,11 +1,11 @@
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 ///
-/// Downloads, extracts, and converts GeoIP CSV databases into binary IP range
-/// data files, compatible with the Linux x_tables xt_geoip module, which can
-/// filter packets based on GeoIP country labels.
+/// Downloads, extracts, and converts GeoIP CSV databases into binary IP
+/// range data files, compatible with the Linux x_tables xt_geoip module,
+/// which can filter packets based on GeoIP country labels.
 ///
-/// Inspired by xt_geoip_build_maxmind (Jan Engelhardt, Philip Prindeville),
-/// now part of Debian's xtables-addons package.
+/// Inspired by xt_geoip_build_maxmind (Jan Engelhardt, Philip
+/// Prindeville), now part of Debian's xtables-addons package.
 use std::{env, path::Path};
 
 use anyhow::{Context, Result};
@@ -23,25 +23,14 @@ use crate::{
 
 fn print_usage() {
     eprintln!(
-        "Usage: xtgeoip <command> [options]\n\
-         \n\
-         Commands:\n\
-         \trun           Fetch CSV archive and build binary data\n\
-         \tconf          Configuration operations (with -d/-s/-e/-h)\n\
-         \n\
-         Options:\n\
-         \t-b, --backup  Backup existing binary files\n\
-         \t-d, --delete  Delete existing binary files\n\
-         \t-f, --force   Force backup and/or delete without verification\n\
-         \n\
-         Examples:\n\
-         \txtgeoip run\n\
-         \txtgeoip -b\n\
-         \txtgeoip -d\n\
-         \txtgeoip -b -d\n\
-         \txtgeoip -b -d -f\n\
-         \txtgeoip run -b -d\n\
-         \txtgeoip conf -h"
+        "Usage: xtgeoip <command> [options]\n\nCommands:\n\trun           \
+         Fetch CSV archive and build binary data\n\tconf          \
+         Configuration operations (with -d/-s/-e/-h)\n\nOptions:\n\t-b, \
+         --backup  Backup existing binary files\n\t-d, --delete  Delete \
+         existing binary files\n\t-f, --force   Force backup and/or delete \
+         without verification\n\nExamples:\n\txtgeoip run\n\txtgeoip \
+         -b\n\txtgeoip -d\n\txtgeoip -b -d\n\txtgeoip -b -d -f\n\txtgeoip run \
+         -b -d\n\txtgeoip conf -h"
     );
 }
 

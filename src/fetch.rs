@@ -40,8 +40,8 @@ pub fn fetch(config: &Config) -> Result<(TempDir, String)> {
         || license_key == "CHANGE ME"
     {
         eprintln!(
-            "Warning: MaxMind account ID or license key not set in \
-                config. Skipping fetch."
+            "Warning: MaxMind account ID or license key not set in config. \
+             Skipping fetch."
         );
         bail!("MaxMind credentials not configured");
     }
@@ -139,7 +139,8 @@ pub fn fetch(config: &Config) -> Result<(TempDir, String)> {
     if actual_hash != expected_hash {
         fs::remove_file(&archive_path).ok(); // remove partial file
         bail!(
-            "Checksum verification failed: expected {expected_hash}, got {actual_hash}"
+            "Checksum verification failed: expected {expected_hash}, got \
+             {actual_hash}"
         );
     }
 
@@ -196,7 +197,8 @@ fn extract_archive_to_temp(archive_path: &Path) -> Result<TempDir> {
     Ok(temp_dir)
 }
 
-/// Flatten MaxMind's top-level versioned directory so CSVs land directly in temp root
+/// Flatten MaxMind's top-level versioned directory so CSVs land directly in
+/// temp root
 fn flatten_to_temp_root(temp_root: &Path, entry_path: &Path) -> PathBuf {
     let components: Vec<_> = entry_path.components().collect();
 
