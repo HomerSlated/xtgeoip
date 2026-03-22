@@ -2,8 +2,8 @@
 name = "xtgeoip"
 version = "0.0.20"
 edition = "2024"
-authors = ["Homer homer@hazensparkle.co.uk"]
-license = "MIT OR Apache-2.0"
+authors = ["Homer at hazensparkle.co.uk"]
+license = "MIT"
 include = ["src/**", "Cargo.toml", "README.md", "LICENSE", "doc/**"]
 
 [dependencies]
