@@ -1,0 +1,6 @@
+/bak
+/target
+*.bak
+*.new
+*.tar.gz
+*.fish
