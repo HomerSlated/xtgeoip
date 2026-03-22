@@ -59,7 +59,8 @@ fn ensure_system_config_exists() -> io::Result<()> {
         println!("Created {SYSTEM_CONFIG} from default example.");
     } else {
         println!(
-            "Skipping creation of system config. You can edit it manually later."
+            "Skipping creation of system config. You can edit it manually \
+             later."
         );
     }
 

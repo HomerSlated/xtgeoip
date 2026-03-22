@@ -20,7 +20,8 @@ fn manifest_path_for_version(data_dir: &Path, version: &str) -> PathBuf {
     data_dir.join(format!("GeoLite2-Country-bin_{}.sha256", version))
 }
 
-/// Collect IV files: 2-char country codes, with .iv4 or .iv6, including digits and letters.
+/// Collect IV files: 2-char country codes, with .iv4 or .iv6, including digits
+/// and letters.
 fn iv_files(data_dir: &Path) -> Result<Vec<PathBuf>> {
     let mut files: Vec<PathBuf> =
         glob(&format!("{}/*[0-9A-Z][0-9A-Z].iv[46]", data_dir.display()))?
@@ -67,7 +68,8 @@ fn verify_manifest_files(
         let file_path = data_dir.join(file_name);
         if !file_path.exists() {
             bail!(
-                "Manifest mismatch\n{}: file not found\nOperation aborted, no files have been modified",
+                "Manifest mismatch\n{}: file not found\nOperation aborted, no \
+                 files have been modified",
                 file_name
             );
         }
@@ -76,7 +78,8 @@ fn verify_manifest_files(
         let actual_hash = format!("{:x}", Sha256::digest(&data));
         if actual_hash != expected_hash {
             bail!(
-                "Manifest mismatch\n{}: checksum failed\nOperation aborted, no files have been modified",
+                "Manifest mismatch\n{}: checksum failed\nOperation aborted, \
+                 no files have been modified",
                 file_name
             );
         }
@@ -147,7 +150,8 @@ fn gather_files(
     Ok((Vec::new(), version, manifest_opt))
 }
 
-/// Backup IV files, version file, and manifest. Force option allows backup even if version/manifest missing.
+/// Backup IV files, version file, and manifest. Force option allows backup even
+/// if version/manifest missing.
 pub fn backup(data_dir: &Path, backup_dir: &Path, force: bool) -> Result<()> {
     fs::create_dir_all(backup_dir)?;
 
@@ -172,7 +176,8 @@ pub fn backup(data_dir: &Path, backup_dir: &Path, force: bool) -> Result<()> {
     // Non-force: verify manifest
     let manifest_path = manifest_opt.ok_or_else(|| {
         anyhow!(
-            "Manifest missing: {}\nExpected manifest not found. Use -f to force backup",
+            "Manifest missing: {}\nExpected manifest not found. Use -f to \
+             force backup",
             manifest_path_for_version(data_dir, &version).display()
         )
     })?;
@@ -189,7 +194,8 @@ pub fn backup(data_dir: &Path, backup_dir: &Path, force: bool) -> Result<()> {
     Ok(())
 }
 
-/// Delete IV files, version file, and manifest. Force option allows deletion even if version/manifest missing.
+/// Delete IV files, version file, and manifest. Force option allows deletion
+/// even if version/manifest missing.
 pub fn delete(data_dir: &Path, force: bool) -> Result<()> {
     let (mut files, version, manifest_opt) = gather_files(data_dir, force)?;
 

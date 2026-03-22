@@ -34,7 +34,8 @@ pub fn build(
 
     let (country_id, mut country_name) = load_countries(source_dir, legacy)?;
 
-    // Ensure special codes exist in the name map (but don't overwrite if already set)
+    // Ensure special codes exist in the name map (but don't overwrite if
+    // already set)
     country_name
         .entry("A1".into())
         .or_insert_with(|| "Anonymous Proxy".into());
@@ -63,10 +64,12 @@ pub fn build(
     // Ensure output directory exists
     std::fs::create_dir_all(target_dir)?;
 
-    // Parallel writing of country files (binary, headerless, xt_geoip-compatible)
+    // Parallel writing of country files (binary, headerless,
+    // xt_geoip-compatible)
     country_ranges.par_iter().for_each(|(iso_code, cr)| {
         let file_base = target_dir.join(iso_code.to_uppercase());
-        // Ignore errors here; build() will surface them if needed by changing this to collect results
+        // Ignore errors here; build() will surface them if needed by changing
+        // this to collect results
         let _ = write_country_v4(&file_base, &cr.pool_v4);
         let _ = write_country_v6(&file_base, &cr.pool_v6);
     });
@@ -148,7 +151,8 @@ fn load_countries(
             country_id.insert(geoname.clone(), iso.clone());
             country_name.entry(iso.clone()).or_insert(name);
         } else if geoname == "6255148" || geoname == "6255147" {
-            // Special geoname IDs (world/continent). Legacy mode maps to continent code.
+            // Special geoname IDs (world/continent). Legacy mode maps to
+            // continent code.
             if legacy {
                 country_id.insert(geoname.clone(), continent.clone());
                 country_name.entry(continent.clone()).or_insert(name);
@@ -157,7 +161,8 @@ fn load_countries(
                 country_name.entry("O1".to_string()).or_insert(name);
             }
         } else {
-            // No ISO code; treat as "Other Country" but don't overwrite existing label
+            // No ISO code; treat as "Other Country" but don't overwrite
+            // existing label
             country_id.insert(geoname.clone(), "".to_string());
             country_name.entry("O1".to_string()).or_insert(name);
         }
