@@ -4,5 +4,3 @@
 *.new
 *.tar.gz
 *.fish
-*.loc
-*.lock
