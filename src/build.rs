@@ -35,63 +35,72 @@ pub fn build(
 
     let (country_id, mut country_name) = load_countries(source_dir, legacy)?;
 
-    // Ensure special codes exist in the name map (but don't overwrite if
-    // already set)
-    country_name
-        .entry("A1".into())
-        .or_insert_with(|| "Anonymous Proxy".into());
-    country_name
-        .entry("A2".into())
-        .or_insert_with(|| "Satellite Provider".into());
-    country_name
-        .entry("O1".into())
-        .or_insert_with(|| "Other Country".into());
+    // Ensure special codes exist in the name map (but don't overwrite if already set)
+    country_name.entry("A1".into()).or_insert_with(|| "Anonymous Proxy".into());
+    country_name.entry("A2".into()).or_insert_with(|| "Satellite Provider".into());
+    country_name.entry("O1".into()).or_insert_with(|| "Other Country".into());
 
-    // Initialize ranges for all known country codes
     let mut country_ranges: BTreeMap<String, CountryRanges> = country_name
         .keys()
         .map(|cc| (cc.clone(), CountryRanges::default()))
         .collect();
 
-    // Also ensure special codes exist in ranges even if not in CSV
     for cc in ["A1", "A2", "O1"] {
         country_ranges.entry(cc.to_string()).or_default();
     }
 
-    // Parallel CIDR parsing
     load_blocks_parallel(source_dir, &country_id, &mut country_ranges, false)?;
     load_blocks_parallel(source_dir, &country_id, &mut country_ranges, true)?;
 
-    // Ensure output directory exists
     std::fs::create_dir_all(target_dir)?;
 
-    // Collect file paths we will write
-    let mut files_to_write = vec![];
-    for iso_code in country_ranges.keys() {
-        let base = target_dir.join(iso_code.to_uppercase());
-        files_to_write.push(base.with_extension("iv4"));
-        files_to_write.push(base.with_extension("iv6"));
+    // -------------------------
+    // Prepare files we will write
+    // -------------------------
+    let files_to_write: Vec<_> = country_ranges
+        .keys()
+        .flat_map(|iso| {
+            let base = target_dir.join(iso.to_uppercase());
+            vec![base.with_extension("iv4"), base.with_extension("iv6")]
+        })
+        .collect();
+
+    // -------------------------
+    // Detect overwrites
+    // -------------------------
+    let overwrite_count = files_to_write.iter().filter(|f| f.exists()).count();
+    if overwrite_count > 0 {
+        println!(
+            "Warning: {} country files (iv4/iv6) will be overwritten.",
+            overwrite_count
+        );
     }
 
-    // Parallel writing of country files (binary, headerless)
-    country_ranges.par_iter().for_each(|(iso_code, cr)| {
-        let file_base = target_dir.join(iso_code.to_uppercase());
-        let _ = write_country_v4(&file_base, &cr.pool_v4);
-        let _ = write_country_v6(&file_base, &cr.pool_v6);
+    // -------------------------
+    // Write country files
+    // -------------------------
+    country_ranges.par_iter().for_each(|(iso, cr)| {
+        let base = target_dir.join(iso.to_uppercase());
+        let _ = write_country_v4(&base, &cr.pool_v4);
+        let _ = write_country_v6(&base, &cr.pool_v6);
     });
 
-    // Write version file
+    // -------------------------
+    // Version file
+    // -------------------------
     fs::write(target_dir.join("version"), format!("{version}\n"))?;
 
-    // Write checksum file
+    // -------------------------
+    // SHA256 manifest
+    // -------------------------
     let checksum_name = format!("GeoLite2-Country-bin_{version}.sha256");
     let checksum_path = target_dir.join(&checksum_name);
     let checksum_file = File::create(&checksum_path)?;
     let mut checksum_writer = BufWriter::new(checksum_file);
 
-    for iso_code in country_ranges.keys() {
+    for iso in country_ranges.keys() {
         for ext in ["iv4", "iv6"] {
-            let file_name = format!("{}.{}", iso_code.to_uppercase(), ext);
+            let file_name = format!("{}.{}", iso.to_uppercase(), ext);
             let file_path = target_dir.join(&file_name);
 
             let mut file = File::open(&file_path)?;
@@ -104,53 +113,39 @@ pub fn build(
     }
 
     // -------------------------
-    // Detect overwrites
-    // -------------------------
-    let mut overwrite_count = 0;
-    if let Ok(entries) = std::fs::read_dir(target_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if (path.extension() == Some(OsStr::new("iv4")) || path.extension() == Some(OsStr::new("iv6")))
-                && files_to_write.contains(&path)
-            {
-                overwrite_count += 1;
-            }
-        }
-    }
-    if overwrite_count > 0 {
-        println!("Warning: {} country files (iv4/iv6) will be overwritten.", overwrite_count);
-    }
-
-    // -------------------------
     // Detect orphaned files
     // -------------------------
-    let mut orphaned_files = vec![];
-    if let Ok(entries) = std::fs::read_dir(target_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let fname = path.file_name().and_then(OsStr::to_str).unwrap_or("");
-            if (fname.ends_with(".iv4") || fname.ends_with(".iv6") || fname.ends_with(".sha256"))
-                && fname != checksum_name
-            {
-                let base = fname.split('.').next().unwrap_or("");
-                if !country_ranges.contains_key(&base.to_string()) {
-                    orphaned_files.push(fname.to_string());
-                }
-            }
-        }
-    }
+    let all_existing: Vec<_> = fs::read_dir(target_dir)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            let ext = p.extension().and_then(OsStr::to_str).unwrap_or("");
+            let fname = p.file_name().and_then(OsStr::to_str).unwrap_or("");
+            fname != "version" && (ext == "iv4" || ext == "iv6" || ext == "sha256")
+        })
+        .collect();
 
-    if !orphaned_files.is_empty() {
-        let orphan_path = target_dir.join("orphaned");
-        fs::write(&orphan_path, orphaned_files.join("\n"))?;
+    let written_files: Vec<_> = files_to_write
+        .iter()
+        .chain(std::iter::once(&checksum_path))
+        .collect();
+
+    let orphaned: Vec<_> = all_existing
+        .into_iter()
+        .filter(|p| !written_files.contains(&p))
+        .collect();
+
+    if !orphaned.is_empty() {
+        let orphaned_path = target_dir.join("orphaned");
+        fs::write(&orphaned_path, orphaned.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n"))?;
         println!(
             "Warning: {} orphaned files detected in \"{}\".",
-            orphaned_files.len(),
+            orphaned.len(),
             target_dir.display()
         );
         println!(
             "Please run `xtgeoip build -c -f` or manually delete files listed in \"{}\" for a clean install.",
-            orphan_path.display()
+            orphaned_path.display()
         );
     }
 
