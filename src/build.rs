@@ -35,10 +35,17 @@ pub fn build(
 
     let (country_id, mut country_name) = load_countries(source_dir, legacy)?;
 
-    // Ensure special codes exist in the name map (but don't overwrite if already set)
-    country_name.entry("A1".into()).or_insert_with(|| "Anonymous Proxy".into());
-    country_name.entry("A2".into()).or_insert_with(|| "Satellite Provider".into());
-    country_name.entry("O1".into()).or_insert_with(|| "Other Country".into());
+    // Ensure special codes exist in the name map (but don't overwrite if
+    // already set)
+    country_name
+        .entry("A1".into())
+        .or_insert_with(|| "Anonymous Proxy".into());
+    country_name
+        .entry("A2".into())
+        .or_insert_with(|| "Satellite Provider".into());
+    country_name
+        .entry("O1".into())
+        .or_insert_with(|| "Other Country".into());
 
     let mut country_ranges: BTreeMap<String, CountryRanges> = country_name
         .keys()
@@ -121,7 +128,8 @@ pub fn build(
         .filter(|p| {
             let ext = p.extension().and_then(OsStr::to_str).unwrap_or("");
             let fname = p.file_name().and_then(OsStr::to_str).unwrap_or("");
-            fname != "version" && (ext == "iv4" || ext == "iv6" || ext == "sha256")
+            fname != "version"
+                && (ext == "iv4" || ext == "iv6" || ext == "sha256")
         })
         .collect();
 
@@ -137,14 +145,22 @@ pub fn build(
 
     if !orphaned.is_empty() {
         let orphaned_path = target_dir.join("orphaned");
-        fs::write(&orphaned_path, orphaned.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n"))?;
+        fs::write(
+            &orphaned_path,
+            orphaned
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )?;
         println!(
             "Warning: {} orphaned files detected in \"{}\".",
             orphaned.len(),
             target_dir.display()
         );
         println!(
-            "Please run `xtgeoip build -c -f` or manually delete files listed in \"{}\" for a clean install.",
+            "Please run `xtgeoip build -c -f` or manually delete files listed \
+             in \"{}\" for a clean install.",
             orphaned_path.display()
         );
     }
@@ -153,8 +169,10 @@ pub fn build(
     // Summary
     // -------------------------
     println!("Countries processed: {}", country_name.len());
-    let ipv4_count: usize = country_ranges.values().map(|cr| cr.pool_v4.len()).sum();
-    let ipv6_count: usize = country_ranges.values().map(|cr| cr.pool_v6.len()).sum();
+    let ipv4_count: usize =
+        country_ranges.values().map(|cr| cr.pool_v4.len()).sum();
+    let ipv6_count: usize =
+        country_ranges.values().map(|cr| cr.pool_v6.len()).sum();
     println!("IPv4 country ranges: {}", ipv4_count);
     println!("IPv6 country ranges: {}", ipv6_count);
 
@@ -173,10 +191,22 @@ fn load_countries(
     let mut rdr = ReaderBuilder::new().has_headers(true).from_reader(file);
     let headers = rdr.headers()?.clone();
 
-    let idx_geoname = headers.iter().position(|h| h == "geoname_id").expect("geoname_id column missing");
-    let idx_iso = headers.iter().position(|h| h == "country_iso_code").expect("country_iso_code column missing");
-    let idx_name = headers.iter().position(|h| h == "country_name").expect("country_name column missing");
-    let idx_continent = headers.iter().position(|h| h == "continent_code").expect("continent_code column missing");
+    let idx_geoname = headers
+        .iter()
+        .position(|h| h == "geoname_id")
+        .expect("geoname_id column missing");
+    let idx_iso = headers
+        .iter()
+        .position(|h| h == "country_iso_code")
+        .expect("country_iso_code column missing");
+    let idx_name = headers
+        .iter()
+        .position(|h| h == "country_name")
+        .expect("country_name column missing");
+    let idx_continent = headers
+        .iter()
+        .position(|h| h == "continent_code")
+        .expect("continent_code column missing");
 
     let mut country_id = BTreeMap::new();
     let mut country_name = BTreeMap::new();
@@ -227,11 +257,26 @@ fn load_blocks_parallel(
     let mut rdr = ReaderBuilder::new().has_headers(true).from_reader(file);
     let headers = rdr.headers()?.clone();
 
-    let idx_net = headers.iter().position(|h| h == "network").expect("network column missing");
-    let idx_id = headers.iter().position(|h| h == "geoname_id").expect("geoname_id column missing");
-    let idx_rid = headers.iter().position(|h| h == "registered_country_geoname_id").expect("registered_country_geoname_id column missing");
-    let idx_proxy = headers.iter().position(|h| h == "is_anonymous_proxy").expect("is_anonymous_proxy column missing");
-    let idx_sat = headers.iter().position(|h| h == "is_satellite_provider").expect("is_satellite_provider column missing");
+    let idx_net = headers
+        .iter()
+        .position(|h| h == "network")
+        .expect("network column missing");
+    let idx_id = headers
+        .iter()
+        .position(|h| h == "geoname_id")
+        .expect("geoname_id column missing");
+    let idx_rid = headers
+        .iter()
+        .position(|h| h == "registered_country_geoname_id")
+        .expect("registered_country_geoname_id column missing");
+    let idx_proxy = headers
+        .iter()
+        .position(|h| h == "is_anonymous_proxy")
+        .expect("is_anonymous_proxy column missing");
+    let idx_sat = headers
+        .iter()
+        .position(|h| h == "is_satellite_provider")
+        .expect("is_satellite_provider column missing");
 
     let records: Vec<_> = rdr.records().collect::<Result<_, _>>()?;
 
@@ -263,28 +308,56 @@ fn load_blocks_parallel(
     for (cc, range_opt) in parsed {
         if let Some((start, end)) = range_opt {
             if ipv6 {
-                country_ranges.entry(cc).or_default().pool_v6.push((start, end));
+                country_ranges
+                    .entry(cc)
+                    .or_default()
+                    .pool_v6
+                    .push((start, end));
             } else {
-                country_ranges.entry(cc).or_default().pool_v4.push((start as u32, end as u32));
+                country_ranges
+                    .entry(cc)
+                    .or_default()
+                    .pool_v4
+                    .push((start as u32, end as u32));
             }
         }
     }
 
     if ipv6 {
-        country_ranges.par_iter_mut().for_each(|(_, cr)| cr.pool_v6 = merge_ranges_v6(&cr.pool_v6));
+        country_ranges
+            .par_iter_mut()
+            .for_each(|(_, cr)| cr.pool_v6 = merge_ranges_v6(&cr.pool_v6));
     } else {
-        country_ranges.par_iter_mut().for_each(|(_, cr)| cr.pool_v4 = merge_ranges_v4(&cr.pool_v4));
+        country_ranges
+            .par_iter_mut()
+            .for_each(|(_, cr)| cr.pool_v4 = merge_ranges_v4(&cr.pool_v4));
     }
 
     Ok(())
 }
 
-fn resolve_country_code(proxy: bool, sat: bool, id: &str, rid: &str, country_id: &BTreeMap<String, String>) -> String {
-    if proxy { return "A1".to_string(); }
-    if sat { return "A2".to_string(); }
+fn resolve_country_code(
+    proxy: bool,
+    sat: bool,
+    id: &str,
+    rid: &str,
+    country_id: &BTreeMap<String, String>,
+) -> String {
+    if proxy {
+        return "A1".to_string();
+    }
+    if sat {
+        return "A2".to_string();
+    }
     let key = if !id.is_empty() { id } else { rid };
-    if key.is_empty() { return "O1".to_string(); }
-    country_id.get(key).filter(|s| !s.is_empty()).cloned().unwrap_or_else(|| key.to_string())
+    if key.is_empty() {
+        return "O1".to_string();
+    }
+    country_id
+        .get(key)
+        .filter(|s| !s.is_empty())
+        .cloned()
+        .unwrap_or_else(|| key.to_string())
 }
 
 // -------------------------
@@ -292,37 +365,59 @@ fn resolve_country_code(proxy: bool, sat: bool, id: &str, rid: &str, country_id:
 // -------------------------
 fn cidr_to_range_ipv4(cidr: &str) -> Option<(u32, u32)> {
     let net: IpNetwork = cidr.parse().ok()?;
-    match net { IpNetwork::V4(v4) => Some((u32::from(v4.network()), u32::from(v4.broadcast()))), _ => None }
+    match net {
+        IpNetwork::V4(v4) => {
+            Some((u32::from(v4.network()), u32::from(v4.broadcast())))
+        }
+        _ => None,
+    }
 }
 
 fn cidr_to_range_ipv6(cidr: &str) -> Option<(u128, u128)> {
     let net: IpNetwork = cidr.parse().ok()?;
-    match net { IpNetwork::V6(v6) => Some((u128::from(v6.network()), u128::from(v6.broadcast()))), _ => None }
+    match net {
+        IpNetwork::V6(v6) => {
+            Some((u128::from(v6.network()), u128::from(v6.broadcast())))
+        }
+        _ => None,
+    }
 }
 
 // -------------------------
 // Merge ranges
 // -------------------------
 fn merge_ranges_v4(ranges: &[(u32, u32)]) -> Vec<(u32, u32)> {
-    if ranges.is_empty() { return vec![]; }
+    if ranges.is_empty() {
+        return vec![];
+    }
     let mut sorted = ranges.to_vec();
     sorted.sort_unstable_by_key(|r| r.0);
     let mut merged = vec![sorted[0]];
     for &(start, end) in &sorted[1..] {
         let last = merged.last_mut().unwrap();
-        if start <= last.1.saturating_add(1) { last.1 = last.1.max(end); } else { merged.push((start, end)); }
+        if start <= last.1.saturating_add(1) {
+            last.1 = last.1.max(end);
+        } else {
+            merged.push((start, end));
+        }
     }
     merged
 }
 
 fn merge_ranges_v6(ranges: &[(u128, u128)]) -> Vec<(u128, u128)> {
-    if ranges.is_empty() { return vec![]; }
+    if ranges.is_empty() {
+        return vec![];
+    }
     let mut sorted = ranges.to_vec();
     sorted.sort_unstable_by_key(|r| r.0);
     let mut merged = vec![sorted[0]];
     for &(start, end) in &sorted[1..] {
         let last = merged.last_mut().unwrap();
-        if start <= last.1.saturating_add(1) { last.1 = last.1.max(end); } else { merged.push((start, end)); }
+        if start <= last.1.saturating_add(1) {
+            last.1 = last.1.max(end);
+        } else {
+            merged.push((start, end));
+        }
     }
     merged
 }
@@ -330,18 +425,30 @@ fn merge_ranges_v6(ranges: &[(u128, u128)]) -> Vec<(u128, u128)> {
 // -------------------------
 // Write country files (binary, headerless)
 // -------------------------
-fn write_country_v4(file_base: &Path, ranges: &[(u32, u32)]) -> std::io::Result<()> {
+fn write_country_v4(
+    file_base: &Path,
+    ranges: &[(u32, u32)],
+) -> std::io::Result<()> {
     let file_name = file_base.with_extension("iv4");
     let file = File::create(file_name)?;
     let mut writer = BufWriter::new(file);
-    for &(start, end) in ranges { writer.write_all(&start.to_be_bytes())?; writer.write_all(&end.to_be_bytes())?; }
+    for &(start, end) in ranges {
+        writer.write_all(&start.to_be_bytes())?;
+        writer.write_all(&end.to_be_bytes())?;
+    }
     Ok(())
 }
 
-fn write_country_v6(file_base: &Path, ranges: &[(u128, u128)]) -> std::io::Result<()> {
+fn write_country_v6(
+    file_base: &Path,
+    ranges: &[(u128, u128)],
+) -> std::io::Result<()> {
     let file_name = file_base.with_extension("iv6");
     let file = File::create(file_name)?;
     let mut writer = BufWriter::new(file);
-    for &(start, end) in ranges { writer.write_all(&start.to_be_bytes())?; writer.write_all(&end.to_be_bytes())?; }
+    for &(start, end) in ranges {
+        writer.write_all(&start.to_be_bytes())?;
+        writer.write_all(&end.to_be_bytes())?;
+    }
     Ok(())
 }

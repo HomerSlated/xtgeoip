@@ -18,22 +18,22 @@ mod fetch;
 use crate::{
     backup::{backup, delete},
     config::{load_config, parse_conf_flag, run_conf},
-    fetch::{fetch, FetchMode},
+    fetch::{FetchMode, fetch},
 };
 
 fn print_usage() {
     eprintln!(
         "Usage: xtgeoip [command] [options]\n\nCommands:\n\trun           \
-         Fetch CSV archive and build binary data\n\tbuild         \
-         Build binary data from latest local CSV archive\n\tfetch         \
-         Fetch CSV archive only\n\tconf          \
-         Configuration operations (with -d/-s/-e/-h)\n\nOptions:\n\t-b, \
-         --backup  Backup existing binary files\n\t-c, --clean   Delete \
-         existing binary files\n\t-f, --force   Force backup and/or clean \
-         without verification\n\nExamples:\n\txtgeoip\n\txtgeoip -b\n\txtgeoip \
-         -c\n\txtgeoip -b -c\n\txtgeoip -b -c -f\n\txtgeoip run\n\txtgeoip run \
-         -b -c\n\txtgeoip build\n\txtgeoip build -b -c\n\txtgeoip fetch\n\txtgeoip \
-         conf -h"
+         Fetch CSV archive and build binary data\n\tbuild         Build \
+         binary data from latest local CSV archive\n\tfetch         Fetch CSV \
+         archive only\n\tconf          Configuration operations (with \
+         -d/-s/-e/-h)\n\nOptions:\n\t-b, --backup  Backup existing binary \
+         files\n\t-c, --clean   Delete existing binary files\n\t-f, --force   \
+         Force backup and/or clean without \
+         verification\n\nExamples:\n\txtgeoip\n\txtgeoip -b\n\txtgeoip \
+         -c\n\txtgeoip -b -c\n\txtgeoip -b -c -f\n\txtgeoip run\n\txtgeoip \
+         run -b -c\n\txtgeoip build\n\txtgeoip build -b -c\n\txtgeoip \
+         fetch\n\txtgeoip conf -h"
     );
 }
 
@@ -85,8 +85,7 @@ fn main() -> Result<()> {
     }
 
     // Only one command allowed among run/build/fetch
-    let command_count =
-        do_run as u8 + do_build as u8 + do_fetch as u8;
+    let command_count = do_run as u8 + do_build as u8 + do_fetch as u8;
 
     if command_count > 1 {
         print_usage();
