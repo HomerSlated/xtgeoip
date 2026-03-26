@@ -105,13 +105,13 @@ pub fn run_conf(action: ConfAction) -> Result<()> {
 }
 
 /// Parses the flag provided to `xtgeoip conf`
-/// Default behavior (no flag) is Show
+/// Default behavior (no flag) is display help
 pub fn parse_conf_flag(flag: Option<&str>) -> Result<ConfAction, String> {
     match flag {
         Some("-d") | Some("--default") => Ok(ConfAction::Default),
-        Some("-s") | Some("--show") | None => Ok(ConfAction::Show),
+        Some("-s") | Some("--show") => Ok(ConfAction::Show),
         Some("-e") | Some("--edit") => Ok(ConfAction::Edit),
-        Some("-h") | Some("--help") => Ok(ConfAction::Help),
+        Some("-h") | Some("--help") | None => Ok(ConfAction::Help),
         Some(other) => Err(format!(
             "Unsupported flag '{other}'\nUsage: xtgeoip conf [-d|-s|-e|-h]"
         )),
