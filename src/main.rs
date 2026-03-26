@@ -18,19 +18,22 @@ mod fetch;
 use crate::{
     backup::{backup, delete},
     config::{load_config, parse_conf_flag, run_conf},
-    fetch::fetch,
+    fetch::{fetch, FetchMode},
 };
 
 fn print_usage() {
     eprintln!(
-        "Usage: xtgeoip <command> [options]\n\nCommands:\n\trun           \
-         Fetch CSV archive and build binary data\n\tconf          \
+        "Usage: xtgeoip [command] [options]\n\nCommands:\n\trun           \
+         Fetch CSV archive and build binary data\n\tbuild         \
+         Build binary data from latest local CSV archive\n\tfetch         \
+         Fetch CSV archive only\n\tconf          \
          Configuration operations (with -d/-s/-e/-h)\n\nOptions:\n\t-b, \
-         --backup  Backup existing binary files\n\t-d, --delete  Delete \
-         existing binary files\n\t-f, --force   Force backup and/or delete \
-         without verification\n\nExamples:\n\txtgeoip run\n\txtgeoip \
-         -b\n\txtgeoip -d\n\txtgeoip -b -d\n\txtgeoip -b -d -f\n\txtgeoip run \
-         -b -d\n\txtgeoip conf -h"
+         --backup  Backup existing binary files\n\t-c, --clean   Delete \
+         existing binary files\n\t-f, --force   Force backup and/or clean \
+         without verification\n\nExamples:\n\txtgeoip\n\txtgeoip -b\n\txtgeoip \
+         -c\n\txtgeoip -b -c\n\txtgeoip -b -c -f\n\txtgeoip run\n\txtgeoip run \
+         -b -c\n\txtgeoip build\n\txtgeoip build -b -c\n\txtgeoip fetch\n\txtgeoip \
+         conf -h"
     );
 }
 
@@ -39,17 +42,21 @@ fn main() -> Result<()> {
 
     let mut force = false;
     let mut do_backup = false;
-    let mut do_delete = false;
-    let mut run_build = false;
+    let mut do_clean = false;
+    let mut do_run = false;
+    let mut do_build = false;
+    let mut do_fetch = false;
     let mut first_positional: Option<String> = None;
 
     // Parse flags and first positional argument
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "-b" | "--backup" => do_backup = true,
-            "-d" | "--delete" => do_delete = true,
+            "-c" | "--clean" => do_clean = true,
             "-f" | "--force" => force = true,
-            "run" => run_build = true,
+            "run" => do_run = true,
+            "build" => do_build = true,
+            "fetch" => do_fetch = true,
             "conf" => {
                 // Forward remaining args to config handler
                 let flag = args.next();
@@ -65,20 +72,40 @@ fn main() -> Result<()> {
         }
     }
 
-    // Validate: must specify at least one valid action
-    if !do_backup && !do_delete && !run_build && first_positional.is_none() {
+    // Unknown positional argument
+    if first_positional.is_some() {
+        print_usage();
+        std::process::exit(1);
+    }
+
+    // Default: no args = usage
+    if !do_backup && !do_clean && !do_run && !do_build && !do_fetch {
+        print_usage();
+        std::process::exit(1);
+    }
+
+    // Only one command allowed among run/build/fetch
+    let command_count =
+        do_run as u8 + do_build as u8 + do_fetch as u8;
+
+    if command_count > 1 {
         print_usage();
         std::process::exit(1);
     }
 
     let cfg = load_config().context("Failed to load config")?;
 
-    // Backup/Delete only (optional)
-    if do_backup || do_delete {
-        let version_path = Path::new(&cfg.paths.output_dir).join("version");
-        let _version_old = std::fs::read_to_string(&version_path)
-            .map(|s| s.trim().to_string())
-            .unwrap_or_else(|_| "unknown".into());
+    // Backup/Clean only for:
+    // - bare flag mode
+    // - run
+    // - build
+    //
+    // Ignored for:
+    // - fetch
+    // - conf (already returned above)
+    let should_apply_backup_clean = !do_fetch;
+
+    if should_apply_backup_clean && (do_backup || do_clean) {
         if do_backup {
             backup(
                 Path::new(&cfg.paths.output_dir),
@@ -86,14 +113,29 @@ fn main() -> Result<()> {
                 force,
             )?;
         }
-        if do_delete {
+        if do_clean {
             delete(Path::new(&cfg.paths.output_dir), force)?;
         }
     }
 
-    // Fetch + Build (explicit 'run' command)
-    if run_build {
-        let (temp_dir, version) = fetch(&cfg)?;
+    // Fetch only
+    if do_fetch {
+        let _ = fetch(&cfg, FetchMode::Remote)?;
+    }
+
+    // Fetch + Build
+    if do_run {
+        let (temp_dir, version) = fetch(&cfg, FetchMode::Remote)?;
+        build::build(
+            temp_dir.path(),
+            Path::new(&cfg.paths.output_dir),
+            &version,
+        )?;
+    }
+
+    // Build from latest local archive
+    if do_build {
+        let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
         build::build(
             temp_dir.path(),
             Path::new(&cfg.paths.output_dir),

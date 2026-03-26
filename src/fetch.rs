@@ -13,22 +13,24 @@ use zip::ZipArchive;
 
 use crate::config::Config;
 
-/// Do not clobber MaxMind's servers during development
-const XTGEOIP_OFFLINE: bool = true;
+#[derive(Clone, Copy, Debug)]
+pub enum FetchMode {
+    Remote,
+    Local,
+}
 
-pub fn fetch(config: &Config) -> Result<(TempDir, String)> {
-    // DEVELOPMENT: optional local archive override
-    if XTGEOIP_OFFLINE {
-        println!("DEV MODE: skipping network fetch, using local archive only.");
-        let version = "20260320".to_string();
-        let temp_dir = extract_archive_to_temp(
-            &Path::new(&config.paths.archive_dir)
-                .join(format!("GeoLite2-Country-CSV_{version}.zip")),
-        )?;
+pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
+    let archive_dir = Path::new(&config.paths.archive_dir);
+
+    // Local-only mode: skip remote entirely, use latest valid local archive
+    if matches!(mode, FetchMode::Local) {
+        fs::create_dir_all(archive_dir)?;
+        let (archive_path, version) = find_latest_local_csv_archive(archive_dir)?;
+        println!("Using latest local archive: {}", archive_path.display());
+        let temp_dir = extract_archive_to_temp(&archive_path)?;
         return Ok((temp_dir, version));
     }
 
-    let archive_dir = &config.paths.archive_dir;
     let maxmind_url = &config.maxmind.url;
     let account_id = &config.maxmind.account_id;
     let license_key = &config.maxmind.license_key;
@@ -81,10 +83,10 @@ pub fn fetch(config: &Config) -> Result<(TempDir, String)> {
 
     println!("Remote archive version: {version}");
 
-    let archive_path = Path::new(archive_dir)
-        .join(format!("GeoLite2-Country-CSV_{version}.zip"));
-    let checksum_path = Path::new(archive_dir)
-        .join(format!("GeoLite2-Country-CSV_{version}.zip.sha256"));
+    let archive_path =
+        archive_dir.join(format!("GeoLite2-Country-CSV_{version}.zip"));
+    let checksum_path =
+        archive_dir.join(format!("GeoLite2-Country-CSV_{version}.zip.sha256"));
 
     if archive_path.exists() && checksum_path.exists() {
         println!("Reusing local copy: {}", archive_path.display());
@@ -154,6 +156,56 @@ pub fn fetch(config: &Config) -> Result<(TempDir, String)> {
 
     let temp_dir = extract_archive_to_temp(&archive_path)?;
     Ok((temp_dir, version))
+}
+
+/// Find the latest valid local archive matching:
+/// `GeoLite2-Country-CSV_YYYYMMDD.zip`
+fn find_latest_local_csv_archive(
+    archive_dir: &Path,
+) -> Result<(PathBuf, String)> {
+    let mut best: Option<(PathBuf, String)> = None;
+
+    for entry in fs::read_dir(archive_dir)
+        .with_context(|| format!("Failed to read {}", archive_dir.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+
+        let prefix = "GeoLite2-Country-CSV_";
+        let suffix = ".zip";
+
+        if !name.starts_with(prefix) || !name.ends_with(suffix) {
+            continue;
+        }
+
+        let version = &name[prefix.len()..name.len() - suffix.len()];
+
+        // Must be exactly 8 digits
+        if version.len() != 8 || !version.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+
+        match &best {
+            Some((_, best_version)) if version <= best_version.as_str() => {}
+            _ => best = Some((path, version.to_string())),
+        }
+    }
+
+    best.ok_or_else(|| {
+        anyhow::anyhow!(
+            "No valid local GeoLite2 Country CSV archive found in {}\n\
+             Run 'xtgeoip fetch' first, or use 'xtgeoip run'.",
+            archive_dir.display()
+        )
+    })
 }
 
 /// Extract zip archive into a temporary directory and return it
