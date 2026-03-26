@@ -3,7 +3,7 @@ use std::{
     collections::BTreeMap,
     fs::{self, File},
     io::{BufWriter, Write, copy},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use csv::ReaderBuilder;
@@ -34,8 +34,7 @@ pub fn build(
 
     let (country_id, mut country_name) = load_countries(source_dir, legacy)?;
 
-    // Ensure special codes exist in the name map (but don't overwrite if
-    // already set)
+    // Ensure special codes exist in the name map
     country_name
         .entry("A1".into())
         .or_insert_with(|| "Anonymous Proxy".into());
@@ -52,7 +51,7 @@ pub fn build(
         .map(|cc| (cc.clone(), CountryRanges::default()))
         .collect();
 
-    // Also ensure special codes exist in ranges even if not in CSV
+    // Ensure special codes exist in ranges even if not in CSV
     for cc in ["A1", "A2", "O1"] {
         country_ranges.entry(cc.to_string()).or_default();
     }
@@ -62,14 +61,43 @@ pub fn build(
     load_blocks_parallel(source_dir, &country_id, &mut country_ranges, true)?;
 
     // Ensure output directory exists
-    std::fs::create_dir_all(target_dir)?;
+    fs::create_dir_all(target_dir)?;
 
-    // Parallel writing of country files (binary, headerless,
-    // xt_geoip-compatible)
+    // Track which files will be overwritten
+    let mut overwrites = Vec::new();
+    for iso_code in country_ranges.keys() {
+        for ext in ["iv4", "iv6"] {
+            let file_path = target_dir.join(format!("{}.{}", iso_code.to_uppercase(), ext));
+            if file_path.exists() {
+                overwrites.push(file_path.clone());
+            }
+        }
+    }
+    if !overwrites.is_empty() {
+        println!("Warning: The following files will be overwritten:");
+        for path in overwrites {
+            println!("  {}", path.display());
+        }
+    }
+
+    // Track potential orphaned country codes
+    let known_codes: Vec<_> = country_name.keys().cloned().collect();
+    let mut orphans = Vec::new();
+    for iso_code in country_ranges.keys() {
+        if !known_codes.contains(iso_code) {
+            orphans.push(iso_code.clone());
+        }
+    }
+    if !orphans.is_empty() {
+        println!("Warning: Detected country codes without names (orphans):");
+        for code in orphans {
+            println!("  {}", code);
+        }
+    }
+
+    // Parallel writing of country files (binary)
     country_ranges.par_iter().for_each(|(iso_code, cr)| {
         let file_base = target_dir.join(iso_code.to_uppercase());
-        // Ignore errors here; build() will surface them if needed by changing
-        // this to collect results
         let _ = write_country_v4(&file_base, &cr.pool_v4);
         let _ = write_country_v6(&file_base, &cr.pool_v6);
     });
@@ -84,6 +112,7 @@ pub fn build(
     println!("IPv4 country ranges: {}", ipv4_country_ranges);
     println!("IPv6 country ranges: {}", ipv6_country_ranges);
 
+    // Write checksum file
     let checksum_path =
         target_dir.join(format!("GeoLite2-Country-bin_{version}.sha256"));
     let checksum_file = File::create(checksum_path)?;
