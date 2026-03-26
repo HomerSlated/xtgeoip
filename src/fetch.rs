@@ -25,7 +25,8 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
     // Local-only mode: skip remote entirely, use latest valid local archive
     if matches!(mode, FetchMode::Local) {
         fs::create_dir_all(archive_dir)?;
-        let (archive_path, version) = find_latest_local_csv_archive(archive_dir)?;
+        let (archive_path, version) =
+            find_latest_local_csv_archive(archive_dir)?;
         println!("Using latest local archive: {}", archive_path.display());
         let temp_dir = extract_archive_to_temp(&archive_path)?;
         return Ok((temp_dir, version));
@@ -186,8 +187,7 @@ fn find_latest_local_csv_archive(
             continue;
         }
 
-        let version =
-            name[prefix.len()..name.len() - suffix.len()].to_string();
+        let version = name[prefix.len()..name.len() - suffix.len()].to_string();
 
         // Must be exactly 8 digits
         if version.len() != 8 || !version.chars().all(|c| c.is_ascii_digit()) {
@@ -197,13 +197,13 @@ fn find_latest_local_csv_archive(
         match &best {
             Some((_, best_version)) if version <= *best_version => {}
             _ => best = Some((path, version)),
-        }        
+        }
     }
 
     best.ok_or_else(|| {
         anyhow::anyhow!(
-            "No valid local GeoLite2 Country CSV archive found in {}\n\
-             Run 'xtgeoip fetch' first, or use 'xtgeoip run'.",
+            "No valid local GeoLite2 Country CSV archive found in {}\nRun \
+             'xtgeoip fetch' first, or use 'xtgeoip run'.",
             archive_dir.display()
         )
     })
