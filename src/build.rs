@@ -288,11 +288,10 @@ fn write_country_v6(file_base: &Path, ranges: &[(u128, u128)]) -> std::io::Resul
 }
 
 // -------------------------
-// Helpers for glob errors
+// Glob helper
 // -------------------------
-fn glob_to_io(res: Result<glob::Paths, glob::PatternError>) -> std::io::Result<Vec<PathBuf>> {
-    match res {
-        Ok(paths) => Ok(paths.filter_map(Result::ok).collect()),
-        Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e)),
-    }
+fn glob_to_io(pattern: &str) -> std::io::Result<Vec<PathBuf>> {
+    glob(pattern)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        .and_then(|paths| Ok(paths.filter_map(Result::ok).collect()))
 }
