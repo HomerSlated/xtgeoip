@@ -197,7 +197,7 @@ pub fn backup(data_dir: &Path, backup_dir: &Path, force: bool) -> Result<()> {
 /// Delete IV files, version file, and manifest. Force option allows deletion
 /// even if version/manifest missing.
 pub fn delete(data_dir: &Path, force: bool) -> Result<()> {
-    let (mut files, version, manifest_opt) = gather_files(data_dir, force)?;
+    let (mut files, version, _manifest_opt) = gather_files(data_dir, force)?;
 
     if force {
         if files.is_empty() {
@@ -206,6 +206,13 @@ pub fn delete(data_dir: &Path, force: bool) -> Result<()> {
         for file in files {
             fs::remove_file(file)?;
         }
+
+        // Remove orphaned file if it exists
+        let orphan_path = data_dir.join("orphaned");
+        if orphan_path.exists() {
+            fs::remove_file(orphan_path)?;
+        }
+
         println!(
             "Force deleted binary data files from {}",
             data_dir.display()
@@ -213,7 +220,8 @@ pub fn delete(data_dir: &Path, force: bool) -> Result<()> {
         return Ok(());
     }
 
-    let manifest_path = manifest_opt.ok_or_else(|| {
+    // Non-force delete only deletes verified manifest files + version
+    let manifest_path = _manifest_opt.ok_or_else(|| {
         anyhow!(
             "Manifest missing: {}\nUse -f to force delete",
             manifest_path_for_version(data_dir, &version).display()
