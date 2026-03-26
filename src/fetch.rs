@@ -186,7 +186,8 @@ fn find_latest_local_csv_archive(
             continue;
         }
 
-        let version = &name[prefix.len()..name.len() - suffix.len()];
+        let version =
+            name[prefix.len()..name.len() - suffix.len()].to_string();
 
         // Must be exactly 8 digits
         if version.len() != 8 || !version.chars().all(|c| c.is_ascii_digit()) {
@@ -194,9 +195,9 @@ fn find_latest_local_csv_archive(
         }
 
         match &best {
-            Some((_, best_version)) if version <= best_version.as_str() => {}
-            _ => best = Some((path, version.to_string())),
-        }
+            Some((_, best_version)) if version <= *best_version => {}
+            _ => best = Some((path, version)),
+        }        
     }
 
     best.ok_or_else(|| {
