@@ -48,14 +48,12 @@ Executed in    1.84 secs
 
 Future enhancements may include:
 
-- Dedicated `fetch only` mode to download GeoIP data without processing.
-- `build only` mode for rapid binary database construction.
-- Optional integration hooks for firewall rule generation.
-- Expanded testing, CI, and packaging support for major distributions.
+- Dedicated `fetch only` mode to download GeoIP data without processing. (DONE)
+- `build only` mode for rapid binary database construction. (DONE)
 
 ## Status
 
-This software is considered **alpha quality**, though it is fully functional. Feedback, bug reports, contributions, and packaging efforts are highly welcome. Please report any issues or suggestions to the repository maintainer.
+This software is considered **beta quality**, though it is fully functional. Feedback, bug reports, contributions, and packaging efforts are highly welcome.
 
 ## License
 
