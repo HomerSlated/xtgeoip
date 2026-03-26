@@ -3,7 +3,7 @@ use std::{
     collections::BTreeMap,
     fs::{self, File},
     io::{BufWriter, Write, copy},
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 use csv::ReaderBuilder;
@@ -34,7 +34,8 @@ pub fn build(
 
     let (country_id, mut country_name) = load_countries(source_dir, legacy)?;
 
-    // Ensure special codes exist in the name map
+    // Ensure special codes exist in the name map (but don't overwrite if
+    // already set)
     country_name
         .entry("A1".into())
         .or_insert_with(|| "Anonymous Proxy".into());
@@ -51,7 +52,7 @@ pub fn build(
         .map(|cc| (cc.clone(), CountryRanges::default()))
         .collect();
 
-    // Ensure special codes exist in ranges even if not in CSV
+    // Also ensure special codes exist in ranges even if not in CSV
     for cc in ["A1", "A2", "O1"] {
         country_ranges.entry(cc.to_string()).or_default();
     }
@@ -61,61 +62,43 @@ pub fn build(
     load_blocks_parallel(source_dir, &country_id, &mut country_ranges, true)?;
 
     // Ensure output directory exists
-    fs::create_dir_all(target_dir)?;
+    std::fs::create_dir_all(target_dir)?;
 
-    // Track which files will be overwritten
-    let mut overwrites = Vec::new();
+    // -------------------------
+    // Overwrite warning (before writing new files)
+    // -------------------------
+    let mut overwrite_count = 0;
     for iso_code in country_ranges.keys() {
         for ext in ["iv4", "iv6"] {
             let file_path = target_dir.join(format!("{}.{}", iso_code.to_uppercase(), ext));
             if file_path.exists() {
-                overwrites.push(file_path.clone());
+                overwrite_count += 1;
             }
         }
     }
-    if !overwrites.is_empty() {
-        println!("Warning: The following files will be overwritten:");
-        for path in overwrites {
-            println!("  {}", path.display());
-        }
+
+    if overwrite_count > 0 {
+        println!(
+            "Warning: {} country files (iv4/iv6) will be overwritten.",
+            overwrite_count
+        );
     }
 
-    // Track potential orphaned country codes
-    let known_codes: Vec<_> = country_name.keys().cloned().collect();
-    let mut orphans = Vec::new();
-    for iso_code in country_ranges.keys() {
-        if !known_codes.contains(iso_code) {
-            orphans.push(iso_code.clone());
-        }
-    }
-    if !orphans.is_empty() {
-        println!("Warning: Detected country codes without names (orphans):");
-        for code in orphans {
-            println!("  {}", code);
-        }
-    }
-
-    // Parallel writing of country files (binary)
+    // -------------------------
+    // Parallel writing of country files
+    // -------------------------
     country_ranges.par_iter().for_each(|(iso_code, cr)| {
         let file_base = target_dir.join(iso_code.to_uppercase());
         let _ = write_country_v4(&file_base, &cr.pool_v4);
         let _ = write_country_v6(&file_base, &cr.pool_v6);
     });
 
-    let countries_processed = country_name.len();
-    let ipv4_country_ranges: usize =
-        country_ranges.values().map(|cr| cr.pool_v4.len()).sum();
-    let ipv6_country_ranges: usize =
-        country_ranges.values().map(|cr| cr.pool_v6.len()).sum();
+    // Write version file
+    fs::write(target_dir.join("version"), format!("{version}\n"))?;
 
-    println!("Countries processed: {}", countries_processed);
-    println!("IPv4 country ranges: {}", ipv4_country_ranges);
-    println!("IPv6 country ranges: {}", ipv6_country_ranges);
-
-    // Write checksum file
-    let checksum_path =
-        target_dir.join(format!("GeoLite2-Country-bin_{version}.sha256"));
-    let checksum_file = File::create(checksum_path)?;
+    // Write checksums
+    let checksum_path = target_dir.join(format!("GeoLite2-Country-bin_{version}.sha256"));
+    let checksum_file = File::create(&checksum_path)?;
     let mut checksum_writer = BufWriter::new(checksum_file);
 
     for iso_code in country_ranges.keys() {
@@ -132,7 +115,59 @@ pub fn build(
         }
     }
 
-    fs::write(target_dir.join("version"), format!("{version}\n"))?;
+    // -------------------------
+    // Orphan detection (after writing files)
+    // -------------------------
+    use std::ffi::OsStr;
+
+    let mut orphans = Vec::new();
+    for entry in std::fs::read_dir(target_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if !path.is_file() {
+            continue;
+        }
+
+        let fname = path.file_name().and_then(OsStr::to_str).unwrap_or("");
+        if fname == "version" {
+            continue;
+        }
+
+        // Keep only iv4, iv6, sha256 files
+        if !(fname.ends_with(".iv4") || fname.ends_with(".iv6") || fname.ends_with(".sha256")) {
+            continue;
+        }
+
+        // If this file is not part of the current build, mark as orphan
+        let base_name = fname.split('.').next().unwrap_or("");
+        if !country_ranges.contains_key(base_name)
+            && fname != checksum_path.file_name().unwrap().to_str().unwrap()
+        {
+            orphans.push(fname.to_string());
+        }
+    }
+
+    if !orphans.is_empty() {
+        let orphaned_path = target_dir.join("orphaned");
+        let mut file = File::create(&orphaned_path)?;
+        for f in &orphans {
+            writeln!(file, "{f}")?;
+        }
+
+        println!("Warning: {} orphaned files detected in {target_dir:?}.", orphans.len());
+        println!("Please run `xtgeoip -c -f` or manually delete files listed in `{orphaned_path:?}` for a clean install.");
+    }
+
+    let countries_processed = country_name.len();
+    let ipv4_country_ranges: usize =
+        country_ranges.values().map(|cr| cr.pool_v4.len()).sum();
+    let ipv6_country_ranges: usize =
+        country_ranges.values().map(|cr| cr.pool_v6.len()).sum();
+
+    println!("Countries processed: {}", countries_processed);
+    println!("IPv4 country ranges: {}", ipv4_country_ranges);
+    println!("IPv6 country ranges: {}", ipv6_country_ranges);
 
     Ok(())
 }
@@ -180,8 +215,6 @@ fn load_countries(
             country_id.insert(geoname.clone(), iso.clone());
             country_name.entry(iso.clone()).or_insert(name);
         } else if geoname == "6255148" || geoname == "6255147" {
-            // Special geoname IDs (world/continent). Legacy mode maps to
-            // continent code.
             if legacy {
                 country_id.insert(geoname.clone(), continent.clone());
                 country_name.entry(continent.clone()).or_insert(name);
@@ -190,8 +223,6 @@ fn load_countries(
                 country_name.entry("O1".to_string()).or_insert(name);
             }
         } else {
-            // No ISO code; treat as "Other Country" but don't overwrite
-            // existing label
             country_id.insert(geoname.clone(), "".to_string());
             country_name.entry("O1".to_string()).or_insert(name);
         }
