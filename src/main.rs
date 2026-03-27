@@ -16,7 +16,7 @@ mod config;
 mod fetch;
 
 use crate::{
-    backup::{backup, delete},
+    backup::{backup, delete, prune_archives},
     config::{load_config, parse_conf_flag, run_conf},
     fetch::{FetchMode, fetch},
 };
@@ -46,6 +46,7 @@ fn main() -> Result<()> {
     let mut do_run = false;
     let mut do_build = false;
     let mut do_fetch = false;
+    let mut do_prune = false;
     let mut first_positional: Option<String> = None;
 
     // Parse flags and first positional argument
@@ -54,6 +55,7 @@ fn main() -> Result<()> {
             "-b" | "--backup" => do_backup = true,
             "-c" | "--clean" => do_clean = true,
             "-f" | "--force" => force = true,
+            "-p" | "--prune" => do_prune = true,
             "run" => do_run = true,
             "build" => do_build = true,
             "fetch" => do_fetch = true,
@@ -89,6 +91,14 @@ fn main() -> Result<()> {
 
     if command_count > 1 {
         print_usage();
+        std::process::exit(1);
+    }
+
+    // Prune must be tied to a clear intent: fetch, run, or --backup
+    if do_prune && !(do_fetch || do_run || do_backup) {
+        eprintln!(
+            "Error: must specify one of fetch, run, or --backup to prune old archives"
+        );
         std::process::exit(1);
     }
 
@@ -140,6 +150,16 @@ fn main() -> Result<()> {
             Path::new(&cfg.paths.output_dir),
             &version,
         )?;
+    }
+
+    // Pruning:
+    // - Fetch or run  => prune CSV archives
+    // - Backup        => prune bin archives
+    // - Both          => prune both CSV and bin archives
+    if do_prune {
+        let prune_csv = do_fetch || do_run;
+        let prune_bin = do_backup;
+        prune_archives(&cfg, prune_csv, prune_bin)?;
     }
 
     Ok(())
