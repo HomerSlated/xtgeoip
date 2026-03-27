@@ -15,7 +15,6 @@ const SYSTEM_CONFIG: &str = "/etc/xtgeoip.conf";
 #[derive(Debug, Deserialize)]
 pub struct Paths {
     pub archive_dir: String,
-    pub archive_prune: usize,
     pub output_dir: String,
 }
 

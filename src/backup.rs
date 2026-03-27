@@ -238,3 +238,223 @@ pub fn delete(data_dir: &Path, force: bool) -> Result<()> {
     println!("Deleted old binary data files from {}", data_dir.display());
     Ok(())
 }
+
+/// Summary of pruning operations.
+struct PruneSummary {
+    csv_removed: usize,
+    bin_removed: usize,
+}
+
+/// Prune old GeoLite2 archives according to the config.
+///
+/// - `prune_csv` => operate on GeoLite2-Country-CSV_* archives (+ .sha256)
+/// - `prune_bin` => operate on GeoLite2-Country-bin_* archives (verified + unverified)
+///
+/// Behaviour:
+/// - Fails hard if the archive directory is missing or invalid.
+/// - Fails if `paths.archive_prune < 1`.
+/// - Prints a concise summary on success.
+/// - Prints a partial summary before failing on error.
+pub fn prune_archives(cfg: &Config, prune_csv: bool, prune_bin: bool) -> Result<()> {
+    let archive_dir = Path::new(&cfg.paths.archive_dir);
+    let keep = cfg.paths.archive_prune;
+
+    if keep < 1 {
+        bail!("Invalid configuration: paths.archive_prune must be >= 1");
+    }
+
+    if !archive_dir.exists() || !archive_dir.is_dir() {
+        bail!(
+            "Archive directory {} is missing or invalid",
+            archive_dir.display()
+        );
+    }
+
+    let mut summary = PruneSummary {
+        csv_removed: 0,
+        bin_removed: 0,
+    };
+
+    if prune_csv {
+        match prune_csv_archives(archive_dir, keep) {
+            Ok(count) => summary.csv_removed = count,
+            Err(e) => {
+                print_prune_summary(&summary);
+                return Err(e);
+            }
+        }
+    }
+
+    if prune_bin {
+        match prune_bin_archives(archive_dir, keep) {
+            Ok(count) => summary.bin_removed = count,
+            Err(e) => {
+                print_prune_summary(&summary);
+                return Err(e);
+            }
+        }
+    }
+
+    print_prune_summary(&summary);
+    Ok(())
+}
+
+fn print_prune_summary(summary: &PruneSummary) {
+    match (summary.csv_removed, summary.bin_removed) {
+        (0, 0) => println!("No archives needed pruning."),
+        (c, 0) => println!("Pruned {c} old CSV archives."),
+        (0, b) => println!("Pruned {b} old bin archives."),
+        (c, b) => println!("Pruned {c} old CSV archives and {b} old bin archives."),
+    }
+}
+
+fn prune_csv_archives(dir: &Path, keep: usize) -> Result<usize> {
+    let entries = fs::read_dir(dir)
+        .with_context(|| format!("Cannot read archive directory {}", dir.display()))?;
+
+    // Map: version -> Vec<PathBuf> (zip + sha256)
+    let mut by_version: Vec<(String, Vec<PathBuf>)> = Vec::new();
+
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+
+        if !name.starts_with("GeoLite2-Country-CSV_") {
+            continue;
+        }
+
+        if !(name.ends_with(".zip") || name.ends_with(".zip.sha256")) {
+            continue;
+        }
+
+        if let Some(ver) = extract_version(name) {
+            match by_version.iter_mut().find(|(v, _)| v == &ver) {
+                Some((_, files)) => files.push(path.clone()),
+                None => by_version.push((ver, vec![path.clone()])),
+            }
+        }
+    }
+
+    if by_version.is_empty() {
+        return Ok(0);
+    }
+
+    // Sort by version (lexicographically; YYYYMMDD works fine)
+    by_version.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let total_versions = by_version.len();
+    if total_versions <= keep {
+        return Ok(0);
+    }
+
+    let mut removed = 0;
+    let to_remove = total_versions - keep;
+
+    for (_, files) in by_version.into_iter().take(to_remove) {
+        for path in files {
+            if path.exists() {
+                fs::remove_file(&path).with_context(|| {
+                    format!("Failed to remove CSV archive file {}", path.display())
+                })?;
+                removed += 1;
+            }
+        }
+    }
+
+    Ok(removed)
+}
+
+fn prune_bin_archives(dir: &Path, keep: usize) -> Result<usize> {
+    let entries = fs::read_dir(dir)
+        .with_context(|| format!("Cannot read archive directory {}", dir.display()))?;
+
+    // Map: version -> Vec<PathBuf> (verified + unverified)
+    let mut by_version: Vec<(String, Vec<PathBuf>)> = Vec::new();
+
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+
+        if !name.starts_with("GeoLite2-Country-bin_") {
+            continue;
+        }
+
+        if !name.ends_with(".tar.gz") {
+            continue;
+        }
+
+        // Ignore the unique unknown-version file
+        if name.contains("unknown_version") {
+            continue;
+        }
+
+        if let Some(ver) = extract_version(name) {
+            match by_version.iter_mut().find(|(v, _)| v == &ver) {
+                Some((_, files)) => files.push(path.clone()),
+                None => by_version.push((ver, vec![path.clone()])),
+            }
+        }
+    }
+
+    if by_version.is_empty() {
+        return Ok(0);
+    }
+
+    // Sort by version (lexicographically; YYYYMMDD works fine)
+    by_version.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let total_versions = by_version.len();
+    if total_versions <= keep {
+        return Ok(0);
+    }
+
+    let mut removed = 0;
+    let to_remove = total_versions - keep;
+
+    for (_, files) in by_version.into_iter().take(to_remove) {
+        for path in files {
+            if path.exists() {
+                fs::remove_file(&path).with_context(|| {
+                    format!("Failed to remove bin archive file {}", path.display())
+                })?;
+                removed += 1;
+            }
+        }
+    }
+
+    Ok(removed)
+}
+
+/// Extract the version component from a GeoLite2 archive filename.
+///
+/// Examples:
+/// - GeoLite2-Country-CSV_20260324.zip
+/// - GeoLite2-Country-CSV_20260324.zip.sha256
+/// - GeoLite2-Country-bin_20260324.tar.gz
+/// - GeoLite2-Country-bin_unverified_20260324.tar.gz
+fn extract_version(name: &str) -> Option<String> {
+    let idx = name.rfind('_')?;
+    let part = &name[idx + 1..];
+    let digits: String = part.chars().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() {
+        None
+    } else {
+        Some(digits)
+    }
+}
