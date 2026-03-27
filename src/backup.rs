@@ -4,7 +4,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, anyhow, bail, Context};
+use crate::config::Config;
 use flate2::{Compression, write::GzEncoder};
 use glob::glob;
 use sha2::{Digest, Sha256};
