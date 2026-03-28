@@ -97,7 +97,8 @@ fn main() -> Result<()> {
     // Prune must be tied to a clear intent: fetch, run, or --backup
     if do_prune && !(do_fetch || do_run || do_backup) {
         eprintln!(
-            "Error: must specify one of fetch, run, or --backup to prune old archives"
+            "Error: must specify one of fetch, run, or --backup to prune old \
+             archives"
         );
         std::process::exit(1);
     }

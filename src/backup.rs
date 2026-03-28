@@ -5,12 +5,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{Result, anyhow, bail, Context};
-use crate::config::Config;
+use anyhow::{Context, Result, anyhow, bail};
 use flate2::{Compression, write::GzEncoder};
 use glob::glob;
 use sha2::{Digest, Sha256};
 use tar::Builder;
+
+use crate::config::Config;
 
 const VERSION_FILE: &str = "version";
 
@@ -250,14 +251,19 @@ struct PruneSummary {
 /// Prune old GeoLite2 archives according to the config.
 ///
 /// - `prune_csv` => operate on GeoLite2-Country-CSV_* archives (+ .sha256)
-/// - `prune_bin` => operate on GeoLite2-Country-bin_* archives (verified + unverified)
+/// - `prune_bin` => operate on GeoLite2-Country-bin_* archives (verified +
+///   unverified)
 ///
 /// Behaviour:
 /// - Fails hard if the archive directory is missing or invalid.
 /// - Fails if `paths.archive_prune < 1`.
 /// - Prints a concise summary on success.
 /// - Prints a partial summary before failing on error.
-pub fn prune_archives(cfg: &Config, prune_csv: bool, prune_bin: bool) -> Result<()> {
+pub fn prune_archives(
+    cfg: &Config,
+    prune_csv: bool,
+    prune_bin: bool,
+) -> Result<()> {
     let archive_dir = Path::new(&cfg.paths.archive_dir);
     let keep = cfg.paths.archive_prune;
 
@@ -306,13 +312,16 @@ fn print_prune_summary(summary: &PruneSummary) {
         (0, 0) => println!("No archives needed pruning."),
         (c, 0) => println!("Pruned {c} old CSV archives."),
         (0, b) => println!("Pruned {b} old bin archives."),
-        (c, b) => println!("Pruned {c} old CSV archives and {b} old bin archives."),
+        (c, b) => {
+            println!("Pruned {c} old CSV archives and {b} old bin archives.")
+        }
     }
 }
 
 fn prune_csv_archives(dir: &Path, keep: usize) -> Result<usize> {
-    let entries = fs::read_dir(dir)
-        .with_context(|| format!("Cannot read archive directory {}", dir.display()))?;
+    let entries = fs::read_dir(dir).with_context(|| {
+        format!("Cannot read archive directory {}", dir.display())
+    })?;
 
     // Map: version -> Vec<PathBuf> (zip + sha256)
     let mut by_version: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
@@ -358,7 +367,10 @@ fn prune_csv_archives(dir: &Path, keep: usize) -> Result<usize> {
         for path in files {
             if path.exists() {
                 fs::remove_file(&path).with_context(|| {
-                    format!("Failed to remove CSV archive file {}", path.display())
+                    format!(
+                        "Failed to remove CSV archive file {}",
+                        path.display()
+                    )
                 })?;
                 removed += 1;
             }
@@ -369,8 +381,9 @@ fn prune_csv_archives(dir: &Path, keep: usize) -> Result<usize> {
 }
 
 fn prune_bin_archives(dir: &Path, keep: usize) -> Result<usize> {
-    let entries = fs::read_dir(dir)
-        .with_context(|| format!("Cannot read archive directory {}", dir.display()))?;
+    let entries = fs::read_dir(dir).with_context(|| {
+        format!("Cannot read archive directory {}", dir.display())
+    })?;
 
     // Map: version -> Vec<PathBuf> (verified + unverified)
     let mut by_version: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
@@ -421,7 +434,10 @@ fn prune_bin_archives(dir: &Path, keep: usize) -> Result<usize> {
         for path in files {
             if path.exists() {
                 fs::remove_file(&path).with_context(|| {
-                    format!("Failed to remove bin archive file {}", path.display())
+                    format!(
+                        "Failed to remove bin archive file {}",
+                        path.display()
+                    )
                 })?;
                 removed += 1;
             }
@@ -441,7 +457,8 @@ fn prune_bin_archives(dir: &Path, keep: usize) -> Result<usize> {
 fn extract_version(name: &str) -> Option<String> {
     let idx = name.rfind('_')?;
     let part = &name[idx + 1..];
-    let digits: String = part.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let digits: String =
+        part.chars().take_while(|c| c.is_ascii_digit()).collect();
     if digits.len() == 8 {
         Some(digits)
     } else {
