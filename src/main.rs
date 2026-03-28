@@ -6,9 +6,10 @@
 ///
 /// Inspired by xt_geoip_build_maxmind (Jan Engelhardt, Philip
 /// Prindeville), now part of Debian's xtables-addons package.
-use std::{env, path::Path};
+use std::path::Path;
 
 use anyhow::{Context, Result};
+use clap::{Arg, ArgAction, Command};
 
 mod backup;
 mod build;
@@ -18,79 +19,86 @@ mod fetch;
 use crate::{
     backup::{backup, delete, prune_archives},
     config::{load_config, parse_conf_flag, run_conf},
-    fetch::{FetchMode, fetch},
+    fetch::{fetch, FetchMode},
 };
 
-fn print_usage() {
-    eprintln!(
-        "Usage: xtgeoip [command] [options]\n\nCommands:\n\trun           \
-         Fetch CSV archive and build binary data\n\tbuild         Build \
-         binary data from latest local CSV archive\n\tfetch         Fetch CSV \
-         archive only\n\tconf          Configuration operations (with \
-         -d/-s/-e/-h)\n\nOptions:\n\t-b, --backup  Backup existing binary \
-         files\n\t-c, --clean   Delete existing binary files\n\t-f, --force   \
-         Force backup and/or clean without \
-         verification\n\nExamples:\n\txtgeoip\n\txtgeoip -b\n\txtgeoip \
-         -c\n\txtgeoip -b -c\n\txtgeoip -b -c -f\n\txtgeoip run\n\txtgeoip \
-         run -b -c\n\txtgeoip build\n\txtgeoip build -b -c\n\txtgeoip \
-         fetch\n\txtgeoip conf -h"
-    );
+fn build_cli() -> Command {
+    Command::new("xtgeoip")
+        .disable_help_subcommand(true)
+        .arg(
+            Arg::new("backup")
+                .short('b')
+                .long("backup")
+                .help("Backup existing binary files")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("clean")
+                .short('c')
+                .long("clean")
+                .help("Delete existing binary files")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("force")
+                .short('f')
+                .long("force")
+                .help("Force backup and/or clean without verification")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("prune")
+                .short('p')
+                .long("prune")
+                .help("Prune old archives/backups")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("command")
+                .value_parser(["run", "build", "fetch", "conf"])
+                .required(false),
+        )
+        .arg(
+            Arg::new("conf_flag")
+                .required(false)
+                .allow_hyphen_values(true),
+        )
+}
+
+fn print_usage(mut cmd: Command) -> Result<()> {
+    cmd.print_help()?;
+    eprintln!();
+    Ok(())
 }
 
 fn main() -> Result<()> {
-    let mut args = env::args().skip(1); // skip executable name
+    let cmd = build_cli();
+    let matches = cmd.clone().get_matches();
 
-    let mut force = false;
-    let mut do_backup = false;
-    let mut do_clean = false;
-    let mut do_run = false;
-    let mut do_build = false;
-    let mut do_fetch = false;
-    let mut do_prune = false;
-    let mut first_positional: Option<String> = None;
+    let force = matches.get_flag("force");
+    let do_backup = matches.get_flag("backup");
+    let do_clean = matches.get_flag("clean");
+    let do_prune = matches.get_flag("prune");
 
-    // Parse flags and first positional argument
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "-b" | "--backup" => do_backup = true,
-            "-c" | "--clean" => do_clean = true,
-            "-f" | "--force" => force = true,
-            "-p" | "--prune" => do_prune = true,
-            "run" => do_run = true,
-            "build" => do_build = true,
-            "fetch" => do_fetch = true,
-            "conf" => {
-                // Forward remaining args to config handler
-                let flag = args.next();
-                let action = parse_conf_flag(flag.as_deref())
-                    .map_err(|e| anyhow::anyhow!(e))?;
-                run_conf(action)?;
-                return Ok(());
-            }
-            _ => {
-                first_positional = Some(arg);
-                break;
-            }
-        }
-    }
+    let command = matches.get_one::<String>("command").map(String::as_str);
+    let conf_flag = matches
+        .get_one::<String>("conf_flag")
+        .map(String::as_str);
 
-    // Unknown positional argument
-    if first_positional.is_some() {
-        print_usage();
-        std::process::exit(1);
+    let do_run = command == Some("run");
+    let do_build = command == Some("build");
+    let do_fetch = command == Some("fetch");
+
+    // conf: preserve existing behavior by forwarding optional -d/-s/-e/-h
+    if command == Some("conf") {
+        let action = parse_conf_flag(conf_flag).map_err(|e| anyhow::anyhow!(e))?;
+        run_conf(action)?;
+        return Ok(());
     }
 
     // Default: no args = usage
     if !do_backup && !do_clean && !do_run && !do_build && !do_fetch {
-        print_usage();
-        std::process::exit(1);
-    }
-
-    // Only one command allowed among run/build/fetch
-    let command_count = do_run as u8 + do_build as u8 + do_fetch as u8;
-
-    if command_count > 1 {
-        print_usage();
+        print_usage(cmd.clone())?;
         std::process::exit(1);
     }
 
@@ -165,4 +173,3 @@ fn main() -> Result<()> {
 
     Ok(())
 }
-
