@@ -1,8 +1,7 @@
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 use std::{
-    collections::BTreeMap,
-    fs::{self, File},
-    io::{BufRead, BufReader, Read, Write},
+    fs::{self},
+    io::{BufRead, Read},
     path::{Path, PathBuf},
 };
 
@@ -316,7 +315,7 @@ fn prune_csv_archives(dir: &Path, keep: usize) -> Result<usize> {
         .with_context(|| format!("Cannot read archive directory {}", dir.display()))?;
 
     // Map: version -> Vec<PathBuf> (zip + sha256)
-    let mut by_version: Vec<(String, Vec<PathBuf>)> = Vec::new();
+    let mut by_version: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
 
     for entry in entries {
         let entry = entry?;
@@ -339,10 +338,7 @@ fn prune_csv_archives(dir: &Path, keep: usize) -> Result<usize> {
         }
 
         if let Some(ver) = extract_version(name) {
-            match by_version.iter_mut().find(|(v, _)| v == &ver) {
-                Some((_, files)) => files.push(path.clone()),
-                None => by_version.push((ver, vec![path.clone()])),
-            }
+            by_version.entry(ver).or_default().push(path.clone());
         }
     }
 
