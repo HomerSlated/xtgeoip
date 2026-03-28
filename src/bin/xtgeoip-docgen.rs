@@ -1,46 +1,22 @@
 //! xtgeoip-docgen v2
 //! Generates documentation and test matrices from cli.yaml
-use std::{
-    collections::BTreeMap,
-};
+use std::collections::BTreeMap;
 use std::fs;
-use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 struct Spec {
-    version: u32,
-    meta: Meta,
-    flags: BTreeMap<String, FlagDef>,
-    reason_templates: BTreeMap<String, ReasonRef>,
-    commands: BTreeMap<String, CommandDef>,
+    commands: BTreeMap<String, Command>,
+    reason_templates: BTreeMap<String, ReasonTemplate>,
 }
 
-#[derive(Debug, Deserialize)]
-struct Meta {
-    program: String,
-    summary: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct FlagDef {
-    long: String,
-    kind: String,
-    summary: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ReasonRef {
-    text: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct CommandDef {
+#[derive(Debug)]
+struct Command {
     summary: String,
     allowed_flags: Vec<String>,
     examples: Vec<Example>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 struct Example {
     cmd: String,
     valid: bool,
@@ -48,10 +24,15 @@ struct Example {
     reason: Option<Reason>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 struct Reason {
     code: String,
     args: Option<BTreeMap<String, String>>,
+}
+
+#[derive(Debug)]
+struct ReasonTemplate {
+    text: String,
 }
 
 fn main() -> anyhow::Result<()> {
