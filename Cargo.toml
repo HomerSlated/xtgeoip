@@ -1,6 +1,6 @@
 [package]
 name = "xtgeoip"
-version = "0.0.21"
+version = "0.0.22"
 edition = "2024"
 authors = ["Homer at hazensparkle.co.uk"]
 license = "MIT"
