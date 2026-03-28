@@ -120,6 +120,16 @@ fn main() -> Result<()> {
                 prune_archives(&cfg, true, false)?;
             }
         }
+        Some(Commands::Build { backup: do_backup, clean: do_clean, force: do_force }) => {
+            let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
+            build::build(temp_dir.path(), Path::new(&cfg.paths.output_dir), &version)?;
+            if *do_backup {
+                backup(Path::new(&cfg.paths.output_dir), Path::new(&cfg.paths.archive_dir), *do_force)?;
+            }
+            if *do_clean {
+                delete(Path::new(&cfg.paths.output_dir), *do_force)?;
+            }
+        }
         Some(Commands::Build { backup, clean, force }) => {
             let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
             build::build(temp_dir.path(), Path::new(&cfg.paths.output_dir), &version)?;
@@ -130,6 +140,8 @@ fn main() -> Result<()> {
                 delete(Path::new(&cfg.paths.output_dir), *force)?;
             }
         }
+
+
         Some(Commands::Fetch { prune }) => {
             let _ = fetch(&cfg, FetchMode::Remote)?;
             if *prune {
