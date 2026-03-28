@@ -6,7 +6,7 @@
 ///
 /// Inspired by xt_geoip_build_maxmind (Jan Engelhardt, Philip
 /// Prindeville), now part of Debian's xtables-addons package.
-
+/// xtgeoip © Haze N Sparkle 2026 (MIT)
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -38,11 +38,11 @@ struct Cli {
     #[arg(short, long)]
     clean: bool,
 
-    /// Force backup and/or clean without verification (only affects backup/clean)
+    /// Force backup and/or clean without verification
     #[arg(short, long)]
     force: bool,
 
-    /// Prune old archives/backups (requires backup, fetch, or run)
+    /// Prune old archives/backups (requires fetch, run, or --backup)
     #[arg(short, long)]
     prune: bool,
 
@@ -60,7 +60,8 @@ enum Commands {
     Fetch,
     /// Configuration operations (-d/-s/-e/-h)
     Conf {
-        /// Configuration flag
+        /// Configuration flag (e.g. -s/-d/-e/-h)
+        #[arg(value_name = "FLAG", allow_hyphen_values = true)]
         flag: String,
     },
 }
@@ -69,31 +70,13 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let cfg = load_config().context("Failed to load config")?;
 
-    // Extract bare flags
     let do_backup = cli.backup;
     let do_clean = cli.clean;
     let do_force = cli.force;
     let do_prune = cli.prune;
 
     match &cli.command {
-        Some(Commands::Conf { flag }) => {
-            // Conf ignores all flags; only the positional flag matters
-            let action = parse_conf_flag(Some(flag))
-                .map_err(|e| anyhow::anyhow!(e))?;
-            run_conf(action)?;
-        }
-
         Some(Commands::Run) => {
-            if do_force && !do_backup && !do_clean {
-                eprintln!("Error: --force can only be used with --backup or --clean");
-                std::process::exit(1);
-            }
-
-            if do_prune && !(do_backup || true) { // run implies fetch
-                eprintln!("Error: --prune requires backup, fetch, or run");
-                std::process::exit(1);
-            }
-
             let (temp_dir, version) = fetch(&cfg, FetchMode::Remote)?;
             build::build(temp_dir.path(), Path::new(&cfg.paths.output_dir), &version)?;
 
@@ -103,22 +86,12 @@ fn main() -> Result<()> {
             if do_clean {
                 delete(Path::new(&cfg.paths.output_dir), do_force)?;
             }
-            if do_prune {
+
+            if do_prune && (do_backup || true) { // run implies fetch
                 prune_archives(&cfg, true, do_backup)?;
             }
         }
-
         Some(Commands::Build) => {
-            if do_force && !do_backup && !do_clean {
-                eprintln!("Error: --force can only be used with --backup or --clean");
-                std::process::exit(1);
-            }
-
-            if do_prune && !(do_backup) {
-                eprintln!("Error: --prune requires backup, fetch, or run");
-                std::process::exit(1);
-            }
-
             let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
             build::build(temp_dir.path(), Path::new(&cfg.paths.output_dir), &version)?;
 
@@ -128,41 +101,25 @@ fn main() -> Result<()> {
             if do_clean {
                 delete(Path::new(&cfg.paths.output_dir), do_force)?;
             }
-            if do_prune {
+
+            if do_prune && do_backup {
                 prune_archives(&cfg, false, do_backup)?;
             }
         }
-
         Some(Commands::Fetch) => {
-            if do_force {
-                eprintln!("Error: --force can only be used with --backup or --clean");
-                std::process::exit(1);
-            }
-
-            if do_prune && !(do_backup || true) { // fetch itself allows prune
-                eprintln!("Error: --prune requires backup, fetch, or run");
-                std::process::exit(1);
-            }
-
             let _ = fetch(&cfg, FetchMode::Remote)?;
 
             if do_prune {
-                prune_archives(&cfg, true, do_backup)?;
+                prune_archives(&cfg, true, false)?;
             }
         }
-
+        Some(Commands::Conf { flag }) => {
+            let action = parse_conf_flag(Some(flag))
+                .map_err(|e| anyhow::anyhow!(e))?;
+            run_conf(action)?;
+        }
         None => {
-            // Bare flags only
-            if do_force && !do_backup && !do_clean {
-                eprintln!("Error: --force can only be used with --backup or --clean");
-                std::process::exit(1);
-            }
-
-            if do_prune && !(do_backup) {
-                eprintln!("Error: --prune requires backup, fetch, or run");
-                std::process::exit(1);
-            }
-
+            // No command: bare flags only
             if !do_backup && !do_clean && !do_prune {
                 Cli::command().print_help()?;
                 println!();
@@ -175,8 +132,11 @@ fn main() -> Result<()> {
             if do_clean {
                 delete(Path::new(&cfg.paths.output_dir), do_force)?;
             }
-            if do_prune {
+            if do_prune && do_backup {
                 prune_archives(&cfg, false, do_backup)?;
+            } else if do_prune {
+                eprintln!("Error: --prune requires fetch, run, or --backup");
+                std::process::exit(1);
             }
         }
     }
