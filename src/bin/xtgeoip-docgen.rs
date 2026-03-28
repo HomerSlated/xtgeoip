@@ -2,37 +2,46 @@
 //! Generates documentation and test matrices from cli.yaml
 use std::collections::BTreeMap;
 use std::fs;
+use serde::Deserialize;
 
-#[derive(Debug)]
-struct Spec {
-    commands: BTreeMap<String, Command>,
-    reason_templates: BTreeMap<String, ReasonTemplate>,
+#[derive(Debug, Deserialize)]
+pub struct Spec {
+    pub meta: Meta,
+    pub version: String,
+    pub commands: BTreeMap<String, Command>,
+    pub reason_templates: BTreeMap<String, ReasonTemplate>,
 }
 
-#[derive(Debug)]
-struct Command {
-    summary: String,
-    allowed_flags: Vec<String>,
-    examples: Vec<Example>,
+#[derive(Debug, Deserialize)]
+pub struct Meta {
+    pub program: String,
+    pub summary: String,
 }
 
-#[derive(Debug)]
-struct Example {
-    cmd: String,
-    valid: bool,
-    outcome: Option<String>,
-    reason: Option<Reason>,
+#[derive(Debug, Deserialize)]
+pub struct Command {
+    pub summary: String,
+    pub allowed_flags: Vec<String>,
+    pub examples: Vec<Example>,
 }
 
-#[derive(Debug)]
-struct Reason {
-    code: String,
-    args: Option<BTreeMap<String, String>>,
+#[derive(Debug, Deserialize)]
+pub struct Example {
+    pub cmd: String,
+    pub valid: bool,
+    pub outcome: Option<String>,
+    pub reason: Option<Reason>,
 }
 
-#[derive(Debug)]
-struct ReasonTemplate {
-    text: String,
+#[derive(Debug, Deserialize)]
+pub struct Reason {
+    pub code: String,
+    pub args: Option<BTreeMap<String, String>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReasonTemplate {
+    pub text: String,
 }
 
 fn main() -> anyhow::Result<()> {
