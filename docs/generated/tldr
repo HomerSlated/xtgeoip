@@ -1,0 +1,11 @@
+xtgeoip build
+xtgeoip build -b -p
+xtgeoip build -c -f
+xtgeoip build -b -c -p
+xtgeoip fetch
+xtgeoip fetch -p
+xtgeoip run
+xtgeoip run -p
+xtgeoip run -c -p
+xtgeoip run -c -f
+xtgeoip show
