@@ -346,9 +346,6 @@ fn prune_csv_archives(dir: &Path, keep: usize) -> Result<usize> {
         return Ok(0);
     }
 
-    // Sort by version (lexicographically; YYYYMMDD works fine)
-    by_version.sort_by(|a, b| a.0.cmp(&b.0));
-
     let total_versions = by_version.len();
     if total_versions <= keep {
         return Ok(0);
@@ -376,7 +373,7 @@ fn prune_bin_archives(dir: &Path, keep: usize) -> Result<usize> {
         .with_context(|| format!("Cannot read archive directory {}", dir.display()))?;
 
     // Map: version -> Vec<PathBuf> (verified + unverified)
-    let mut by_version: Vec<(String, Vec<PathBuf>)> = Vec::new();
+    let mut by_version: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
 
     for entry in entries {
         let entry = entry?;
@@ -404,19 +401,13 @@ fn prune_bin_archives(dir: &Path, keep: usize) -> Result<usize> {
         }
 
         if let Some(ver) = extract_version(name) {
-            match by_version.iter_mut().find(|(v, _)| v == &ver) {
-                Some((_, files)) => files.push(path.clone()),
-                None => by_version.push((ver, vec![path.clone()])),
-            }
+            by_version.entry(ver).or_default().push(path.clone());
         }
     }
 
     if by_version.is_empty() {
         return Ok(0);
     }
-
-    // Sort by version (lexicographically; YYYYMMDD works fine)
-    by_version.sort_by(|a, b| a.0.cmp(&b.0));
 
     let total_versions = by_version.len();
     if total_versions <= keep {
