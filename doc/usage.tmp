@@ -1,0 +1,40 @@
+- xtgeoip # print usage
+- xtgeoip -b # backup data in /usr/share/xt_geoip/, as per manifest, store backup in /var/lib/xt_geoip/
+- xtgeoip -b -c # backup and clean, as per manifest
+- xtgeoip -b -c -f # force backup and clean, even without manifest
+- xtgeoip -b -f # force backup data in /usr/share/xt_geoip/, even without a manifest
+- xtgeoip -b -p # backup data in /usr/share/xt_geoip/, and prune old backups in /var/lib/xt_geoip/
+- xtgeoip -b -p -f # unsupported option, ambiguous, cannot force prune (does force apply to backup or prune?)
+- xtgeoip build # build binary data in /usr/share/xt_geoip/ using local copy of database
+- xtgeoip build -b # backup, as per manifest, then build using local copy of database
+- xtgeoip build -b -c # backup and clean using manifest, then  build using local copy of database
+- xtgeoip build -b -c -f # force backup and clean even without manifest, then and build using local copy of database
+- xtgeoip build -b -f # force backup even without manifest, then build using local copy of database
+- xtgeoip build -b -p # unsupported option, build has no prune function
+- xtgeoip -c # clean (delete) data in /usr/share/xt_geoip/, as per manifest
+- xtgeoip -c -f # force clean (delete) data in /usr/share/xt_geoip/, even without a manifest
+- xtgeoip conf # print conf usage
+- xtgeoip conf -b # unsupported option, conf has no backup function
+- xtgeoip conf -c # unsupported option, conf has no clean function
+- xtgeoip conf -d # show default config
+- xtgeoip conf -e # edit current config using $EDITOR
+- xtgeoip conf -f # unsupported option, conf has no force option
+- xtgeoip conf -h # print conf usage
+- xtgeoip conf -p # unsupported option, conf has no prune function
+- xtgeoip conf -s show current config
+- xtgeoip fetch # download latest MaxMind database
+- xtgeoip fetch -b # unsupported option, fetch has no backup function
+- xtgeoip fetch -c # unsupported option, fetch has no clean function
+- xtgeoip fetch -f # unsupported option, fetch has no force option
+- xtgeoip fetch -p # download latest MaxMind database, then prune old archived copies
+- xtgeoip -h # print usage
+- xtgeoip run # fetch (if needed), and build binary data in /usr/share/xt_geoip/
+- xtgeoip run -b # backup using manifest, then fetch, and build
+- xtgeoip run -b -c # backup and clean using manifest, then fetch, and build
+- xtgeoip run -b -c -f # force backup and clean even without manifest, then fetch, and build
+- xtgeoip run -b -f # force backup even without manifest, then fetch, and build
+- xtgeoip run -b -p # force backup using manifest, then prune old archived copies
+- xtgeoip run -b -p -f # unsupported option, ambiguous, cannot force prune (does force apply to backup or prune?)
+- xtgeoip run -c # clean using manifest, then fetch, and build
+- xtgeoip run -c -f # force clean even without manifest, then fetch, and build
+- xtgeoip run -p # fetch, build, then prune old archived copies
