@@ -1,5 +1,6 @@
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 use std::{
+    collections::BTreeMap,
     fs::{self},
     io::{BufRead, Read},
     path::{Path, PathBuf},
