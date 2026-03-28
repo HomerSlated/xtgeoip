@@ -67,6 +67,7 @@ fn main() -> anyhow::Result<()> {
     fs::write("docs/generated/usage.md", generate_usage_md(&spec)?)?;
     fs::write("docs/generated/tldr.md", generate_tldr_md(&spec)?)?;
     fs::write("docs/generated/scd", generate_scd(&spec)?)?;
+    fs::write("docs/generated/xtgeoip.1", generate_manpage(&spec)?)?;
     fs::write("src/generated/error_text.rs", generate_error_text_rs(&spec)?)?;
     fs::write("src/generated/cli_matrix.rs", generate_cli_matrix_rs(&spec)?)?;
 
@@ -157,4 +158,64 @@ fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
     out.push_str("#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn test_matrix() {\n        assert!(!CLI_MATRIX.is_empty());\n    }\n}\n");
 
     Ok(out)
+}
+
+fn generate_manpage(spec: &Spec) -> String {
+    let mut out = String::new();
+
+    // Header
+    out.push_str(&format!(
+        ".TH {} 1 \"{}\" \"{} v1\" \"User Commands\"\n",
+        spec.meta.program.to_uppercase(),
+        chrono::Local::now().format("%Y-%m-%d"),
+        spec.meta.program
+    ));
+
+    // Name section
+    out.push_str(&format!(
+        ".SH NAME\n{} \\- {}\n\n",
+        spec.meta.program, spec.meta.summary
+    ));
+
+    // Synopsis
+    out.push_str(".SH SYNOPSIS\n.B ");
+    out.push_str(&spec.meta.program);
+    out.push_str(" [\\fB-b\\fR] [\\fB-c\\fR] [\\fB-p\\fR] [\\fB-f\\fR] \\fICOMMAND\\fR [\\fB-flags\\fR]\n\n");
+
+    // Description
+    out.push_str(".SH DESCRIPTION\n");
+    out.push_str(&format!("{}\n\n", spec.meta.summary));
+
+    // Commands
+    out.push_str(".SH COMMANDS\n");
+    for (cmd_name, cmd) in &spec.commands {
+        out.push_str(".TP\n");
+        out.push_str(&format!("\\fB{}\\fR\n", cmd_name));
+        out.push_str(&format!("{}\n\n", cmd.summary));
+    }
+
+    // Options
+    out.push_str(".SH OPTIONS\n");
+    for (flag, def) in &spec.flags {
+        out.push_str(".TP\n");
+        out.push_str(&format!("\\fB-{}\\fR, \\fB--{}\\fR\n", flag, def.long));
+        out.push_str(&format!("{}\n\n", def.summary));
+    }
+
+    // Examples
+    out.push_str(".SH EXAMPLES\n");
+    for (cmd_name, cmd) in &spec.commands {
+        for ex in &cmd.examples {
+            if let Some(outcome) = &ex.outcome {
+                out.push_str(".TP\n");
+                out.push_str(&format!("{}\n.nf\n{}\n.fi\n\n", outcome, ex.cmd));
+            }
+        }
+    }
+
+    // Author / See also
+    out.push_str(".SH AUTHOR\nGenerated from CLI specification YAML by xtgeoip-docgen.\n\n");
+    out.push_str(".SH \"SEE ALSO\"\n.tl tldr(1)\n");
+
+    out
 }

@@ -19,13 +19,10 @@ pub const CLI_MATRIX: &[CliExample] = &[
 ];
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
-
     #[test]
-    fn cli_matrix_valid() {
-        for ex in CLI_MATRIX {
-            println!("{} → {} → {}", ex.cmd, ex.valid, ex.outcome);
-        }
+    fn test_matrix() {
+        assert!(!CLI_MATRIX.is_empty());
     }
 }
