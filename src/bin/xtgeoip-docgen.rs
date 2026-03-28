@@ -160,62 +160,34 @@ fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
     Ok(out)
 }
 
-fn generate_manpage(spec: &Spec) -> String {
+fn generate_manpage(spec: &Spec) -> Result<String, Box<dyn std::error::Error>> {
     let mut out = String::new();
 
     // Header
-    out.push_str(&format!(
-        ".TH {} 1 \"{}\" \"{} v1\" \"User Commands\"\n",
-        spec.meta.program.to_uppercase(),
-        chrono::Local::now().format("%Y-%m-%d"),
-        spec.meta.program
-    ));
-
-    // Name section
-    out.push_str(&format!(
-        ".SH NAME\n{} \\- {}\n\n",
-        spec.meta.program, spec.meta.summary
-    ));
-
-    // Synopsis
-    out.push_str(".SH SYNOPSIS\n.B ");
-    out.push_str(&spec.meta.program);
-    out.push_str(" [\\fB-b\\fR] [\\fB-c\\fR] [\\fB-p\\fR] [\\fB-f\\fR] \\fICOMMAND\\fR [\\fB-flags\\fR]\n\n");
-
-    // Description
-    out.push_str(".SH DESCRIPTION\n");
-    out.push_str(&format!("{}\n\n", spec.meta.summary));
+    out.push_str(&format!(".TH {} 1 \"\" \"xtgeoip {}\" \"User Commands\"\n",
+                          spec.meta.program.to_uppercase(),
+                          spec.version));
+    out.push_str(&format!(".SH NAME\n{}\n\t{}\n\n", 
+                          spec.meta.program, spec.meta.summary));
 
     // Commands
-    out.push_str(".SH COMMANDS\n");
     for (cmd_name, cmd) in &spec.commands {
-        out.push_str(".TP\n");
-        out.push_str(&format!("\\fB{}\\fR\n", cmd_name));
-        out.push_str(&format!("{}\n\n", cmd.summary));
-    }
+        out.push_str(&format!(".SH {}\n{}\n", cmd_name.to_uppercase(), cmd.summary));
 
-    // Options
-    out.push_str(".SH OPTIONS\n");
-    for (flag, def) in &spec.flags {
-        out.push_str(".TP\n");
-        out.push_str(&format!("\\fB-{}\\fR, \\fB--{}\\fR\n", flag, def.long));
-        out.push_str(&format!("{}\n\n", def.summary));
-    }
-
-    // Examples
-    out.push_str(".SH EXAMPLES\n");
-    for (cmd_name, cmd) in &spec.commands {
         for ex in &cmd.examples {
-            if let Some(outcome) = &ex.outcome {
-                out.push_str(".TP\n");
-                out.push_str(&format!("{}\n.nf\n{}\n.fi\n\n", outcome, ex.cmd));
+            let outcome = if ex.valid {
+                ex.outcome.clone().unwrap_or_default()
+            } else if let Some(reason) = &ex.reason {
+                format!("{{{{ {} }}}}", reason.code.to_uppercase())
+            } else {
+                String::new()
+            };
+            out.push_str(&format!(".TP\n{}\n", ex.cmd));
+            if !outcome.is_empty() {
+                out.push_str(&format!("{}\n", outcome));
             }
         }
     }
 
-    // Author / See also
-    out.push_str(".SH AUTHOR\nGenerated from CLI specification YAML by xtgeoip-docgen.\n\n");
-    out.push_str(".SH \"SEE ALSO\"\n.tl tldr(1)\n");
-
-    out
+    Ok(out)
 }
