@@ -2,10 +2,8 @@
 //! Generates documentation and test matrices from cli.yaml
 use std::{
     collections::BTreeMap,
-    fs::{self},
-    io::Write,
-    path::Path,
 };
+use std::fs;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
