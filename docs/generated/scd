@@ -1,0 +1,16 @@
+Command: build
+Summary: Build xt_geoip data from the local CSV copy.
+Flags: ["b", "c", "p", "f"]
+
+Command: fetch
+Summary: Download or refresh the local MaxMind CSV archive set.
+Flags: ["p"]
+
+Command: run
+Summary: Fetch, then build, optionally wrapping with backup/clean/prune.
+Flags: ["b", "c", "p", "f"]
+
+Command: show
+Summary: Display current configuration and relevant paths.
+Flags: []
+
