@@ -1,0 +1,120 @@
+version: 2
+
+meta:
+  program: xtgeoip
+  summary: Build and manage xt_geoip data from MaxMind GeoLite2 CSVs.
+
+flags:
+  b:
+    long: backup
+    kind: bool
+    summary: Back up current database before replacing it.
+  c:
+    long: clean
+    kind: bool
+    summary: Clean working files before continuing.
+  p:
+    long: prune
+    kind: bool
+    summary: Prune retained artifacts for the current operation.
+  f:
+    long: force
+    kind: bool
+    summary: Force the relevant operation when supported.
+  s:
+    long: show
+    kind: bool
+    summary: Show configured paths and status.
+
+reason_templates:
+  ok:
+    text: "{outcome}"
+  invalid_flag:
+    text: "unsupported option, -{flag} is not valid for {command}"
+  invalid_combo:
+    text: "unsupported option combination"
+  no_prune_here:
+    text: "unsupported option, {command} has no prune function"
+  no_force_here:
+    text: "unsupported option, {target} does not support force"
+  ambiguous_force_prune:
+    text: "unsupported option, ambiguous and prune does not support force"
+  ambiguous_prune_target:
+    text: "unsupported option, ambiguous (does prune apply to {left} or {right}?)"
+
+commands:
+  fetch:
+    summary: Download or refresh the local MaxMind CSV archive set.
+    allowed_flags: [p]
+    examples:
+      - cmd: "xtgeoip fetch"
+        outcome: "fetch CSVs"
+        valid: true
+      - cmd: "xtgeoip fetch -p"
+        outcome: "fetch CSVs, then prune CSVs"
+        valid: true
+      - cmd: "xtgeoip fetch -b"
+        valid: false
+        reason:
+          code: invalid_flag
+          args: { flag: "b", command: "fetch" }
+
+  build:
+    summary: Build xt_geoip data from the local CSV copy.
+    allowed_flags: [b, c, p, f]
+    examples:
+      - cmd: "xtgeoip build"
+        outcome: "build using local copy of database"
+        valid: true
+      - cmd: "xtgeoip build -b -p"
+        outcome: "backup, prune backups, then build"
+        valid: true
+      - cmd: "xtgeoip build -p"
+        valid: false
+        reason:
+          code: no_prune_here
+          args: { command: "build" }
+      - cmd: "xtgeoip build -c -f"
+        outcome: "clean using manifest, then build using local copy of database"
+        valid: true
+      - cmd: "xtgeoip build -b -c -p"
+        outcome: "backup, prune backups, clean, then build"
+        valid: true
+      - cmd: "xtgeoip build -b -c -p -f"
+        valid: false
+        reason:
+          code: ambiguous_force_prune
+
+  run:
+    summary: Fetch, then build, optionally wrapping with backup/clean/prune.
+    allowed_flags: [b, c, p, f]
+    examples:
+      - cmd: "xtgeoip run"
+        outcome: "fetch, then build"
+        valid: true
+      - cmd: "xtgeoip run -p"
+        outcome: "fetch, then prune CSVs, then build"
+        valid: true
+      - cmd: "xtgeoip run -c -p"
+        outcome: "clean using manifest, then fetch, then prune CSVs, then build"
+        valid: true
+      - cmd: "xtgeoip run -c -f"
+        outcome: "force clean without manifest, then fetch, then build"
+        valid: true
+      - cmd: "xtgeoip run -c -p -f"
+        valid: false
+        reason:
+          code: ambiguous_force_prune
+      - cmd: "xtgeoip run -b -c -p"
+        valid: false
+        reason:
+          code: ambiguous_prune_target
+          args: { left: "fetch", right: "backup" }
+
+  show:
+    summary: Display current configuration and relevant paths.
+    allowed_flags: []
+    examples:
+      - cmd: "xtgeoip show"
+        outcome: "show configured paths and status"
+        valid: true
