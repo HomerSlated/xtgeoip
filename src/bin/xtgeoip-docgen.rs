@@ -160,18 +160,22 @@ fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
     Ok(out)
 }
 
-fn generate_manpage(spec: &Spec) -> Result<String, Box<dyn std::error::Error>> {
+fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
     let mut out = String::new();
 
     // Header
-    out.push_str(&format!(".TH {} 1 \"\" \"xtgeoip {}\" \"User Commands\"\n",
-                          spec.meta.program.to_uppercase(),
-                          spec.version));
-    out.push_str(&format!(".SH NAME\n{}\n\t{}\n\n", 
-                          spec.meta.program, spec.meta.summary));
+    out.push_str(&format!(
+        ".TH {} 1 \"\" \"xtgeoip {}\" \"User Commands\"\n",
+        spec.meta.program.to_uppercase(),
+        spec.version
+    ));
+    out.push_str(&format!(
+        ".SH NAME\n{}\n\t{}\n\n",
+        spec.meta.program, spec.meta.summary
+    ));
 
     // Commands
-    for (cmd_name, cmd) in &spec.commands {
+    for (_cmd_name, cmd) in &spec.commands {
         out.push_str(&format!(".SH {}\n{}\n", cmd_name.to_uppercase(), cmd.summary));
 
         for ex in &cmd.examples {
