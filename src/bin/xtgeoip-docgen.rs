@@ -2,7 +2,7 @@
 //! Generates documentation and test matrices from cli.yaml
 use std::{
     collections::BTreeMap,
-    fs::{self, File},
+    fs::{self},
     io::Write,
     path::Path,
 };
@@ -175,7 +175,7 @@ fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
     ));
 
     // Commands
-    for (_cmd_name, cmd) in &spec.commands {
+    for (cmd_name, cmd) in &spec.commands {
         out.push_str(&format!(".SH {}\n{}\n", cmd_name.to_uppercase(), cmd.summary));
 
         for ex in &cmd.examples {
