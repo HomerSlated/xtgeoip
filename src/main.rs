@@ -130,18 +130,6 @@ fn main() -> Result<()> {
                 delete(Path::new(&cfg.paths.output_dir), *do_force)?;
             }
         }
-        Some(Commands::Build { backup, clean, force }) => {
-            let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
-            build::build(temp_dir.path(), Path::new(&cfg.paths.output_dir), &version)?;
-            if *backup {
-                backup(Path::new(&cfg.paths.output_dir), Path::new(&cfg.paths.archive_dir), *force)?;
-            }
-            if *clean {
-                delete(Path::new(&cfg.paths.output_dir), *force)?;
-            }
-        }
-
-
         Some(Commands::Fetch { prune }) => {
             let _ = fetch(&cfg, FetchMode::Remote)?;
             if *prune {
