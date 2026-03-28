@@ -1,0 +1,296 @@
+# doc/xtgeoip-usage.yaml
+version: 1
+
+meta:
+  command: xtgeoip
+  summary: Manage xt_geoip binary data, backups, and MaxMind CSV archives
+
+flags:
+  b:
+    long: backup
+    meaning: Backup binary data before continuing
+  c:
+    long: clean
+    meaning: Clean binary data before continuing
+  f:
+    long: force
+    meaning: Force backup and/or clean even without a manifest
+  p:
+    long: prune
+    meaning: Prune old backups or archived CSVs when exactly one valid prune target exists
+  d:
+    long: defaults
+    meaning: Show default config
+  e:
+    long: edit
+    meaning: Edit current config using $EDITOR
+  h:
+    long: help
+    meaning: Print usage
+
+rules:
+  - id: force_requires_backup_or_clean
+    when:
+      has: [f]
+      lacks_all: [b, c]
+    result: invalid
+    reason: "force requires backup and/or clean"
+
+  - id: prune_and_force_conflict
+    when:
+      has: [p, f]
+    result: invalid
+    reason: "prune does not support force"
+
+  - id: top_level_prune_requires_backup
+    command: root
+    when:
+      has: [p]
+      lacks: [b]
+    result: invalid
+    reason: "clean does not have a prune function"
+
+  - id: build_prune_requires_backup
+    command: build
+    when:
+      has: [p]
+      lacks: [b]
+    result: invalid
+    reason: "neither build nor clean have a prune function"
+
+  - id: run_prune_ambiguous_with_backup
+    command: run
+    when:
+      has: [b, p]
+    result: invalid
+    reason: "ambiguous (does prune apply to fetch or backup?)"
+
+commands:
+  root:
+    synopsis: "xtgeoip"
+    description: "Top-level backup/clean operations and usage"
+    allowed_flags: [b, c, f, h, p]
+    examples:
+      - argv: []
+        valid: true
+        note: "print usage"
+
+      - argv: [b]
+        valid: true
+        note: "backup data in /usr/share/xt_geoip/, as per manifest, store backup in /var/lib/xt_geoip/"
+
+      - argv: [b, c]
+        valid: true
+        note: "backup and clean, as per manifest"
+
+      - argv: [b, c, f]
+        valid: true
+        note: "force backup and clean, even without manifest"
+
+      - argv: [b, f]
+        valid: true
+        note: "force backup data in /usr/share/xt_geoip/, even without a manifest"
+
+      - argv: [b, p]
+        valid: true
+        note: "backup data in /usr/share/xt_geoip/, and prune old backups in /var/lib/xt_geoip/"
+
+      - argv: [b, p, f]
+        valid: false
+        note: "unsupported option, ambiguous, prune does not support force (does force apply to backup or prune?)"
+
+      - argv: [c]
+        valid: true
+        note: "clean (delete) data in /usr/share/xt_geoip/, as per manifest"
+
+      - argv: [c, f]
+        valid: true
+        note: "force clean (delete) data in /usr/share/xt_geoip/, even without a manifest"
+
+      - argv: [c, p]
+        valid: false
+        note: "unsupported option, clean does not have a prune function"
+
+      - argv: [c, p, f]
+        valid: false
+        note: "unsupported option, clean does not have a prune function; prune does not support force"
+
+      - argv: [h]
+        valid: true
+        note: "print usage"
+
+  build:
+    synopsis: "xtgeoip build"
+    description: "Build binary data using the local CSV database"
+    allowed_flags: [b, c, f, p]
+    examples:
+      - argv: []
+        valid: true
+        note: "build binary data in /usr/share/xt_geoip/ using local copy of database"
+
+      - argv: [b]
+        valid: true
+        note: "backup, as per manifest, then build using local copy of database"
+
+      - argv: [b, c]
+        valid: true
+        note: "backup and clean using manifest, then build using local copy of database"
+
+      - argv: [b, c, f]
+        valid: true
+        note: "force backup and clean even without manifest, then build using local copy of database"
+
+      - argv: [b, c, p]
+        valid: true
+        note: "backup, prune backups, clean, then build"
+
+      - argv: [b, c, p, f]
+        valid: false
+        note: "unsupported option, ambiguous, prune does not support force"
+
+      - argv: [b, f]
+        valid: true
+        note: "force backup even without manifest, then build using local copy of database"
+
+      - argv: [b, p]
+        valid: true
+        note: "backup, prune backups, then build"
+
+      - argv: [c]
+        valid: true
+        note: "clean using manifest, then build using local copy of database"
+
+      - argv: [c, f]
+        valid: true
+        note: "force clean without manifest, then build using local copy of database"
+
+      - argv: [c, p]
+        valid: false
+        note: "unsupported option, neither build nor clean have a prune function"
+
+      - argv: [p]
+        valid: false
+        note: "unsupported option, build has no prune function"
+
+  fetch:
+    synopsis: "xtgeoip fetch"
+    description: "Download the latest MaxMind database"
+    allowed_flags: [p]
+    examples:
+      - argv: []
+        valid: true
+        note: "download latest MaxMind database"
+
+      - argv: [b]
+        valid: false
+        note: "unsupported option, fetch has no backup function"
+
+      - argv: [c]
+        valid: false
+        note: "unsupported option, fetch has no clean function"
+
+      - argv: [f]
+        valid: false
+        note: "unsupported option, fetch has no force option"
+
+      - argv: [p]
+        valid: true
+        note: "download latest MaxMind database, then prune old archived copies"
+
+  run:
+    synopsis: "xtgeoip run"
+    description: "Fetch (if needed), then build binary data"
+    allowed_flags: [b, c, f, p]
+    examples:
+      - argv: []
+        valid: true
+        note: "fetch (if needed), and build binary data in /usr/share/xt_geoip/"
+
+      - argv: [b]
+        valid: true
+        note: "backup using manifest, then fetch, and build"
+
+      - argv: [b, c]
+        valid: true
+        note: "backup and clean using manifest, then fetch, and build"
+
+      - argv: [b, c, f]
+        valid: true
+        note: "force backup and clean even without manifest, then fetch, and build"
+
+      - argv: [b, c, p]
+        valid: false
+        note: "unsupported option, ambiguous (does prune apply to fetch or backup?)"
+
+      - argv: [b, f]
+        valid: true
+        note: "force backup even without manifest, then fetch, and build"
+
+      - argv: [b, p]
+        valid: false
+        note: "unsupported option, ambiguous (are we pruning backups or CSV archives?)"
+
+      - argv: [b, p, f]
+        valid: false
+        note: "unsupported option, ambiguous, prune does not support force (does force apply to backup or prune?)"
+
+      - argv: [c]
+        valid: true
+        note: "clean using manifest, then fetch, and build"
+
+      - argv: [c, f]
+        valid: true
+        note: "force clean even without manifest, then fetch, and build"
+
+      - argv: [c, p]
+        valid: true
+        note: "clean using manifest, then fetch, then prune CSV archives, then build"
+
+      - argv: [c, p, f]
+        valid: false
+        note: "unsupported option, prune does not support force"
+
+      - argv: [p]
+        valid: true
+        note: "fetch, then prune CSV archives, then build"
+
+  conf:
+    synopsis: "xtgeoip conf"
+    description: "Inspect or edit configuration"
+    allowed_flags: [d, e, h]
+    examples:
+      - argv: []
+        valid: true
+        note: "print conf usage"
+
+      - argv: [b]
+        valid: false
+        note: "unsupported option, conf has no backup function"
+
+      - argv: [c]
+        valid: false
+        note: "unsupported option, conf has no clean function"
+
+      - argv: [d]
+        valid: true
+        note: "show default config"
+
+      - argv: [e]
+        valid: true
+        note: "edit current config using $EDITOR"
+
+      - argv: [f]
+        valid: false
+        note: "unsupported option, conf has no force option"
+
+      - argv: [h]
+        valid: true
+        note: "print conf usage"
+
+      - argv: [p]
+        valid: false
+        note: "unsupported option, conf has no prune function"
+
+      - argv: [s]
+        valid: true
+        note: "show current config"
