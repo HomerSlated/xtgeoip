@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const SPEC_PATH: &str = "docs/cli_spec.yaml";
+const SPEC_PATH: &str = "docs/spec/cli.yaml";
 const OUT_DOCS_DIR: &str = "docs/generated";
 const OUT_SRC_DIR: &str = "src/generated";
 
