@@ -60,9 +60,9 @@ fn main() -> anyhow::Result<()> {
     let spec: Spec = serde_yaml::from_str(&spec_str)?;
     validate_spec(&spec)?;
 
-    fs::write("docs/usage.md", generate_usage_md(&spec))?;
-    fs::write("docs/tldr", generate_tldr(&spec))?;
-    fs::write("docs/scd", generate_scd(&spec))?;
+    fs::write("docs/generated/usage.md", generate_usage_md(&spec))?;
+    fs::write("docs/generated/tldr", generate_tldr(&spec))?;
+    fs::write("docs/generated/scd", generate_scd(&spec))?;
 
     fs::create_dir_all("src/generated")?;
     fs::write("src/generated/error_text.rs", generate_error_text_rs(&spec))?;
@@ -153,7 +153,7 @@ fn render_reason(spec: &Spec, r: Option<&ReasonRef>) -> String {
 // --- Generate tldr ---
 fn generate_tldr(spec: &Spec) -> String {
     let mut out = String::new();
-    for (cmd_name, cmd) in &spec.commands {
+    for (_cmd_name, cmd) in &spec.commands {
         for ex in &cmd.examples {
             if ex.valid {
                 out.push_str(&format!("{}\n", ex.cmd));
