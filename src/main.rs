@@ -60,7 +60,9 @@ enum Commands {
     /// Configuration operations (-d/-s/-e/-h)
     Conf {
         /// Configuration flag
+        #[arg(value_parser, allow_hyphen_values = true)]
         flag: String,
+
         /// Backup existing binary files (used with conf)
         #[arg(short, long)]
         backup: bool,
@@ -81,10 +83,10 @@ fn main() -> Result<()> {
     let cfg = load_config().context("Failed to load config")?;
 
     // Helper flags
-    let mut do_backup = cli.backup;
-    let mut do_clean = cli.clean;
-    let mut do_force = cli.force;
-    let mut do_prune = cli.prune;
+    let do_backup = cli.backup;
+    let do_clean = cli.clean;
+    let do_force = cli.force;
+    let do_prune = cli.prune;
 
     match &cli.command {
         Some(Commands::Run) => {
