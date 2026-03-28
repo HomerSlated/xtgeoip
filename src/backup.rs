@@ -453,9 +453,9 @@ fn extract_version(name: &str) -> Option<String> {
     let idx = name.rfind('_')?;
     let part = &name[idx + 1..];
     let digits: String = part.chars().take_while(|c| c.is_ascii_digit()).collect();
-    if digits.is_empty() {
-        None
-    } else {
+    if digits.len() == 8 {
         Some(digits)
+    } else {
+        None
     }
 }
