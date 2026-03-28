@@ -122,7 +122,8 @@ fn main() -> Result<()> {
             }
         }
         Some(Commands::Conf { flag, backup: b, clean: c, force: f, prune: p }) => {
-            let action = parse_conf_flag(Some(flag))?;
+            let action = parse_conf_flag(Some(flag))
+                .map_err(|e| anyhow::anyhow!(e))?;
             run_conf(action)?;
 
             if *b {
