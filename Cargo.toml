@@ -1,8 +1,9 @@
 [package]
 name = "xtgeoip"
-version = "0.0.22"
+version = "0.0.23"
 edition = "2024"
 authors = ["Homer at hazensparkle.co.uk"]
+repository = "https://github.com/HomerSlated/xtgeoip"
 license = "MIT"
 include = ["src/**", "Cargo.toml", "README.md", "LICENSE", "doc/**", "conf/**"]
 
@@ -24,4 +25,9 @@ tar = "0.4.45"
 flate2 = "1.1.9"
 glob = "0.3.3"
 clap = { version = "4.6.0", features = ["derive"] }
+serde_yaml = "0.9.34"
+serde_json = "1.0.149"
 
+[[bin]]
+name = "xtgeoip-docgen"
+path = "src/bin/xtgeoip-docgen.rs"
