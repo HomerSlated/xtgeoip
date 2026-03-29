@@ -71,16 +71,16 @@ fn main() -> anyhow::Result<()> {
 
 /// Ensure that all example flags exist
 fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
-    for (_cmd_name, cmd) in &spec.commands {
+    for cmd in spec.commands.values() {
         for ex in &cmd.examples {
-            if let Some(reason) = &ex.reason {
-                if !spec.reason_templates.contains_key(&reason.code) {
-                    anyhow::bail!(
-                        "Unknown reason code {} in command example {}",
-                        reason.code,
-                        ex.cmd
-                    );
-                }
+            if let Some(reason) = &ex.reason
+                && !spec.reason_templates.contains_key(&reason.code)
+            {
+                anyhow::bail!(
+                    "Unknown reason code {} in command example {}",
+                    reason.code,
+                    ex.cmd
+                );
             }
         }
     }
@@ -112,7 +112,7 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
 fn generate_tldr_md(spec: &Spec) -> anyhow::Result<String> {
     let mut out =
         format!("# {}\n\n> {}\n\n", spec.meta.program, spec.meta.summary);
-    for (_cmd_name, cmd) in &spec.commands {
+    for cmd in spec.commands.values() {
         for ex in &cmd.examples {
             if ex.valid {
                 let outcome = ex.outcome.clone().unwrap_or_default();
@@ -154,7 +154,7 @@ fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
                    bool, pub outcome: &'static str }\n"
         .to_string();
     out.push_str("pub const CLI_MATRIX: &[CliExample] = &[\n");
-    for (_cmd_name, cmd) in &spec.commands {
+    for cmd in spec.commands.values() {
         for ex in &cmd.examples {
             let outcome = ex.outcome.clone().unwrap_or_default();
             out.push_str(&format!(
