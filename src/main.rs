@@ -230,7 +230,7 @@ fn main() -> Result<()> {
         None => {
             if !(cli.backup || cli.clean || cli.prune) {
                 Cli::command().print_help()?;
-                info!();
+                println!();
                 std::process::exit(1);
             }
         }
