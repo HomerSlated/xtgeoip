@@ -1,4 +1,4 @@
-c// xtgeoip © Haze N Sparkle 2026 (MIT)
+/// xtgeoip © Haze N Sparkle 2026 (MIT)
 ///
 /// Downloads, extracts, and converts GeoIP CSV databases into binary IP
 /// range data files, compatible with the Linux x_tables xt_geoip module,
