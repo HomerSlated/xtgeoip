@@ -46,7 +46,7 @@ reason_templates:
 
 commands:
   fetch:
-    kind: flag_command
+    kind: FlagCommand
     summary: Download or refresh the local MaxMind CSV archive set.
     allowed_flags: [p]
     examples:
@@ -68,7 +68,7 @@ commands:
           args: { flag: "b", command: "fetch" }
 
   build:
-    kind: flag_command
+    kind: FlagCommand
     summary: Build xt_geoip data from the local CSV copy.
     allowed_flags: [b, c, p, f, l]
     examples:
@@ -98,7 +98,7 @@ commands:
           code: ambiguous_force_prune
 
   run:
-    kind: flag_command
+    kind: FlagCommand
     summary: Fetch, then build, optionally wrapping with backup/clean/prune.
     allowed_flags: [b, c, p, f, l]
     examples:
@@ -128,7 +128,7 @@ commands:
           args: { left: "fetch", right: "backup" }
 
   conf:
-    kind: selector_command
+    kind: SelectorCommand
     summary: Configuration operations.
     usage: "xtgeoip conf <FLAG>"
     positional:
@@ -158,3 +158,4 @@ commands:
       - cmd: "xtgeoip conf -e"
         outcome: "edit config"
         valid: true
+
