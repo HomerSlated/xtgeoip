@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use log::{info, warn, error};
+use log::{info, error};
 use anyhow::{Context, Result, bail};
 use reqwest::{blocking::Client, header::CONTENT_DISPOSITION};
 use sha2::{Digest, Sha256};
