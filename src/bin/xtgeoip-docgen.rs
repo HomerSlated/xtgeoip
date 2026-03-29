@@ -124,7 +124,7 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
                     let outcome = if ex.valid {
                         ex.outcome.clone().unwrap_or_default()
                     } else if let Some(r) = &ex.reason {
-                        format!("({})", r.code)
+                        render_reason(spec, r)?
                     } else {
                         "(invalid)".to_string()
                     };
@@ -138,7 +138,7 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
                     let outcome = if ex.valid {
                         ex.outcome.clone().unwrap_or_default()
                     } else if let Some(r) = &ex.reason {
-                        format!("({})", r.code)
+                        render_reason(spec, r)?
                     } else {
                         "(invalid)".to_string()
                     };
@@ -241,7 +241,7 @@ fn render_reason(spec: &Spec, reason: &Reason) -> anyhow::Result<String> {
 
     if let Some(args) = &reason.args {
         for (key, value) in args {
-            let placeholder = format!("{{{{ {} }}}}", key.to_uppercase());
+            let placeholder = format!("{{{}}}", key);
             text = text.replace(&placeholder, value);
         }
     }
