@@ -8,7 +8,6 @@
 /// Prindeville), now part of Debian's xtables-addons package.
 use std::path::Path;
 use std::fs::OpenOptions;
-use std::io::Write;
 
 use log::{warn, error};
 use simplelog::*;
