@@ -6,15 +6,14 @@
 ///
 /// Inspired by xt_geoip_build_maxmind (Jan Engelhardt, Philip
 /// Prindeville), now part of Debian's xtables-addons package.
-
 use std::path::Path;
 use std::fs::OpenOptions;
+use std::io::Write;
 
-use anyhow::Result;
+use log::{info, warn, error};
+use simplelog::*;
+use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
-use log::{error, warn};
-use simplelog::{CombinedLogger, WriteLogger, LevelFilter, Config};
-use syslog::{Facility, Formatter3164};
 
 mod backup;
 mod build;
@@ -23,9 +22,8 @@ mod fetch;
 
 use crate::{
     backup::{backup, delete, prune_archives},
-    build::build,
     config::{ConfAction, load_config, run_conf},
-    fetch::{fetch, FetchMode},
+    fetch::{FetchMode, fetch},
 };
 
 #[derive(Parser)]
@@ -86,7 +84,7 @@ enum Commands {
         prune: bool,
     },
     #[command(group(
-        clap::ArgGroup::new("conf_action")
+            clap::ArgGroup::new("conf_action")
             .required(true)
             .multiple(false)
     ))]
@@ -100,24 +98,7 @@ enum Commands {
     },
 }
 
-/// Warn user if legacy mode is enabled
-fn warn_legacy_mode(legacy: bool) {
-    if legacy {
-        warn!("Warning: Legacy Mode activated. See documentation for collisions.");
-    }
-}
-
-fn log_config_failure(msg: &str) {
-    if let Ok(mut logger) = syslog::unix(Formatter3164 {
-        facility: Facility::LOG_DAEMON,
-        hostname: None,
-        process: "xtgeoip".into(),
-        pid: 0,
-    }) {
-        let _ = logger.err(msg); // send as error priority
-    }
-}
-
+/// Initialize logging to file in syslog/cron-friendly format
 fn init_logging(log_file: &str) -> anyhow::Result<()> {
     let file = OpenOptions::new()
         .create(true)
@@ -128,7 +109,11 @@ fn init_logging(log_file: &str) -> anyhow::Result<()> {
     CombinedLogger::init(vec![
         WriteLogger::new(
             LevelFilter::Info,
-            Config::default(),
+            ConfigBuilder::new()
+                .set_time_format_str("%b %d %H:%M:%S") // e.g., "Mar 29 03:00:00"
+                .set_time_to_local(true)
+                .set_thread_mode(ThreadLogMode::Off)
+                .build(),
             file,
         ),
     ])?;
@@ -136,14 +121,20 @@ fn init_logging(log_file: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn warn_legacy_mode(legacy: bool) {
+    if legacy {
+        warn!("Warning: Legacy Mode activated. See documentation for collisions.");
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Handle `xtgeoip conf` subcommand before loading config
+    // Handle `xtgeoip conf` before loading system config
     if let Some(Commands::Conf {
         default,
         show,
-        edit: _,
+        edit,
     }) = &cli.command
     {
         let action = if *default {
@@ -157,17 +148,9 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Load system configuration
-    let cfg = match load_config() {
-        Ok(c) => c,
-        Err(e) => {
-            log_config_failure(&format!("Failed to load config: {}", e));
-            eprintln!("Fatal: Failed to load config: {}", e);
-            std::process::exit(1);
-        }
-    };
+    let cfg = load_config().context("Failed to load config")?;
 
-    // Initialize file-based logging for all normal operations
+    // Initialize logging
     if let Some(log_file) = cfg.logging.as_ref().map(|l| l.log_file.as_str()) {
         init_logging(log_file)?;
     }
@@ -203,7 +186,7 @@ fn main() -> Result<()> {
         Some(Commands::Run { prune, legacy }) => {
             let (temp_dir, version) = fetch(&cfg, FetchMode::Remote)?;
             warn_legacy_mode(*legacy);
-            build(
+            build::build(
                 temp_dir.path(),
                 Path::new(&cfg.paths.output_dir),
                 &version,
@@ -221,7 +204,7 @@ fn main() -> Result<()> {
         }) => {
             let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
             warn_legacy_mode(*legacy);
-            build(
+            build::build(
                 temp_dir.path(),
                 Path::new(&cfg.paths.output_dir),
                 &version,
@@ -247,11 +230,10 @@ fn main() -> Result<()> {
         None => {
             if !(cli.backup || cli.clean || cli.prune) {
                 Cli::command().print_help()?;
-                println!();
+                info!();
                 std::process::exit(1);
             }
         }
-        Some(Commands::Conf { .. }) => unreachable!(), // already handled above
     }
 
     Ok(())
