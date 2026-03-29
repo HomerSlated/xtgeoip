@@ -102,7 +102,11 @@ fn main() -> Result<()> {
 
     // Handle top-level flags (backup/clean/prune)
     if cli.backup {
-        backup(Path::new(&cfg.paths.output_dir), Path::new(&cfg.paths.archive_dir), cli.force)?;
+        backup(
+            Path::new(&cfg.paths.output_dir),
+            Path::new(&cfg.paths.archive_dir),
+            cli.force,
+        )?;
     }
     if cli.clean {
         delete(Path::new(&cfg.paths.output_dir), cli.force)?;
@@ -115,16 +119,32 @@ fn main() -> Result<()> {
     match &cli.command {
         Some(Commands::Run { prune }) => {
             let (temp_dir, version) = fetch(&cfg, FetchMode::Remote)?;
-            build::build(temp_dir.path(), Path::new(&cfg.paths.output_dir), &version)?;
+            build::build(
+                temp_dir.path(),
+                Path::new(&cfg.paths.output_dir),
+                &version,
+            )?;
             if *prune {
                 prune_archives(&cfg, true, false)?;
             }
         }
-        Some(Commands::Build { backup: do_backup, clean: do_clean, force: do_force }) => {
+        Some(Commands::Build {
+            backup: do_backup,
+            clean: do_clean,
+            force: do_force,
+        }) => {
             let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
-            build::build(temp_dir.path(), Path::new(&cfg.paths.output_dir), &version)?;
+            build::build(
+                temp_dir.path(),
+                Path::new(&cfg.paths.output_dir),
+                &version,
+            )?;
             if *do_backup {
-                backup(Path::new(&cfg.paths.output_dir), Path::new(&cfg.paths.archive_dir), *do_force)?;
+                backup(
+                    Path::new(&cfg.paths.output_dir),
+                    Path::new(&cfg.paths.archive_dir),
+                    *do_force,
+                )?;
             }
             if *do_clean {
                 delete(Path::new(&cfg.paths.output_dir), *do_force)?;
@@ -137,8 +157,8 @@ fn main() -> Result<()> {
             }
         }
         Some(Commands::Conf { flag }) => {
-            let action = parse_conf_flag(Some(flag))
-                .map_err(|e| anyhow::anyhow!(e))?;
+            let action =
+                parse_conf_flag(Some(flag)).map_err(|e| anyhow::anyhow!(e))?;
             run_conf(action)?;
         }
         None => {
