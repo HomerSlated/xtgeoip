@@ -7,7 +7,11 @@
 /// Inspired by xt_geoip_build_maxmind (Jan Engelhardt, Philip
 /// Prindeville), now part of Debian's xtables-addons package.
 use std::path::Path;
+use std::fs::OpenOptions;
+use std::io::Write;
 
+use log::{info, warn, error};
+use simplelog::*;
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
 
@@ -18,7 +22,7 @@ mod fetch;
 
 use crate::{
     backup::{backup, delete, prune_archives},
-    config::{load_config, parse_conf_flag, run_conf},
+    config::{ConfAction, load_config, run_conf},
     fetch::{FetchMode, fetch},
 };
 
@@ -79,30 +83,86 @@ enum Commands {
         #[arg(short, long)]
         prune: bool,
     },
+    #[command(group(
+            clap::ArgGroup::new("conf_action")
+            .required(true)
+            .multiple(false)
+    ))]
     Conf {
-        #[arg(value_name = "FLAG", allow_hyphen_values = true)]
-        flag: String,
+        #[arg(short = 'd', long = "default", group = "conf_action")]
+        default: bool,
+        #[arg(short = 's', long = "show", group = "conf_action")]
+        show: bool,
+        #[arg(short = 'e', long = "edit", group = "conf_action")]
+        edit: bool,
     },
+}
+
+/// Initialize logging to file in syslog/cron-friendly format
+fn init_logging(log_file: &str) -> anyhow::Result<()> {
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .write(true)
+        .open(log_file)?;
+
+    CombinedLogger::init(vec![
+        WriteLogger::new(
+            LevelFilter::Info,
+            ConfigBuilder::new()
+                .set_time_format_str("%b %d %H:%M:%S") // e.g., "Mar 29 03:00:00"
+                .set_time_to_local(true)
+                .set_thread_mode(ThreadLogMode::Off)
+                .build(),
+            file,
+        ),
+    ])?;
+
+    Ok(())
 }
 
 fn warn_legacy_mode(legacy: bool) {
     if legacy {
-        println!("Warning: Legacy Mode activated. See documentation for collisions.");
+        warn!("Warning: Legacy Mode activated. See documentation for collisions.");
     }
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    // Handle `xtgeoip conf` before loading system config
+    if let Some(Commands::Conf {
+        default,
+        show,
+        edit,
+    }) = &cli.command
+    {
+        let action = if *default {
+            ConfAction::Default
+        } else if *show {
+            ConfAction::Show
+        } else {
+            ConfAction::Edit
+        };
+        run_conf(action)?;
+        return Ok(());
+    }
+
     let cfg = load_config().context("Failed to load config")?;
+
+    // Initialize logging
+    if let Some(log_file) = cfg.logging.as_ref().map(|l| l.log_file.as_str()) {
+        init_logging(log_file)?;
+    }
 
     // Enforce flag rules
     if cli.force && !(cli.backup || cli.clean) {
-        eprintln!("Error: --force only applies to --backup or --clean");
+        error!("Error: --force only applies to --backup or --clean");
         std::process::exit(1);
     }
 
     if cli.prune && !cli.backup {
-        eprintln!("Error: --prune requires --backup at top-level");
+        error!("Error: --prune requires --backup at top-level");
         std::process::exit(1);
     }
 
@@ -167,15 +227,10 @@ fn main() -> Result<()> {
                 prune_archives(&cfg, true, false)?;
             }
         }
-        Some(Commands::Conf { flag }) => {
-            let action =
-                parse_conf_flag(Some(flag)).map_err(|e| anyhow::anyhow!(e))?;
-            run_conf(action)?;
-        }
         None => {
             if !(cli.backup || cli.clean || cli.prune) {
                 Cli::command().print_help()?;
-                println!();
+                info!();
                 std::process::exit(1);
             }
         }

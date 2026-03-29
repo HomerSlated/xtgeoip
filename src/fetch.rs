@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use log::{info, warn, error};
 use anyhow::{Context, Result, bail};
 use reqwest::{blocking::Client, header::CONTENT_DISPOSITION};
 use sha2::{Digest, Sha256};
@@ -27,7 +28,7 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
         fs::create_dir_all(archive_dir)?;
         let (archive_path, version) =
             find_latest_local_csv_archive(archive_dir)?;
-        println!("Using latest local archive: {}", archive_path.display());
+        info!("Using latest local archive: {}", archive_path.display());
         let temp_dir = extract_archive_to_temp(&archive_path)?;
         return Ok((temp_dir, version));
     }
@@ -42,8 +43,8 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
         || license_key.is_empty()
         || license_key == "CHANGE ME"
     {
-        eprintln!(
-            "Warning: MaxMind account ID or license key not set in config. \
+        error!(
+            "Error: MaxMind account ID or license key not set in config. \
              Skipping fetch."
         );
         bail!("MaxMind credentials not configured");
@@ -59,7 +60,7 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
         ))
         .build()?;
 
-    println!("Checking remote archive version...");
+    info!("Checking remote archive version...");
 
     let resp = client
         .get(format!("{maxmind_url}?suffix=zip"))
@@ -82,7 +83,7 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
         anyhow::anyhow!("Failed to parse version from filename")
     })?;
 
-    println!("Remote archive version: {version}");
+    info!("Remote archive version: {version}");
 
     let archive_path =
         archive_dir.join(format!("GeoLite2-Country-CSV_{version}.zip"));
@@ -90,12 +91,12 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
         archive_dir.join(format!("GeoLite2-Country-CSV_{version}.zip.sha256"));
 
     if archive_path.exists() && checksum_path.exists() {
-        println!("Reusing local copy: {}", archive_path.display());
+        info!("Reusing local copy: {}", archive_path.display());
         let temp_dir = extract_archive_to_temp(&archive_path)?;
         return Ok((temp_dir, version));
     }
 
-    println!("No local copy of this version. Downloading...");
+    info!("No local copy of this version. Downloading...");
 
     // Stream archive directly to file + hash while copying
     let mut archive_file =
@@ -142,18 +143,20 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
     if actual_hash != expected_hash {
         fs::remove_file(&archive_path).ok(); // remove partial file
         bail!(
-            "Checksum verification failed: expected {expected_hash}, got \
-             {actual_hash}"
+            "Checksum verification failed for {}: expected {}, got {}",
+            archive_path.display(),
+            expected_hash,
+            actual_hash
         );
     }
 
-    println!("Checksum verification successful.");
+    info!("Checksum verification successful.");
 
     // Save checksum
     fs::write(&checksum_path, checksum_text)
         .context("Failed to save checksum")?;
 
-    println!("Saved archive as {}", archive_path.display());
+    info!("Saved archive as {}", archive_path.display());
 
     let temp_dir = extract_archive_to_temp(&archive_path)?;
     Ok((temp_dir, version))
