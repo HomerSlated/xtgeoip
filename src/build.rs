@@ -23,16 +23,8 @@ pub fn build(
     source_dir: &Path,
     target_dir: &Path,
     version: &str,
+    legacy: bool,
 ) -> std::io::Result<()> {
-    let legacy = std::env::args()
-        .skip(1)
-        .any(|arg| arg == "-l" || arg == "--legacy");
-    if legacy {
-        println!(
-            "Warning: Legacy Mode activated. See documentation for collisions."
-        );
-    }
-
     let (country_id, mut country_name) = load_countries(source_dir, legacy)?;
 
     // Ensure special codes exist in the name map (but don't overwrite if

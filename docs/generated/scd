@@ -4,7 +4,9 @@ Flags: ["b", "c", "p", "f", "l"]
 
 Command: conf
 Summary: Configuration operations.
-Flags: []
+Usage: xtgeoip conf <FLAG>
+Positional: "FLAG"
+Constraints: Some(Constraints { exactly_one_positional: true })
 
 Command: fetch
 Summary: Download or refresh the local MaxMind CSV archive set.
