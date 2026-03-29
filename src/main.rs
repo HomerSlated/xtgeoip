@@ -1,4 +1,4 @@
-/// xtgeoip © Haze N Sparkle 2026 (MIT)
+c// xtgeoip © Haze N Sparkle 2026 (MIT)
 ///
 /// Downloads, extracts, and converts GeoIP CSV databases into binary IP
 /// range data files, compatible with the Linux x_tables xt_geoip module,
@@ -67,8 +67,12 @@ enum Commands {
         #[arg(short, long)]
         force: bool,
 
-        /// Use legacy mode
-        #[arg(short = 'l', long)]
+        /// Use legacy MaxMind-compatible continent mappings (EU/AS) instead of O1
+        #[arg(
+            short = 'l',
+            long,
+            help = "Enable legacy MaxMind-compatible continent mappings (e.g. EU/AS) instead of O1"
+        )]
         legacy: bool,
     },
     Fetch {
@@ -79,6 +83,12 @@ enum Commands {
         #[arg(value_name = "FLAG", allow_hyphen_values = true)]
         flag: String,
     },
+}
+
+fn warn_legacy_mode(legacy: bool) {
+    if legacy {
+        println!("Warning: Legacy Mode activated. See documentation for collisions.");
+    }
 }
 
 fn main() -> Result<()> {
@@ -115,6 +125,7 @@ fn main() -> Result<()> {
     match &cli.command {
         Some(Commands::Run { prune, legacy }) => {
             let (temp_dir, version) = fetch(&cfg, FetchMode::Remote)?;
+            warn_legacy_mode(*legacy);
             build::build(
                 temp_dir.path(),
                 Path::new(&cfg.paths.output_dir),
@@ -132,6 +143,7 @@ fn main() -> Result<()> {
             legacy,
         }) => {
             let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
+            warn_legacy_mode(*legacy);
             build::build(
                 temp_dir.path(),
                 Path::new(&cfg.paths.output_dir),
