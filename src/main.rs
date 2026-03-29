@@ -103,7 +103,7 @@ enum Commands {
 /// Warn user if legacy mode is enabled
 fn warn_legacy_mode(legacy: bool) {
     if legacy {
-        warn!("Warning: Legacy Mode activated. See documentation for collisions.");
+        log_print("Warning: Legacy Mode activated. See documentation for collisions.", log::Level::Warn);
     }
 }
 
@@ -134,6 +134,16 @@ fn init_logging(log_file: &str) -> anyhow::Result<()> {
     ])?;
 
     Ok(())
+}
+
+fn log_print(msg: &str, level: log::Level) {
+    // Always print to stdout/stderr
+    match level {
+        log::Level::Error | log::Level::Warn => eprintln!("{}", msg),
+        _ => println!("{}", msg),
+    }
+    // Only log if logger initialized
+    log::log!(level, "{}", msg);
 }
 
 fn main() -> Result<()> {
@@ -174,12 +184,12 @@ fn main() -> Result<()> {
 
     // Enforce flag rules
     if cli.force && !(cli.backup || cli.clean) {
-        error!("Error: --force only applies to --backup or --clean");
+        log_print("Error: --force only applies to --backup or --clean", log::Level::Error);
         std::process::exit(1);
     }
 
     if cli.prune && !cli.backup {
-        error!("Error: --prune requires --backup at top-level");
+        log_print("Error: --prune requires --backup at top-level", log::Level::Error);
         std::process::exit(1);
     }
 
