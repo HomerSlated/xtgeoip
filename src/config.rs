@@ -27,9 +27,15 @@ pub struct MaxMind {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct Logging {
+    pub log_file: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct Config {
     pub paths: Paths,
     pub maxmind: MaxMind,
+    pub logging: Option<Logging>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
