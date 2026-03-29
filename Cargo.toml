@@ -5,7 +5,7 @@ edition = "2024"
 authors = ["Homer at hazensparkle.co.uk"]
 repository = "https://github.com/HomerSlated/xtgeoip"
 license = "MIT"
-include = ["src/**", "Cargo.toml", "README.md", "LICENSE", "doc/**", "conf/**"]
+include = ["src/**", "Cargo.toml", "README.md", "LICENSE", "docs/**", "conf/**"]
 
 [dependencies]
 sha2 = "0.10.9"
