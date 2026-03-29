@@ -109,11 +109,7 @@ fn init_logging(log_file: &str) -> anyhow::Result<()> {
     CombinedLogger::init(vec![
         WriteLogger::new(
             LevelFilter::Info,
-            ConfigBuilder::new()
-                .set_time_format_str("%b %d %H:%M:%S") // e.g., "Mar 29 03:00:00"
-                .set_time_to_local(true)
-                .set_thread_mode(ThreadLogMode::Off)
-                .build(),
+            simplelog::Config::default(),
             file,
         ),
     ])?;
