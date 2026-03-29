@@ -231,6 +231,24 @@ fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
     Ok(out)
 }
 
+fn render_reason(spec: &Spec, reason: &Reason) -> anyhow::Result<String> {
+    let template = spec
+        .reason_templates
+        .get(&reason.code)
+        .ok_or_else(|| anyhow::anyhow!("Unknown reason code: {}", reason.code))?;
+
+    let mut text = template.text.clone();
+
+    if let Some(args) = &reason.args {
+        for (key, value) in args {
+            let placeholder = format!("{{{{ {} }}}}", key.to_uppercase());
+            text = text.replace(&placeholder, value);
+        }
+    }
+
+    Ok(text)
+}
+
 /// Generate manpage
 fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
     let mut out = String::new();
@@ -254,7 +272,7 @@ fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
                     let outcome = if ex.valid {
                         ex.outcome.clone().unwrap_or_default()
                     } else if let Some(reason) = &ex.reason {
-                        format!("{{{{ {} }}}}", reason.code.to_uppercase())
+                        render_reason(spec, reason)?
                     } else {
                         String::new()
                     };
@@ -270,7 +288,7 @@ fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
                     let outcome = if ex.valid {
                         ex.outcome.clone().unwrap_or_default()
                     } else if let Some(reason) = &ex.reason {
-                        format!("{{{{ {} }}}}", reason.code.to_uppercase())
+                        render_reason(spec, reason)?
                     } else {
                         String::new()
                     };
