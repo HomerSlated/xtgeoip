@@ -6,13 +6,14 @@
 ///
 /// Inspired by xt_geoip_build_maxmind (Jan Engelhardt, Philip
 /// Prindeville), now part of Debian's xtables-addons package.
-use std::path::Path;
-use std::fs::OpenOptions;
 
-use log::{warn, error};
-use simplelog::*;
+use std::path::Path;
+
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
+use log::{error, warn};
+use simplelog::*;
+use syslog::{Facility, Formatter3164};
 
 mod backup;
 mod build;
@@ -21,8 +22,9 @@ mod fetch;
 
 use crate::{
     backup::{backup, delete, prune_archives},
+    build::build,
     config::{ConfAction, load_config, run_conf},
-    fetch::{FetchMode, fetch},
+    fetch::{fetch, FetchMode},
 };
 
 #[derive(Parser)]
@@ -83,7 +85,7 @@ enum Commands {
         prune: bool,
     },
     #[command(group(
-            clap::ArgGroup::new("conf_action")
+        clap::ArgGroup::new("conf_action")
             .required(true)
             .multiple(false)
     ))]
@@ -97,35 +99,28 @@ enum Commands {
     },
 }
 
-/// Initialize logging to file in syslog/cron-friendly format
-fn init_logging(log_file: &str) -> anyhow::Result<()> {
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .write(true)
-        .open(log_file)?;
-
-    CombinedLogger::init(vec![
-        WriteLogger::new(
-            LevelFilter::Info,
-            simplelog::Config::default(),
-            file,
-        ),
-    ])?;
-
-    Ok(())
-}
-
+/// Warn user if legacy mode is enabled
 fn warn_legacy_mode(legacy: bool) {
     if legacy {
         warn!("Warning: Legacy Mode activated. See documentation for collisions.");
     }
 }
 
+fn log_config_failure(msg: &str) {
+    if let Ok(mut logger) = syslog::unix(Formatter3164 {
+        facility: Facility::LOG_DAEMON,
+        hostname: None,
+        process: "xtgeoip".into(),
+        pid: 0,
+    }) {
+        let _ = logger.err(msg); // send as error priority
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Handle `xtgeoip conf` before loading system config
+    // Handle `xtgeoip conf` subcommand before loading config
     if let Some(Commands::Conf {
         default,
         show,
@@ -143,12 +138,15 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let cfg = load_config().context("Failed to load config")?;
-
-    // Initialize logging
-    if let Some(log_file) = cfg.logging.as_ref().map(|l| l.log_file.as_str()) {
-        init_logging(log_file)?;
-    }
+    // Load system configuration
+    let cfg = match load_config() {
+        Ok(c) => c,
+        Err(e) => {
+            log_config_failure(&format!("Failed to load config: {}", e));
+            eprintln!("Fatal: Failed to load config: {}", e);
+            std::process::exit(1);
+        }
+    };
 
     // Enforce flag rules
     if cli.force && !(cli.backup || cli.clean) {
@@ -181,7 +179,7 @@ fn main() -> Result<()> {
         Some(Commands::Run { prune, legacy }) => {
             let (temp_dir, version) = fetch(&cfg, FetchMode::Remote)?;
             warn_legacy_mode(*legacy);
-            build::build(
+            build(
                 temp_dir.path(),
                 Path::new(&cfg.paths.output_dir),
                 &version,
@@ -199,7 +197,7 @@ fn main() -> Result<()> {
         }) => {
             let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
             warn_legacy_mode(*legacy);
-            build::build(
+            build(
                 temp_dir.path(),
                 Path::new(&cfg.paths.output_dir),
                 &version,
@@ -229,6 +227,7 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
         }
+        Some(Commands::Conf { .. }) => unreachable!(), // already handled above
     }
 
     Ok(())
