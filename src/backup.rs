@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use log::{info, warn, error};
+use log::{info};
 use anyhow::{Context, Result, anyhow, bail};
 use flate2::{Compression, write::GzEncoder};
 use glob::glob;
