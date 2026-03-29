@@ -10,7 +10,7 @@ use std::path::Path;
 use std::fs::OpenOptions;
 use std::io::Write;
 
-use log::{info, warn, error};
+use log::{warn, error};
 use simplelog::*;
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
