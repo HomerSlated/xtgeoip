@@ -6,6 +6,10 @@
 
 `xtgeoip build`
 
+- build using local copy of database in legacy mode:
+
+`xtgeoip build -l`
+
 - backup, prune backups, then build:
 
 `xtgeoip build -b -p`
@@ -17,6 +21,18 @@
 - backup, prune backups, clean, then build:
 
 `xtgeoip build -b -c -p`
+
+- show current config:
+
+`xtgeoip conf -s`
+
+- show default config:
+
+`xtgeoip conf -d`
+
+- edit config:
+
+`xtgeoip conf -e`
 
 - fetch CSVs:
 
@@ -30,6 +46,10 @@
 
 `xtgeoip run`
 
+- fetch, then build in legacy mode:
+
+`xtgeoip run -l`
+
 - fetch, then prune CSVs, then build:
 
 `xtgeoip run -p`
@@ -41,8 +61,4 @@
 - force clean without manifest, then fetch, then build:
 
 `xtgeoip run -c -f`
-
-- show configured paths and status:
-
-`xtgeoip show`
 
