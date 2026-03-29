@@ -5,8 +5,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use log::{info, error};
 use anyhow::{Context, Result, bail};
+use log::{error, info};
 use reqwest::{blocking::Client, header::CONTENT_DISPOSITION};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;

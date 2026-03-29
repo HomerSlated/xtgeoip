@@ -1,3 +1,4 @@
+use std::fs::OpenOptions;
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 ///
 /// Downloads, extracts, and converts GeoIP CSV databases into binary IP
@@ -6,14 +7,11 @@
 ///
 /// Inspired by xt_geoip_build_maxmind (Jan Engelhardt, Philip
 /// Prindeville), now part of Debian's xtables-addons package.
-
 use std::path::Path;
-use std::fs::OpenOptions;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
-use log::{error, warn};
-use simplelog::{CombinedLogger, WriteLogger, LevelFilter, Config};
+use simplelog::{CombinedLogger, Config, LevelFilter, WriteLogger};
 use syslog::{Facility, Formatter3164};
 
 mod backup;
@@ -25,7 +23,7 @@ use crate::{
     backup::{backup, delete, prune_archives},
     build::build,
     config::{ConfAction, load_config, run_conf},
-    fetch::{fetch, FetchMode},
+    fetch::{FetchMode, fetch},
 };
 
 #[derive(Parser)]
@@ -73,11 +71,13 @@ enum Commands {
         #[arg(short, long)]
         force: bool,
 
-        /// Use legacy MaxMind-compatible continent mappings (EU/AS) instead of O1
+        /// Use legacy MaxMind-compatible continent mappings (EU/AS) instead of
+        /// O1
         #[arg(
             short = 'l',
             long,
-            help = "Enable legacy MaxMind-compatible continent mappings (e.g. EU/AS) instead of O1"
+            help = "Enable legacy MaxMind-compatible continent mappings (e.g. \
+                    EU/AS) instead of O1"
         )]
         legacy: bool,
     },
@@ -103,7 +103,10 @@ enum Commands {
 /// Warn user if legacy mode is enabled
 fn warn_legacy_mode(legacy: bool) {
     if legacy {
-        log_print("Warning: Legacy Mode activated. See documentation for collisions.", log::Level::Warn);
+        log_print(
+            "Warning: Legacy Mode activated. See documentation for collisions.",
+            log::Level::Warn,
+        );
     }
 }
 
@@ -125,13 +128,11 @@ fn init_logging(log_file: &str) -> anyhow::Result<()> {
         .write(true)
         .open(log_file)?;
 
-    CombinedLogger::init(vec![
-        WriteLogger::new(
-            LevelFilter::Info,
-            Config::default(),
-            file,
-        ),
-    ])?;
+    CombinedLogger::init(vec![WriteLogger::new(
+        LevelFilter::Info,
+        Config::default(),
+        file,
+    )])?;
 
     Ok(())
 }
@@ -184,12 +185,18 @@ fn main() -> Result<()> {
 
     // Enforce flag rules
     if cli.force && !(cli.backup || cli.clean) {
-        log_print("Error: --force only applies to --backup or --clean", log::Level::Error);
+        log_print(
+            "Error: --force only applies to --backup or --clean",
+            log::Level::Error,
+        );
         std::process::exit(1);
     }
 
     if cli.prune && !cli.backup {
-        log_print("Error: --prune requires --backup at top-level", log::Level::Error);
+        log_print(
+            "Error: --prune requires --backup at top-level",
+            log::Level::Error,
+        );
         std::process::exit(1);
     }
 
