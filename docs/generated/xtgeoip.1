@@ -9,6 +9,9 @@ Build xt_geoip data from the local CSV copy.
 xtgeoip build
 build using local copy of database
 .TP
+xtgeoip build -l
+build using local copy of database in legacy mode
+.TP
 xtgeoip build -b -p
 backup, prune backups, then build
 .TP
@@ -23,6 +26,20 @@ backup, prune backups, clean, then build
 .TP
 xtgeoip build -b -c -p -f
 {{ AMBIGUOUS_FORCE_PRUNE }}
+.SH CONF
+Configuration operations.
+.TP
+xtgeoip conf
+{{ MISSING_REQUIRED_ARGUMENT }}
+.TP
+xtgeoip conf -s
+show current config
+.TP
+xtgeoip conf -d
+show default config
+.TP
+xtgeoip conf -e
+edit config
 .SH FETCH
 Download or refresh the local MaxMind CSV archive set.
 .TP
@@ -32,6 +49,9 @@ fetch CSVs
 xtgeoip fetch -p
 fetch CSVs, then prune CSVs
 .TP
+xtgeoip fetch -l
+{{ INVALID_FLAG }}
+.TP
 xtgeoip fetch -b
 {{ INVALID_FLAG }}
 .SH RUN
@@ -39,6 +59,9 @@ Fetch, then build, optionally wrapping with backup/clean/prune.
 .TP
 xtgeoip run
 fetch, then build
+.TP
+xtgeoip run -l
+fetch, then build in legacy mode
 .TP
 xtgeoip run -p
 fetch, then prune CSVs, then build
@@ -54,8 +77,3 @@ xtgeoip run -c -p -f
 .TP
 xtgeoip run -b -c -p
 {{ AMBIGUOUS_PRUNE_TARGET }}
-.SH SHOW
-Display current configuration and relevant paths.
-.TP
-xtgeoip show
-show configured paths and status
