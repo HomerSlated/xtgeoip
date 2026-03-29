@@ -125,7 +125,7 @@ fn init_logging(log_file: &str) -> anyhow::Result<()> {
     let file = OpenOptions::new()
         .create(true)
         .append(true)
-        .write(true)
+        
         .open(log_file)?;
 
     CombinedLogger::init(vec![WriteLogger::new(
