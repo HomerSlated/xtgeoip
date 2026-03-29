@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use log::{info, warn, error};
 use anyhow::{Context, Result, anyhow, bail};
 use flate2::{Compression, write::GzEncoder};
 use glob::glob;
@@ -169,7 +170,7 @@ pub fn backup(data_dir: &Path, backup_dir: &Path, force: bool) -> Result<()> {
             version
         ));
         create_tarball(&output_path, &files)?;
-        println!(
+        info!(
             "Backed up unverified binary data to {}",
             output_path.display()
         );
@@ -192,7 +193,7 @@ pub fn backup(data_dir: &Path, backup_dir: &Path, force: bool) -> Result<()> {
     let output_path =
         backup_dir.join(format!("GeoLite2-Country-bin_{}.tar.gz", version));
     create_tarball(&output_path, &files)?;
-    println!("Backed up binary data to {}", output_path.display());
+    info!("Backed up binary data to {}", output_path.display());
 
     Ok(())
 }
@@ -216,7 +217,7 @@ pub fn delete(data_dir: &Path, force: bool) -> Result<()> {
             fs::remove_file(orphan_path)?;
         }
 
-        println!(
+        info!(
             "Force deleted binary data files from {}",
             data_dir.display()
         );
@@ -238,7 +239,7 @@ pub fn delete(data_dir: &Path, force: bool) -> Result<()> {
     fs::remove_file(version_path(data_dir))?;
     fs::remove_file(manifest_path)?;
 
-    println!("Deleted old binary data files from {}", data_dir.display());
+    info!("Deleted old binary data files from {}", data_dir.display());
     Ok(())
 }
 
@@ -309,11 +310,11 @@ pub fn prune_archives(
 
 fn print_prune_summary(summary: &PruneSummary) {
     match (summary.csv_removed, summary.bin_removed) {
-        (0, 0) => println!("No archives needed pruning."),
-        (c, 0) => println!("Pruned {c} old CSV archives."),
-        (0, b) => println!("Pruned {b} old bin archives."),
+        (0, 0) => info!("No archives needed pruning."),
+        (c, 0) => info!("Pruned {c} old CSV archives."),
+        (0, b) => info!("Pruned {b} old bin archives."),
         (c, b) => {
-            println!("Pruned {c} old CSV archives and {b} old bin archives.")
+            info!("Pruned {c} old CSV archives and {b} old bin archives.")
         }
     }
 }

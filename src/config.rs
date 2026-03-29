@@ -37,7 +37,6 @@ pub enum ConfAction {
     Show,
     Edit,
     Default,
-    Help,
 }
 
 /// Prompt user to create system config if missing (used for `-s` or `-e`)
@@ -97,26 +96,8 @@ pub fn run_conf(action: ConfAction) -> Result<()> {
                 .status()
                 .context("Failed to launch editor")?;
         }
-        ConfAction::Help => {
-            print_usage();
-        }
     }
-
     Ok(())
-}
-
-/// Parses the flag provided to `xtgeoip conf`
-/// Default behavior (no flag) is display help
-pub fn parse_conf_flag(flag: Option<&str>) -> Result<ConfAction, String> {
-    match flag {
-        Some("-d") | Some("--default") => Ok(ConfAction::Default),
-        Some("-s") | Some("--show") => Ok(ConfAction::Show),
-        Some("-e") | Some("--edit") => Ok(ConfAction::Edit),
-        Some("-h") | Some("--help") | None => Ok(ConfAction::Help),
-        Some(other) => Err(format!(
-            "Unsupported flag '{other}'\nUsage: xtgeoip conf [-d|-s|-e|-h]"
-        )),
-    }
 }
 
 /// Load the TOML configuration into a Config struct
@@ -140,11 +121,3 @@ pub fn load_config() -> Result<Config> {
     Ok(cfg)
 }
 
-/// Simple usage message
-fn print_usage() {
-    println!("Usage: xtgeoip conf [-d|-s|-e|-h]");
-    println!("  -d, --default   Show default configuration");
-    println!("  -s, --show      Show current configuration (default)");
-    println!("  -e, --edit      Edit current configuration in $EDITOR");
-    println!("  -h, --help      Show this help message");
-}
