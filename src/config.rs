@@ -126,4 +126,3 @@ pub fn load_config() -> Result<Config> {
 
     Ok(cfg)
 }
-

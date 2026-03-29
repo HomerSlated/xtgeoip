@@ -83,8 +83,14 @@ fn main() -> anyhow::Result<()> {
     fs::write("docs/generated/tldr.md", generate_tldr_md(&spec)?)?;
     fs::write("docs/generated/scd", generate_scd(&spec)?)?;
     fs::write("docs/generated/xtgeoip.1", generate_manpage(&spec)?)?;
-    fs::write("src/generated/error_text.rs", generate_error_text_rs(&spec)?)?;
-    fs::write("src/generated/cli_matrix.rs", generate_cli_matrix_rs(&spec)?)?;
+    fs::write(
+        "src/generated/error_text.rs",
+        generate_error_text_rs(&spec)?,
+    )?;
+    fs::write(
+        "src/generated/cli_matrix.rs",
+        generate_cli_matrix_rs(&spec)?,
+    )?;
 
     println!("Documentation and generated code updated successfully.");
     Ok(())
@@ -94,7 +100,8 @@ fn main() -> anyhow::Result<()> {
 fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
     for cmd in spec.commands.values() {
         match cmd {
-            CommandSpec::FlagCommand { examples, .. } | CommandSpec::SelectorCommand { examples, .. } => {
+            CommandSpec::FlagCommand { examples, .. }
+            | CommandSpec::SelectorCommand { examples, .. } => {
                 for ex in examples {
                     if let Some(reason) = &ex.reason
                         && !spec.reason_templates.contains_key(&reason.code)
@@ -114,11 +121,14 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
 
 /// Generate usage.md
 fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
-    let mut out = format!("# {}\n\n{}\n\n", spec.meta.program, spec.meta.summary);
+    let mut out =
+        format!("# {}\n\n{}\n\n", spec.meta.program, spec.meta.summary);
 
     for (cmd_name, cmd) in &spec.commands {
         match cmd {
-            CommandSpec::FlagCommand { summary, examples, .. } => {
+            CommandSpec::FlagCommand {
+                summary, examples, ..
+            } => {
                 out.push_str(&format!("## {}\n{}\n\n", cmd_name, summary));
                 for ex in examples {
                     let outcome = if ex.valid {
@@ -132,8 +142,16 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
                 }
                 out.push('\n');
             }
-            CommandSpec::SelectorCommand { summary, usage, examples, .. } => {
-                out.push_str(&format!("## {}\n{}\nUsage: {}\n\n", cmd_name, summary, usage));
+            CommandSpec::SelectorCommand {
+                summary,
+                usage,
+                examples,
+                ..
+            } => {
+                out.push_str(&format!(
+                    "## {}\n{}\nUsage: {}\n\n",
+                    cmd_name, summary, usage
+                ));
                 for ex in examples {
                     let outcome = if ex.valid {
                         ex.outcome.clone().unwrap_or_default()
@@ -154,15 +172,20 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
 
 /// Generate TLDR Markdown
 fn generate_tldr_md(spec: &Spec) -> anyhow::Result<String> {
-    let mut out = format!("# {}\n\n> {}\n\n", spec.meta.program, spec.meta.summary);
+    let mut out =
+        format!("# {}\n\n> {}\n\n", spec.meta.program, spec.meta.summary);
 
     for cmd in spec.commands.values() {
         match cmd {
-            CommandSpec::FlagCommand { examples, .. } | CommandSpec::SelectorCommand { examples, .. } => {
+            CommandSpec::FlagCommand { examples, .. }
+            | CommandSpec::SelectorCommand { examples, .. } => {
                 for ex in examples {
                     if ex.valid {
                         let outcome = ex.outcome.clone().unwrap_or_default();
-                        out.push_str(&format!("- {}:\n\n`{}`\n\n", outcome, ex.cmd));
+                        out.push_str(&format!(
+                            "- {}:\n\n`{}`\n\n",
+                            outcome, ex.cmd
+                        ));
                     }
                 }
             }
@@ -178,12 +201,26 @@ fn generate_scd(spec: &Spec) -> anyhow::Result<String> {
 
     for (cmd_name, cmd) in &spec.commands {
         match cmd {
-            CommandSpec::FlagCommand { summary, allowed_flags, .. } => {
-                out.push_str(&format!("Command: {}\nSummary: {}\nFlags: {:?}\n\n", cmd_name, summary, allowed_flags));
-            }
-            CommandSpec::SelectorCommand { summary, usage, positional, constraints, .. } => {
+            CommandSpec::FlagCommand {
+                summary,
+                allowed_flags,
+                ..
+            } => {
                 out.push_str(&format!(
-                    "Command: {}\nSummary: {}\nUsage: {}\nPositional: {:?}\nConstraints: {:?}\n\n",
+                    "Command: {}\nSummary: {}\nFlags: {:?}\n\n",
+                    cmd_name, summary, allowed_flags
+                ));
+            }
+            CommandSpec::SelectorCommand {
+                summary,
+                usage,
+                positional,
+                constraints,
+                ..
+            } => {
+                out.push_str(&format!(
+                    "Command: {}\nSummary: {}\nUsage: {}\nPositional: \
+                     {:?}\nConstraints: {:?}\n\n",
                     cmd_name, summary, usage, positional.name, constraints
                 ));
             }
@@ -208,16 +245,20 @@ fn generate_error_text_rs(spec: &Spec) -> anyhow::Result<String> {
 
 /// Generate cli_matrix.rs and a tiny test module
 fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
-    let mut out = "pub struct CliExample { pub cmd: &'static str, pub valid: bool, pub outcome: &'static str }\n".to_string();
+    let mut out = "pub struct CliExample { pub cmd: &'static str, pub valid: \
+                   bool, pub outcome: &'static str }\n"
+        .to_string();
     out.push_str("pub const CLI_MATRIX: &[CliExample] = &[\n");
 
     for cmd in spec.commands.values() {
         match cmd {
-            CommandSpec::FlagCommand { examples, .. } | CommandSpec::SelectorCommand { examples, .. } => {
+            CommandSpec::FlagCommand { examples, .. }
+            | CommandSpec::SelectorCommand { examples, .. } => {
                 for ex in examples {
                     let outcome = ex.outcome.clone().unwrap_or_default();
                     out.push_str(&format!(
-                        "    CliExample {{ cmd: \"{}\", valid: {}, outcome: \"{}\" }},\n",
+                        "    CliExample {{ cmd: \"{}\", valid: {}, outcome: \
+                         \"{}\" }},\n",
                         ex.cmd, ex.valid, outcome
                     ));
                 }
@@ -226,16 +267,19 @@ fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
     }
 
     out.push_str("];\n\n");
-    out.push_str("#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn test_matrix() {\n        assert!(!CLI_MATRIX.is_empty());\n    }\n}\n");
+    out.push_str(
+        "#[cfg(test)]\nmod tests {\n    use super::*;\n    #[test]\n    fn \
+         test_matrix() {\n        assert!(!CLI_MATRIX.is_empty());\n    }\n}\n",
+    );
 
     Ok(out)
 }
 
 fn render_reason(spec: &Spec, reason: &Reason) -> anyhow::Result<String> {
-    let template = spec
-        .reason_templates
-        .get(&reason.code)
-        .ok_or_else(|| anyhow::anyhow!("Unknown reason code: {}", reason.code))?;
+    let template =
+        spec.reason_templates.get(&reason.code).ok_or_else(|| {
+            anyhow::anyhow!("Unknown reason code: {}", reason.code)
+        })?;
 
     let mut text = template.text.clone();
 
@@ -266,8 +310,14 @@ fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
 
     for (cmd_name, cmd) in &spec.commands {
         match cmd {
-            CommandSpec::FlagCommand { summary, examples, .. } => {
-                out.push_str(&format!(".SH {}\n{}\n", cmd_name.to_uppercase(), summary));
+            CommandSpec::FlagCommand {
+                summary, examples, ..
+            } => {
+                out.push_str(&format!(
+                    ".SH {}\n{}\n",
+                    cmd_name.to_uppercase(),
+                    summary
+                ));
                 for ex in examples {
                     let outcome = if ex.valid {
                         ex.outcome.clone().unwrap_or_default()
@@ -282,8 +332,18 @@ fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
                     }
                 }
             }
-            CommandSpec::SelectorCommand { summary, usage, examples, .. } => {
-                out.push_str(&format!(".SH {}\n{}\nUsage: {}\n", cmd_name.to_uppercase(), summary, usage));
+            CommandSpec::SelectorCommand {
+                summary,
+                usage,
+                examples,
+                ..
+            } => {
+                out.push_str(&format!(
+                    ".SH {}\n{}\nUsage: {}\n",
+                    cmd_name.to_uppercase(),
+                    summary,
+                    usage
+                ));
                 for ex in examples {
                     let outcome = if ex.valid {
                         ex.outcome.clone().unwrap_or_default()
