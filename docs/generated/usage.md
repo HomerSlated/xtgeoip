@@ -15,6 +15,7 @@ Build xt_geoip data from the local CSV copy.
 
 ## conf
 Configuration operations.
+Usage: xtgeoip conf <FLAG>
 
 - `xtgeoip conf` → (missing_required_argument)
 - `xtgeoip conf -s` → show current config

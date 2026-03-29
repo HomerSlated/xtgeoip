@@ -51,35 +51,31 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Fetch CSV archive and build binary data
     Run {
-        /// Prune old CSV archives
         #[arg(short, long)]
         prune: bool,
+
+        /// Use legacy mode
+        #[arg(short = 'l', long)]
+        legacy: bool,
     },
-    /// Build binary data from latest local CSV archive
     Build {
-        /// Backup existing binary files
         #[arg(short, long)]
         backup: bool,
-
-        /// Delete existing binary files
         #[arg(short, long)]
         clean: bool,
-
-        /// Force backup and/or clean without verification
         #[arg(short, long)]
         force: bool,
+
+        /// Use legacy mode
+        #[arg(short = 'l', long)]
+        legacy: bool,
     },
-    /// Fetch CSV archive only
     Fetch {
-        /// Prune old CSV archives
         #[arg(short, long)]
         prune: bool,
     },
-    /// Configuration operations (-d/-s/-e/-h)
     Conf {
-        /// Configuration flag
         #[arg(value_name = "FLAG", allow_hyphen_values = true)]
         flag: String,
     },
@@ -117,12 +113,13 @@ fn main() -> Result<()> {
 
     // Handle subcommands
     match &cli.command {
-        Some(Commands::Run { prune }) => {
+        Some(Commands::Run { prune, legacy }) => {
             let (temp_dir, version) = fetch(&cfg, FetchMode::Remote)?;
             build::build(
                 temp_dir.path(),
                 Path::new(&cfg.paths.output_dir),
                 &version,
+                *legacy,
             )?;
             if *prune {
                 prune_archives(&cfg, true, false)?;
@@ -132,12 +129,14 @@ fn main() -> Result<()> {
             backup: do_backup,
             clean: do_clean,
             force: do_force,
+            legacy,
         }) => {
             let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
             build::build(
                 temp_dir.path(),
                 Path::new(&cfg.paths.output_dir),
                 &version,
+                *legacy,
             )?;
             if *do_backup {
                 backup(
