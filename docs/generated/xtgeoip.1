@@ -1,0 +1,61 @@
+.TH XTGEOIP 1 "" "xtgeoip 2" "User Commands"
+.SH NAME
+xtgeoip
+	Build and manage xt_geoip data from MaxMind GeoLite2 CSVs.
+
+.SH BUILD
+Build xt_geoip data from the local CSV copy.
+.TP
+xtgeoip build
+build using local copy of database
+.TP
+xtgeoip build -b -p
+backup, prune backups, then build
+.TP
+xtgeoip build -p
+{{ NO_PRUNE_HERE }}
+.TP
+xtgeoip build -c -f
+clean using manifest, then build using local copy of database
+.TP
+xtgeoip build -b -c -p
+backup, prune backups, clean, then build
+.TP
+xtgeoip build -b -c -p -f
+{{ AMBIGUOUS_FORCE_PRUNE }}
+.SH FETCH
+Download or refresh the local MaxMind CSV archive set.
+.TP
+xtgeoip fetch
+fetch CSVs
+.TP
+xtgeoip fetch -p
+fetch CSVs, then prune CSVs
+.TP
+xtgeoip fetch -b
+{{ INVALID_FLAG }}
+.SH RUN
+Fetch, then build, optionally wrapping with backup/clean/prune.
+.TP
+xtgeoip run
+fetch, then build
+.TP
+xtgeoip run -p
+fetch, then prune CSVs, then build
+.TP
+xtgeoip run -c -p
+clean using manifest, then fetch, then prune CSVs, then build
+.TP
+xtgeoip run -c -f
+force clean without manifest, then fetch, then build
+.TP
+xtgeoip run -c -p -f
+{{ AMBIGUOUS_FORCE_PRUNE }}
+.TP
+xtgeoip run -b -c -p
+{{ AMBIGUOUS_PRUNE_TARGET }}
+.SH SHOW
+Display current configuration and relevant paths.
+.TP
+xtgeoip show
+show configured paths and status
