@@ -21,10 +21,10 @@ flags:
     long: force
     kind: bool
     summary: Force the relevant operation when supported.
-  s:
-    long: show
+  l:
+    long: legacy
     kind: bool
-    summary: Show configured paths and status.
+    summary: Enable legacy mode.
 
 reason_templates:
   ok:
@@ -41,9 +41,12 @@ reason_templates:
     text: "unsupported option, ambiguous and prune does not support force"
   ambiguous_prune_target:
     text: "unsupported option, ambiguous (does prune apply to {left} or {right}?)"
+  missing_required_argument:
+    text: "missing required argument, {command} requires {argument}"
 
 commands:
   fetch:
+    kind: flag_command
     summary: Download or refresh the local MaxMind CSV archive set.
     allowed_flags: [p]
     examples:
@@ -53,6 +56,11 @@ commands:
       - cmd: "xtgeoip fetch -p"
         outcome: "fetch CSVs, then prune CSVs"
         valid: true
+      - cmd: "xtgeoip fetch -l"
+        valid: false
+        reason:
+          code: invalid_flag
+          args: { flag: "l", command: "fetch" }
       - cmd: "xtgeoip fetch -b"
         valid: false
         reason:
@@ -60,11 +68,15 @@ commands:
           args: { flag: "b", command: "fetch" }
 
   build:
+    kind: flag_command
     summary: Build xt_geoip data from the local CSV copy.
-    allowed_flags: [b, c, p, f]
+    allowed_flags: [b, c, p, f, l]
     examples:
       - cmd: "xtgeoip build"
         outcome: "build using local copy of database"
+        valid: true
+      - cmd: "xtgeoip build -l"
+        outcome: "build using local copy of database in legacy mode"
         valid: true
       - cmd: "xtgeoip build -b -p"
         outcome: "backup, prune backups, then build"
@@ -86,11 +98,15 @@ commands:
           code: ambiguous_force_prune
 
   run:
+    kind: flag_command
     summary: Fetch, then build, optionally wrapping with backup/clean/prune.
-    allowed_flags: [b, c, p, f]
+    allowed_flags: [b, c, p, f, l]
     examples:
       - cmd: "xtgeoip run"
         outcome: "fetch, then build"
+        valid: true
+      - cmd: "xtgeoip run -l"
+        outcome: "fetch, then build in legacy mode"
         valid: true
       - cmd: "xtgeoip run -p"
         outcome: "fetch, then prune CSVs, then build"
@@ -111,10 +127,34 @@ commands:
           code: ambiguous_prune_target
           args: { left: "fetch", right: "backup" }
 
-  show:
-    summary: Display current configuration and relevant paths.
-    allowed_flags: []
+  conf:
+    kind: selector_command
+    summary: Configuration operations.
+    usage: "xtgeoip conf <FLAG>"
+    positional:
+      name: FLAG
+      required: true
+      choices:
+        d:
+          summary: Show default configuration.
+        s:
+          summary: Show current configuration.
+        e:
+          summary: Edit configuration.
+    constraints:
+      exactly_one_positional: true
     examples:
-      - cmd: "xtgeoip show"
-        outcome: "show configured paths and status"
+      - cmd: "xtgeoip conf"
+        valid: false
+        reason:
+          code: missing_required_argument
+          args: { argument: "FLAG", command: "conf" }
+      - cmd: "xtgeoip conf -s"
+        outcome: "show current config"
+        valid: true
+      - cmd: "xtgeoip conf -d"
+        outcome: "show default config"
+        valid: true
+      - cmd: "xtgeoip conf -e"
+        outcome: "edit config"
         valid: true
