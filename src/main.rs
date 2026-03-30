@@ -25,7 +25,7 @@ use crate::{
     build::build,
     config::{ConfAction, load_config, run_conf},
     fetch::{FetchMode, fetch},
-    messages::log_print,
+    messages::{log_print, info, warn, error},
 };
 
 #[derive(Parser)]
@@ -105,10 +105,7 @@ enum Commands {
 /// Warn user if legacy mode is enabled
 fn warn_legacy_mode(legacy: bool) {
     if legacy {
-        log_print(
-            "Warning: Legacy Mode activated. See documentation for collisions.",
-            log::Level::Warn,
-        );
+        warn("Warning: Legacy Mode activated. See documentation for collisions.");
     }
 }
 
