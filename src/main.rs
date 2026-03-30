@@ -139,16 +139,6 @@ fn init_logging(log_file: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn log_print(msg: &str, level: log::Level) {
-    // Always print to stdout/stderr
-    match level {
-        log::Level::Error | log::Level::Warn => eprintln!("{}", msg),
-        _ => println!("{}", msg),
-    }
-    // Only log if logger initialized
-    log::log!(level, "{}", msg);
-}
-
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
