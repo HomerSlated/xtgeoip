@@ -124,17 +124,14 @@ fn log_config_failure(msg: &str) {
 }
 
 fn init_logging(log_file: &str) -> Result<()> {
-    // Create a ConfigBuilder
     let mut config_builder = ConfigBuilder::new();
 
-    // Use Rfc3339 timestamps
-    let rfc3339_format = Rfc3339.format_description(); // &[FormatItem<'_>]
-    config_builder.set_time_format_custom(rfc3339_format);
+    // Rfc3339 is already &[FormatItem<'_>], so just pass it
+    config_builder.set_time_format_custom(Rfc3339);
     config_builder
         .set_time_offset_to_local()
         .map_err(|_| anyhow::anyhow!("Failed to set time offset to local"))?;
 
-    // Build the logger
     CombinedLogger::init(vec![
         WriteLogger::new(
             LevelFilter::Info,
