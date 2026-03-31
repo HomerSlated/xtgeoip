@@ -1,19 +1,17 @@
+use std::fs::OpenOptions;
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 ///
 /// Downloads, extracts, and converts GeoIP CSV databases into binary IP
 /// range data files, compatible with the Linux x_tables xt_geoip module,
 /// which can filter packets based on GeoIP country labels.
 ///
-/// Inspired by xtgeoip_build_maxmind (Jan Engelhardt, Philip
+/// Inspired by xt_geoip_build_maxmind (Jan Engelhardt, Philip
 /// Prindeville), now part of Debian's xtables-addons package.
 use std::path::Path;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
-
-use flexi_logger::{Logger, Age, Cleanup, Criterion, Naming, FileSpec};
-use log::{info, warn, error};
-
+use simplelog::{CombinedLogger, Config, LevelFilter, WriteLogger};
 use syslog::{Facility, Formatter3164};
 
 mod backup;
@@ -27,7 +25,7 @@ use crate::{
     build::build,
     config::{ConfAction, load_config, run_conf},
     fetch::{FetchMode, fetch},
-    messages::{log_print, warn as msg_warn},
+    messages::{log_print, warn},
 };
 
 #[derive(Parser)]
@@ -37,15 +35,19 @@ use crate::{
     about = "Downloads and builds GeoIP databases"
 )]
 struct Cli {
+    /// Backup existing binary files
     #[arg(short, long)]
     backup: bool,
 
+    /// Delete existing binary files
     #[arg(short, long)]
     clean: bool,
 
+    /// Force backup and/or clean without verification
     #[arg(short, long)]
     force: bool,
 
+    /// Prune old binary archives (requires backup)
     #[arg(short, long)]
     prune: bool,
 
@@ -58,6 +60,8 @@ enum Commands {
     Run {
         #[arg(short, long)]
         prune: bool,
+
+        /// Use legacy mode
         #[arg(short = 'l', long)]
         legacy: bool,
     },
@@ -68,10 +72,14 @@ enum Commands {
         clean: bool,
         #[arg(short, long)]
         force: bool,
+
+        /// Use legacy MaxMind-compatible continent mappings (EU/AS) instead of
+        /// O1
         #[arg(
             short = 'l',
             long,
-            help = "Enable legacy MaxMind-compatible continent mappings (e.g. EU/AS) instead of O1"
+            help = "Enable legacy MaxMind-compatible continent mappings (e.g. \
+                    EU/AS) instead of O1"
         )]
         legacy: bool,
     },
@@ -97,7 +105,7 @@ enum Commands {
 /// Warn user if legacy mode is enabled
 fn warn_legacy_mode(legacy: bool) {
     if legacy {
-        msg_warn("Warning: Legacy Mode activated. See documentation for collisions.");
+        warn("Warning: Legacy Mode activated. See documentation for collisions.");
     }
 }
 
@@ -108,45 +116,30 @@ fn log_config_failure(msg: &str) {
         process: "xtgeoip".into(),
         pid: 0,
     }) {
-        let _ = logger.err(msg);
+        let _ = logger.err(msg); // send as error priority
     }
 }
 
-pub fn init_logging(log_file: &str) -> Result<()> {
-    Logger::try_with_str("info")? // log level filter
-        .log_to_file(FileSpec::try_from(log_file)?)
-        .format_for_files(flexi_logger::detailed_format) // includes date/time
-        .duplicate_to_stdout(flexi_logger::Duplicate::Info)
-        .rotate(
-            Criterion::Age(Age::Day),
-            Naming::Numbers,
-            Cleanup::KeepLogFiles(7),
-        )
-        .start()?; // start logger
+fn init_logging(log_file: &str) -> anyhow::Result<()> {
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        
+        .open(log_file)?;
 
-    info!("Logging initialized");
+    CombinedLogger::init(vec![WriteLogger::new(
+        LevelFilter::Info,
+        Config::default(),
+        file,
+    )])?;
+
     Ok(())
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Load system configuration early to get log_file path
-    let cfg = match load_config() {
-        Ok(c) => c,
-        Err(e) => {
-            log_config_failure(&format!("Failed to load config: {}", e));
-            eprintln!("Fatal: Failed to load config: {}", e);
-            std::process::exit(1);
-        }
-    };
-
-    // Initialize logging before anything else
-    if let Some(log_file) = cfg.logging.as_ref().map(|l| l.log_file.as_str()) {
-        init_logging(log_file)?;
-    }
-
-    // Handle `xtgeoip conf` subcommand before anything else
+    // Handle `xtgeoip conf` subcommand before loading config
     if let Some(Commands::Conf {
         default,
         show,
@@ -164,18 +157,39 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // Load system configuration
+    let cfg = match load_config() {
+        Ok(c) => c,
+        Err(e) => {
+            log_config_failure(&format!("Failed to load config: {}", e));
+            eprintln!("Fatal: Failed to load config: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    // Initialize file-based logging for all normal operations
+    if let Some(log_file) = cfg.logging.as_ref().map(|l| l.log_file.as_str()) {
+        init_logging(log_file)?;
+    }
+
     // Enforce flag rules
     if cli.force && !(cli.backup || cli.clean) {
-        error!("--force only applies to --backup or --clean");
+        log_print(
+            "Error: --force only applies to --backup or --clean",
+            log::Level::Error,
+        );
         std::process::exit(1);
     }
 
     if cli.prune && !cli.backup {
-        error!("--prune requires --backup at top-level");
+        log_print(
+            "Error: --prune requires --backup at top-level",
+            log::Level::Error,
+        );
         std::process::exit(1);
     }
 
-    // Handle top-level flags
+    // Handle top-level flags (backup/clean/prune)
     if cli.backup {
         backup(
             Path::new(&cfg.paths.output_dir),
@@ -243,7 +257,7 @@ fn main() -> Result<()> {
                 std::process::exit(1);
             }
         }
-        Some(Commands::Conf { .. }) => unreachable!(),
+        Some(Commands::Conf { .. }) => unreachable!(), // already handled above
     }
 
     Ok(())
