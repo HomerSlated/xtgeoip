@@ -105,7 +105,9 @@ enum Commands {
 /// Warn user if legacy mode is enabled
 fn warn_legacy_mode(legacy: bool) {
     if legacy {
-        warn("Warning: Legacy Mode activated. See documentation for collisions.");
+        warn(
+            "Warning: Legacy Mode activated. See documentation for collisions.",
+        );
     }
 }
 
@@ -124,7 +126,6 @@ fn init_logging(log_file: &str) -> anyhow::Result<()> {
     let file = OpenOptions::new()
         .create(true)
         .append(true)
-        
         .open(log_file)?;
 
     CombinedLogger::init(vec![WriteLogger::new(
