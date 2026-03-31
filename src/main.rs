@@ -13,8 +13,8 @@ use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 
 use simplelog::{CombinedLogger, ConfigBuilder, LevelFilter, WriteLogger};
-use time::format_description::well_known::Rfc3339;
 use std::fs::OpenOptions;
+use time::format_description::well_known::Rfc3339;
 
 use syslog::{Facility, Formatter3164};
 
@@ -124,26 +124,17 @@ fn log_config_failure(msg: &str) {
     }
 }
 
-use simplelog::{CombinedLogger, ConfigBuilder, LevelFilter, WriteLogger};
-use time::format_description::well_known::Rfc3339;
-use std::fs::OpenOptions;
-
 fn init_logging(log_file: &str) -> anyhow::Result<()> {
     let file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(log_file)?;
 
-    let mut config = ConfigBuilder::new();
-    
-    // Use Rfc3339 format (ISO-8601)
-    let rfc3339_format = Rfc3339.format_description();
-    config.set_time_format_custom(rfc3339_format)?;
-    
-    // Make timestamps local instead of UTC
-    config.set_time_offset_to_local()?;
-
-    let config = config.build();
+    // Build the config
+    let config = ConfigBuilder::new()
+        .set_time_format_custom(Rfc3339) // already &'static [FormatItem]
+        .set_time_offset_to_local()       // timestamps use local offset
+        .build();
 
     CombinedLogger::init(vec![WriteLogger::new(
         LevelFilter::Info,
