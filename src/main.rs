@@ -11,7 +11,10 @@ use std::path::Path;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
-use simplelog::{CombinedLogger, Config, LevelFilter, WriteLogger};
+use simplelog::{
+    format_description, CombinedLogger, ConfigBuilder, LevelFilter,
+    WriteLogger,
+};
 use syslog::{Facility, Formatter3164};
 
 mod backup;
@@ -25,7 +28,7 @@ use crate::{
     build::build,
     config::{ConfAction, load_config, run_conf},
     fetch::{FetchMode, fetch},
-    messages::{log_print, info, warn, error},
+    messages::{log_print, warn},
 };
 
 #[derive(Parser)]
@@ -124,12 +127,21 @@ fn init_logging(log_file: &str) -> anyhow::Result<()> {
     let file = OpenOptions::new()
         .create(true)
         .append(true)
-        
         .open(log_file)?;
+
+    let time_format = format_description!(
+        "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:6][offset_hour sign:mandatory]:[offset_minute]"
+    );
+
+    let config = ConfigBuilder::new()
+        .set_time_offset_to_local()
+        .map_err(|_| anyhow::anyhow!("Failed to determine local time offset"))?
+        .set_time_format_custom(time_format)
+        .build();
 
     CombinedLogger::init(vec![WriteLogger::new(
         LevelFilter::Info,
-        Config::default(),
+        config,
         file,
     )])?;
 
