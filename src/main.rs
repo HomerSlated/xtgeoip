@@ -123,17 +123,34 @@ fn log_config_failure(msg: &str) {
     }
 }
 
+use simplelog::{CombinedLogger, ConfigBuilder, LevelFilter, WriteLogger};
+use std::fs::OpenOptions;
+use time::format_description::FormatItem;
+use time::macros::format_description;
+
 fn init_logging(log_file: &str) -> anyhow::Result<()> {
     let file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(log_file)?;
 
-    // Build the config
-    let config = ConfigBuilder::new()
-        .set_time_format_custom(Rfc3339) // already &'static [FormatItem]
-        .set_time_offset_to_local()       // timestamps use local offset
-        .build();
+    // Define ISO-8601 / syslog style timestamp with local offset
+    let time_format: &[FormatItem] = format_description!(
+        "[year]-[month]-[day]T[hour]:[minute]:[second][offset_hour sign:mandatory]:[offset_minute]"
+    );
+
+    let mut config_builder = ConfigBuilder::new();
+
+    // This returns Result<&mut ConfigBuilder, &mut ConfigBuilder>
+    let config_builder = config_builder
+        .set_time_format_custom(time_format)
+        .map_err(|_| anyhow::anyhow!("Failed to set custom time format"))?;
+
+    let config_builder = config_builder
+        .set_time_offset_to_local()
+        .map_err(|_| anyhow::anyhow!("Failed to set local time offset"))?;
+
+    let config = config_builder.build();
 
     CombinedLogger::init(vec![WriteLogger::new(
         LevelFilter::Info,
