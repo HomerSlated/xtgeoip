@@ -13,7 +13,8 @@ use clap::{CommandFactory, Parser, Subcommand};
 
 use simplelog::{CombinedLogger, ConfigBuilder, LevelFilter, WriteLogger};
 use std::fs::OpenOptions;
-use time::format_description::well_known::Rfc3339;
+use time::format_description::FormatItem;
+use time::macros::format_description;
 
 use syslog::{Facility, Formatter3164};
 
@@ -122,11 +123,6 @@ fn log_config_failure(msg: &str) {
         let _ = logger.err(msg); // send as error priority
     }
 }
-
-use simplelog::{CombinedLogger, ConfigBuilder, LevelFilter, WriteLogger};
-use std::fs::OpenOptions;
-use time::format_description::FormatItem;
-use time::macros::format_description;
 
 fn init_logging(log_file: &str) -> anyhow::Result<()> {
     let file = OpenOptions::new()
