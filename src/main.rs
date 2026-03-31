@@ -11,9 +11,8 @@ use std::path::Path;
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 
-use std::fs::OpenOptions;
-use simplelog::{CombinedLogger, ConfigBuilder, LevelFilter, WriteLogger};
-use time::format_description::well_known::Rfc3339;
+use flexi_logger::{Logger, Age, Cleanup, Criterion, Naming, FileSpec};
+use log::{info, warn, error};
 
 use syslog::{Facility, Formatter3164};
 
@@ -123,25 +122,21 @@ fn log_config_failure(msg: &str) {
     }
 }
 
-fn init_logging(log_file: &str) -> Result<()> {
-    let mut config_builder = ConfigBuilder::new();
+pub fn init_logging(log_file: &str) -> Result<()> {
+    Logger::try_with_str("info")?               // log level filter
+        .log_to_file(
+            FileSpec::try_from(log_file)?       // path to log file
+        )
+        .format_for_files(flexi_logger::detailed_format) // includes full date/time
+        .duplicate_to_stdout(flexi_logger::Duplicate::Info) // optional: also print INFO+ to stdout
+        .rotate(
+            Criterion::Age(Age::Day),           // rotate daily
+            Naming::Numbers,                    // name rotated files with numbers
+            Cleanup::KeepLogFiles(7)            // keep last 7 rotated files
+        )
+        .start()?;                              // start logger
 
-    // Rfc3339 is already &[FormatItem<'_>], so just pass it
-    config_builder.set_time_format_custom(Rfc3339);
-    config_builder
-        .set_time_offset_to_local()
-        .map_err(|_| anyhow::anyhow!("Failed to set time offset to local"))?;
-
-    CombinedLogger::init(vec![
-        WriteLogger::new(
-            LevelFilter::Info,
-            config_builder.build(),
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(log_file)?,
-        ),
-    ])?;
+    info!("Logging initialized");
 
     Ok(())
 }
