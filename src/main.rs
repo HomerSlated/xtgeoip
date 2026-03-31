@@ -1,4 +1,3 @@
-use std::fs::OpenOptions;
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 ///
 /// Downloads, extracts, and converts GeoIP CSV databases into binary IP
