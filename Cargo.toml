@@ -33,6 +33,7 @@ log = "0.4.29"
 syslog = "7.0.0"
 time = { version = "0.3.47", features = ["macros", "local-offset"] }
 flexi_logger = "0.31.8"
+simplelog = "0.12.2"
 
 [[bin]]
 name = "xtgeoip-docgen"
