@@ -130,15 +130,18 @@ fn init_logging(log_file: &str) -> anyhow::Result<()> {
         .append(true)
         .open(log_file)?;
 
-    // ISO-8601 style timestamp with local offset
     let time_format: &[FormatItem] = format_description!(
         "[year]-[month]-[day]T[hour]:[minute]:[second][offset_hour sign:mandatory]:[offset_minute]"
     );
 
     // Build the config
-    let config = ConfigBuilder::new()
-        .set_time_format_custom(time_format)
-        .set_time_offset_to_local() // this method exists in 0.12.2
+    let mut config_builder = ConfigBuilder::new()
+        .set_time_format_custom(time_format);
+
+    // Handle Result from set_time_offset_to_local
+    let config = config_builder
+        .set_time_offset_to_local()
+        .map_err(|_| anyhow::anyhow!("Failed to set time offset to local"))?
         .build();
 
     CombinedLogger::init(vec![WriteLogger::new(
