@@ -134,15 +134,19 @@ fn init_logging(log_file: &str) -> anyhow::Result<()> {
         "[year]-[month]-[day]T[hour]:[minute]:[second][offset_hour sign:mandatory]:[offset_minute]"
     );
 
-    // Build the config
-    let mut config_builder = ConfigBuilder::new()
-        .set_time_format_custom(time_format);
+    // Step 1: Create a long-lived ConfigBuilder
+    let config_builder = ConfigBuilder::new();
 
-    // Handle Result from set_time_offset_to_local
-    let config = config_builder
+    // Step 2: Set custom time format
+    let config_builder = config_builder.set_time_format_custom(time_format);
+
+    // Step 3: Set time offset to local (handle Result)
+    let config_builder = config_builder
         .set_time_offset_to_local()
-        .map_err(|_| anyhow::anyhow!("Failed to set time offset to local"))?
-        .build();
+        .map_err(|_| anyhow::anyhow!("Failed to set time offset to local"))?;
+
+    // Step 4: Build the config
+    let config = config_builder.build();
 
     CombinedLogger::init(vec![WriteLogger::new(
         LevelFilter::Info,
