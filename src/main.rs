@@ -11,10 +11,9 @@ use std::path::Path;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
-use simplelog::{
-    format_description, CombinedLogger, ConfigBuilder, LevelFilter,
-    WriteLogger,
-};
+use simplelog::{ConfigBuilder, CombinedLogger, LevelFilter, WriteLogger};
+use time::format_description::well_known::Rfc3339;
+
 use syslog::{Facility, Formatter3164};
 
 mod backup;
@@ -124,19 +123,15 @@ fn log_config_failure(msg: &str) {
 }
 
 fn init_logging(log_file: &str) -> anyhow::Result<()> {
-    let file = OpenOptions::new()
+    let file = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(log_file)?;
 
-    let time_format = format_description!(
-        "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:6][offset_hour sign:mandatory]:[offset_minute]"
-    );
-
+    // Build a custom config
     let config = ConfigBuilder::new()
-        .set_time_offset_to_local()
-        .map_err(|_| anyhow::anyhow!("Failed to determine local time offset"))?
-        .set_time_format_custom(time_format)
+        .set_time_format_custom(Rfc3339) // <-- ISO-8601 style timestamp
+        .set_time_to_local(true)         // use local time instead of UTC
         .build();
 
     CombinedLogger::init(vec![WriteLogger::new(
