@@ -1,65 +1,49 @@
 use anyhow::Result;
-use chrono::Utc;
-use log::{Level, LevelFilter};
+use chrono::{Local, SecondsFormat};
+use log::Level;
+use syslog::{Facility, Formatter3164};
 
-/// Initialize logging
-/// `log_file` is optional; if None, no file logging
-pub fn init_logger(log_file: Option<&str>) -> Result<()> {
-    let mut dispatch = fern::Dispatch::new()
+pub fn init_logger(log_file: &str) -> Result<()> {
+    fern::Dispatch::new()
         .format(|out, message, record| {
-            // Timestamp in RFC3339 UTC
-            let ts = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
-
-            // File logging format: timestamp + level + message
-            if record.level() == Level::Info {
-                out.finish(format_args!("{ts} [{level}] {msg}",
-                    ts = ts,
-                    level = record.level(),
-                    msg = message
-                ));
-            } else {
-                out.finish(format_args!("{ts} [{level}] {msg}",
-                    ts = ts,
-                    level = record.level(),
-                    msg = message
-                ));
-            }
+            out.finish(format_args!(
+                "{} [{}] {}",
+                Local::now().to_rfc3339_opts(SecondsFormat::Micros, false),
+                record.level(),
+                message
+            ))
         })
-        .level(LevelFilter::Info);
+        .level(log::LevelFilter::Info)
+        .chain(std::io::stdout())
+        .chain(fern::log_file(log_file)?)
+        .apply()?;
 
-    // stdout/stderr for console
-    dispatch = dispatch.chain(
-        fern::Dispatch::new()
-            .format(|out, message, record| {
-                let msg = match record.level() {
-                    Level::Info => format!("{}", message),
-                    Level::Warn => format!("Warning: {}", message),
-                    Level::Error => format!("Error: {}", message),
-                    _ => format!("{}", message),
-                };
-                out.finish(format_args!("{}", msg));
-            })
-            .chain(std::io::stdout())
-    );
-
-    // optional file logging
-    if let Some(path) = log_file {
-        dispatch = dispatch.chain(fern::log_file(path)?);
-    }
-
-    dispatch.apply()?;
     Ok(())
 }
 
-/// Helper functions for convenience
+pub fn log_config_failure(msg: &str) {
+    if let Ok(mut logger) = syslog::unix(Formatter3164 {
+        facility: Facility::LOG_DAEMON,
+        hostname: None,
+        process: "xtgeoip".into(),
+        pid: 0,
+    }) {
+        let _ = logger.err(msg);
+    }
+}
+
+pub fn log_print(msg: &str, level: Level) {
+    log::log!(level, "{msg}");
+}
+
 pub fn info(msg: &str) {
-    log::info!("{msg}");
+    log_print(msg, Level::Info);
 }
 
 pub fn warn(msg: &str) {
-    log::warn!("{msg}");
+    log_print(msg, Level::Warn);
 }
 
 pub fn error(msg: &str) {
-    log::error!("{msg}");
+    log_print(msg, Level::Error);
 }
