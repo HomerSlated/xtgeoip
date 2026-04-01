@@ -22,7 +22,7 @@ use crate::{
     build::build,
     config::{load_config, run_conf, ConfAction},
     fetch::{fetch, FetchMode},
-    messages::{init_logger, log_config_failure, log_print, warn},
+    messages::{init_logging, info, warn, error};
 };
 
 #[derive(Parser)]
