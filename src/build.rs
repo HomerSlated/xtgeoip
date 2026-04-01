@@ -145,28 +145,28 @@ pub fn build(
                 .collect::<Vec<_>>()
                 .join("\n"),
         )?;
-        println!(
+        messages::warn(&format!(
             "Warning: {} orphaned files detected in \"{}\".",
             orphaned.len(),
             target_dir.display()
-        );
-        println!(
+        ));
+        messages::warn(&format!(
             "Please run `xtgeoip build -c -f` or manually delete files listed \
              in \"{}\" for a clean install.",
             orphaned_path.display()
-        );
+        ));
     }
 
     // -------------------------
     // Summary
     // -------------------------
-    println!("Countries processed: {}", country_name.len());
+    messages::info(&format!("Countries processed: {}", country_name.len()))
     let ipv4_count: usize =
         country_ranges.values().map(|cr| cr.pool_v4.len()).sum();
     let ipv6_count: usize =
         country_ranges.values().map(|cr| cr.pool_v6.len()).sum();
-    println!("IPv4 country ranges: {}", ipv4_count);
-    println!("IPv6 country ranges: {}", ipv6_count);
+    messages::info(&format("IPv4 country ranges: {}", ipv4_count));
+    messages::info(&format("IPv6 country ranges: {}", ipv6_count));
 
     Ok(())
 }
