@@ -72,7 +72,7 @@ pub fn build(
         messages::warn(&format!(
             "Warning: {} country files (iv4/iv6) will be overwritten.",
             overwrite_count
-        );
+        ));
     }
 
     // -------------------------
