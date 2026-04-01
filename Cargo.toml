@@ -32,6 +32,7 @@ syslog = "7.0.0"
 time = { version = "0.3.47", features = ["macros", "local-offset"] }
 simplelog = "0.12.2"
 chrono = "0.4.44"
+fern = { version = "0.7.1", features = ["chrono"] }
 
 [[bin]]
 name = "xtgeoip-docgen"
