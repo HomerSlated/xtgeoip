@@ -12,7 +12,7 @@ use ipnetwork::IpNetwork;
 use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 mod messages;
-use crate::messages::{info, warn};
+use messages::{info, warn};
 
 /// Country data with IPv4 and IPv6 ranges
 #[derive(Default)]
