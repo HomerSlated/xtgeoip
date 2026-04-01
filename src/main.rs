@@ -22,7 +22,7 @@ use crate::{
     build::build,
     config::{load_config, run_conf, ConfAction},
     fetch::{fetch, FetchMode},
-    messages::{init_logger, info, warn, error},
+    messages::{init_logger, log_config_failure, log_print, warn},
 };
 
 #[derive(Parser)]
@@ -143,11 +143,6 @@ fn main() -> Result<()> {
     if let Some(log_file) = cfg.logging.as_ref().map(|l| l.log_file.as_str()) {
         init_logger(log_file)?;
     }
-
-    // test output
-    messages::info("Using latest local archive: /var/lib/xt_geoip/GeoLite2-Country-CSV_20260327.zip");
-    messages::warn("Legacy mode activated. See documentation for collisions.");
-    messages::error("Failed to load config file");
 
     // Enforce flag rules
     if cli.force && !(cli.backup || cli.clean) {
