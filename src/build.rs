@@ -165,8 +165,8 @@ pub fn build(
         country_ranges.values().map(|cr| cr.pool_v4.len()).sum();
     let ipv6_count: usize =
         country_ranges.values().map(|cr| cr.pool_v6.len()).sum();
-    messages::info(&format("IPv4 country ranges: {}", ipv4_count));
-    messages::info(&format("IPv6 country ranges: {}", ipv6_count));
+    messages::info(&format!("IPv4 country ranges: {}", ipv4_count));
+    messages::info(&format!("IPv6 country ranges: {}", ipv6_count));
 
     Ok(())
 }
