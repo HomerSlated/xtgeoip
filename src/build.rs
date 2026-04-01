@@ -69,7 +69,7 @@ pub fn build(
     // -------------------------
     let overwrite_count = files_to_write.iter().filter(|f| f.exists()).count();
     if overwrite_count > 0 {
-        println!(
+        messages::warn(&format!(
             "Warning: {} country files (iv4/iv6) will be overwritten.",
             overwrite_count
         );
