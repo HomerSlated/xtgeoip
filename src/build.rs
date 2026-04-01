@@ -160,7 +160,7 @@ pub fn build(
     // -------------------------
     // Summary
     // -------------------------
-    messages::info(&format!("Countries processed: {}", country_name.len()))
+    messages::info(&format!("Countries processed: {}", country_name.len()));
     let ipv4_count: usize =
         country_ranges.values().map(|cr| cr.pool_v4.len()).sum();
     let ipv6_count: usize =
