@@ -1,4 +1,3 @@
-use std::fs::OpenOptions;
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 ///
 /// Downloads, extracts, and converts GeoIP CSV databases into binary IP
@@ -11,8 +10,6 @@ use std::path::Path;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
-use simplelog::{CombinedLogger, Config, LevelFilter, WriteLogger};
-use syslog::{Facility, Formatter3164};
 
 mod backup;
 mod build;
@@ -23,9 +20,9 @@ mod messages;
 use crate::{
     backup::{backup, delete, prune_archives},
     build::build,
-    config::{ConfAction, load_config, run_conf},
-    fetch::{FetchMode, fetch},
-    messages::{log_print, warn},
+    config::{load_config, run_conf, ConfAction},
+    fetch::{fetch, FetchMode},
+    messages::{init_logger, log_config_failure, log_print, warn},
 };
 
 #[derive(Parser)]
@@ -111,32 +108,6 @@ fn warn_legacy_mode(legacy: bool) {
     }
 }
 
-fn log_config_failure(msg: &str) {
-    if let Ok(mut logger) = syslog::unix(Formatter3164 {
-        facility: Facility::LOG_DAEMON,
-        hostname: None,
-        process: "xtgeoip".into(),
-        pid: 0,
-    }) {
-        let _ = logger.err(msg); // send as error priority
-    }
-}
-
-fn init_logging(log_file: &str) -> anyhow::Result<()> {
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_file)?;
-
-    CombinedLogger::init(vec![WriteLogger::new(
-        LevelFilter::Info,
-        Config::default(),
-        file,
-    )])?;
-
-    Ok(())
-}
-
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -168,9 +139,9 @@ fn main() -> Result<()> {
         }
     };
 
-    // Initialize file-based logging for all normal operations
+    // Initialize normal logging using configured log file
     if let Some(log_file) = cfg.logging.as_ref().map(|l| l.log_file.as_str()) {
-        init_logging(log_file)?;
+        init_logger(log_file)?;
     }
 
     // Enforce flag rules
