@@ -4,8 +4,9 @@ use log::Level;
 use syslog::{Facility, Formatter3164};
 
 pub fn init_logger(log_file: &str) -> Result<()> {
-    fern::Dispatch::new()
+    let mut dispatch = fern::Dispatch::new()
         .format(|out, message, record| {
+            // File log: timestamp + level + message
             out.finish(format_args!(
                 "{} [{}] {}",
                 Local::now().to_rfc3339_opts(SecondsFormat::Micros, false),
@@ -13,11 +14,27 @@ pub fn init_logger(log_file: &str) -> Result<()> {
                 message
             ))
         })
-        .level(log::LevelFilter::Info)
-        .chain(std::io::stdout())
-        .chain(fern::log_file(log_file)?)
-        .apply()?;
+        .level(log::LevelFilter::Info);
 
+    // Console formatting: custom prefixes
+    dispatch = dispatch.chain(
+        fern::Dispatch::new()
+            .format(|out, message, record| {
+                let msg = match record.level() {
+                    Level::Info => format!("{}", message),
+                    Level::Warn => format!("Warning: {}", message),
+                    Level::Error => format!("Error: {}", message),
+                    _ => format!("{}", message),
+                };
+                out.finish(format_args!("{}", msg));
+            })
+            .chain(std::io::stdout()),
+    );
+
+    // File logging
+    dispatch = dispatch.chain(fern::log_file(log_file)?);
+
+    dispatch.apply()?;
     Ok(())
 }
 
