@@ -144,6 +144,11 @@ fn main() -> Result<()> {
         init_logger(log_file)?;
     }
 
+    // test output
+    messages::info("Using latest local archive: /var/lib/xt_geoip/GeoLite2-Country-CSV_20260327.zip");
+    messages::warn("Legacy mode activated. See documentation for collisions.");
+    messages::error("Failed to load config file");
+
     // Enforce flag rules
     if cli.force && !(cli.backup || cli.clean) {
         log_print(
