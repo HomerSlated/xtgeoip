@@ -7,7 +7,7 @@ fn setup_logger() -> Result<()> {
         .format(|out, message, record| {
             out.finish(format_args!(
                 "{} [{}] {}",
-                Local::now().format("%Y-%m-%d %H:%M:%S"),
+                Local::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, false)
                 record.level(),
                 message
             ))
