@@ -3,10 +3,28 @@ use chrono::{Local, SecondsFormat};
 use log::Level;
 use syslog::{Facility, Formatter3164};
 
+/// Initialize logging
+/// `log_file` is mandatory; logs to stdout/stderr and optionally to file
 pub fn init_logger(log_file: &str) -> Result<()> {
-    let mut dispatch = fern::Dispatch::new()
+    let base_dispatch = fern::Dispatch::new()
+        .level(log::LevelFilter::Info);
+
+    // stdout/stderr logging with custom formatting
+    let stdout_dispatch = fern::Dispatch::new()
         .format(|out, message, record| {
-            // File log: timestamp + level + message
+            let msg = match record.level() {
+                Level::Info => format!("{}", message),
+                Level::Warn => format!("Warning: {}", message),
+                Level::Error => format!("Error: {}", message),
+                _ => format!("{}", message),
+            };
+            out.finish(format_args!("{}", msg));
+        })
+        .chain(std::io::stdout());
+
+    // file logging with timestamp + level
+    let file_dispatch = fern::Dispatch::new()
+        .format(|out, message, record| {
             out.finish(format_args!(
                 "{} [{}] {}",
                 Local::now().to_rfc3339_opts(SecondsFormat::Micros, false),
@@ -14,30 +32,18 @@ pub fn init_logger(log_file: &str) -> Result<()> {
                 message
             ))
         })
-        .level(log::LevelFilter::Info);
+        .chain(fern::log_file(log_file)?);
 
-    // Console formatting: custom prefixes
-    dispatch = dispatch.chain(
-        fern::Dispatch::new()
-            .format(|out, message, record| {
-                let msg = match record.level() {
-                    Level::Info => format!("{}", message),
-                    Level::Warn => format!("Warning: {}", message),
-                    Level::Error => format!("Error: {}", message),
-                    _ => format!("{}", message),
-                };
-                out.finish(format_args!("{}", msg));
-            })
-            .chain(std::io::stdout()),
-    );
+    // combine stdout + file
+    base_dispatch
+        .chain(stdout_dispatch)
+        .chain(file_dispatch)
+        .apply()?;
 
-    // File logging
-    dispatch = dispatch.chain(fern::log_file(log_file)?);
-
-    dispatch.apply()?;
     Ok(())
 }
 
+/// Log configuration load failures to syslog
 pub fn log_config_failure(msg: &str) {
     if let Ok(mut logger) = syslog::unix(Formatter3164 {
         facility: Facility::LOG_DAEMON,
@@ -49,10 +55,12 @@ pub fn log_config_failure(msg: &str) {
     }
 }
 
+/// Generic log function
 pub fn log_print(msg: &str, level: Level) {
     log::log!(level, "{msg}");
 }
 
+/// Convenience helpers
 pub fn info(msg: &str) {
     log_print(msg, Level::Info);
 }
