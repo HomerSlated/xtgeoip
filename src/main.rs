@@ -15,7 +15,6 @@ mod backup;
 mod build;
 mod config;
 mod fetch;
-mod messages;
 
 use crate::{
     backup::{backup, delete, prune_archives},
