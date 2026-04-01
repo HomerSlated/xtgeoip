@@ -4,7 +4,7 @@ use log::{Level, LevelFilter};
 
 /// Initialize logging
 /// `log_file` is optional; if None, no file logging
-pub fn init_logging(log_file: Option<&str>) -> Result<()> {
+pub fn init_logger(log_file: Option<&str>) -> Result<()> {
     let mut dispatch = fern::Dispatch::new()
         .format(|out, message, record| {
             // Timestamp in RFC3339 UTC
