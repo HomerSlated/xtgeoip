@@ -21,7 +21,7 @@ use crate::{
     build::build,
     config::{load_config, run_conf, ConfAction},
     fetch::{fetch, FetchMode},
-    messages::{init_logger, log_config_failure, log_print, warn},
+    messages::{init_logger, log_early_error, log_print, warn},
 };
 
 #[derive(Parser)]
@@ -132,7 +132,7 @@ fn main() -> Result<()> {
     let cfg = match load_config() {
         Ok(c) => c,
         Err(e) => {
-            log_config_failure(&format!("Failed to load config: {}", e));
+            log_early_error(&format!("Failed to load config: {}", e));
             eprintln!("Fatal: Failed to load config: {}", e);
             std::process::exit(1);
         }
