@@ -158,7 +158,7 @@ fn gather_files(
            version_path(data_dir).display()
        );
        error(&msg); // logs + prints to console
-       bail!(msg);  // propagate as Result
+       std::process::exit(1); // terminate immediately, no further Err propagated
     }
 
     // At this point, we have a valid version and possibly a manifest
