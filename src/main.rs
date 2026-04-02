@@ -166,6 +166,34 @@ fn main() -> Result<()> {
     }
 
     // Handle top-level flags (backup/clean/prune)
+
+    // Handle top-level flags (backup/clean/prune)
+    if cli.backup {
+        if let Err(e) = backup(
+            Path::new(&cfg.paths.output_dir),
+            Path::new(&cfg.paths.archive_dir),
+            cli.force,
+        ) {
+            // Log once
+            log_print(&e.to_string(), log::Level::Error);
+            return Err(e); // propagate for exit code
+        }
+    }
+    
+    if cli.clean {
+        if let Err(e) = delete(Path::new(&cfg.paths.output_dir), cli.force) {
+            log_print(&e.to_string(), log::Level::Error);
+            return Err(e);
+        }
+    }
+
+    if cli.prune {
+        if let Err(e) = prune_archives(&cfg, false, cli.backup) {
+            log_print(&e.to_string(), log::Level::Error);
+            return Err(e);
+        }
+    }
+
     if cli.backup {
         backup(
             Path::new(&cfg.paths.output_dir),
