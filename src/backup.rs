@@ -116,6 +116,8 @@ fn create_tarball(output_path: &Path, files: &[PathBuf]) -> Result<()> {
 
 /// Helper: collect files for backup or delete.
 /// Returns (files_to_process, version, optional_manifest_path)
+/// Helper: collect files for backup or delete.
+/// Returns (files_to_process, version, optional_manifest_path)
 fn gather_files(
     data_dir: &Path,
     force: bool,
