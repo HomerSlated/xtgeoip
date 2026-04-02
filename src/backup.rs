@@ -139,19 +139,20 @@ fn gather_files(
         return Ok((files, version, Some(manifest_path)));
     }
 
-    let msg = format!(
-        "Failed to gather backup files: Version file missing: {}. Use -f to force operation",
-        version_path(data_dir).display()
-    );
-    error(&msg);
-    bail!(msg);
-
     let manifest_opt = if manifest_path.exists() {
         Some(manifest_path.clone())
     } else {
         None
     };
 
+    if version_result.is_err() {
+        let msg = format!(
+            "Failed to gather backup files: Version file missing: {}. Use -f to force operation",
+            version_path(data_dir).display()
+        );
+        error(&msg);
+        bail!(msg);
+    }
     Ok((Vec::new(), version, manifest_opt))
 }
 
