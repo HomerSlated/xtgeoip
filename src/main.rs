@@ -6,6 +6,10 @@
 ///
 /// Inspired by xt_geoip_build_maxmind (Jan Engelhardt, Philip
 /// Prindeville), now part of Debian's xtables-addons package.
+/// xtgeoip © Haze N Sparkle 2026 (MIT)
+///
+/// Downloads, extracts, and converts GeoIP CSV databases into binary IP
+/// range data files, compatible with the Linux x_tables xt_geoip module.
 use std::path::Path;
 
 use anyhow::Result;
@@ -16,12 +20,13 @@ mod build;
 mod config;
 mod fetch;
 mod messages;
+
 use crate::{
     backup::{backup, delete, prune_archives},
     build::build,
     config::{load_config, run_conf, ConfAction},
     fetch::{fetch, FetchMode},
-    messages::{init_logger, log_early_error, log_print, warn},
+    messages::{init_logger, log_early_error, info, warn, error},
 };
 
 #[derive(Parser)]
@@ -69,14 +74,8 @@ enum Commands {
         #[arg(short, long)]
         force: bool,
 
-        /// Use legacy MaxMind-compatible continent mappings (EU/AS) instead of
-        /// O1
-        #[arg(
-            short = 'l',
-            long,
-            help = "Enable legacy MaxMind-compatible continent mappings (e.g. \
-                    EU/AS) instead of O1"
-        )]
+        /// Use legacy MaxMind-compatible continent mappings
+        #[arg(short = 'l', long)]
         legacy: bool,
     },
     Fetch {
@@ -101,14 +100,11 @@ enum Commands {
 /// Warn user if legacy mode is enabled
 fn warn_legacy_mode(legacy: bool) {
     if legacy {
-        warn(
-            "Warning: Legacy Mode activated. See documentation for collisions.",
-        );
+        warn("Warning: Legacy Mode activated. See documentation for collisions.");
     }
 }
 
 fn main() -> Result<()> {
-    // let cli = Cli::parse();
     let cli = Cli::try_parse().unwrap_or_else(|e| {
         log_early_error(&format!("CLI argument parsing failed: {}", e.kind()));
         eprintln!("{e}");
@@ -116,12 +112,7 @@ fn main() -> Result<()> {
     });
 
     // Handle `xtgeoip conf` subcommand before loading config
-    if let Some(Commands::Conf {
-        default,
-        show,
-        edit: _,
-    }) = &cli.command
-    {
+    if let Some(Commands::Conf { default, show, edit: _ }) = &cli.command {
         let action = if *default {
             ConfAction::Default
         } else if *show {
@@ -143,29 +134,21 @@ fn main() -> Result<()> {
         }
     };
 
-    // Initialize normal logging using configured log file
+    // Initialize logging
     if let Some(log_file) = cfg.logging.as_ref().map(|l| l.log_file.as_str()) {
         init_logger(log_file)?;
     }
 
     // Enforce flag rules
     if cli.force && !(cli.backup || cli.clean) {
-        log_print(
-            "Error: --force only applies to --backup or --clean",
-            log::Level::Error,
-        );
+        error("Error: --force only applies to --backup or --clean");
         std::process::exit(1);
     }
 
     if cli.prune && !cli.backup {
-        log_print(
-            "Error: --prune requires --backup at top-level",
-            log::Level::Error,
-        );
+        error("Error: --prune requires --backup at top-level");
         std::process::exit(1);
     }
-
-    // Handle top-level flags (backup/clean/prune)
 
     // Handle top-level flags (backup/clean/prune)
     if cli.backup {
@@ -174,38 +157,23 @@ fn main() -> Result<()> {
             Path::new(&cfg.paths.archive_dir),
             cli.force,
         ) {
-            // Log once
-            log_print(&e.to_string(), log::Level::Error);
-            return Err(e); // propagate for exit code
+            error(&e.to_string());
+            return Err(e);
         }
     }
-    
+
     if cli.clean {
         if let Err(e) = delete(Path::new(&cfg.paths.output_dir), cli.force) {
-            log_print(&e.to_string(), log::Level::Error);
+            error(&e.to_string());
             return Err(e);
         }
     }
 
     if cli.prune {
         if let Err(e) = prune_archives(&cfg, false, cli.backup) {
-            log_print(&e.to_string(), log::Level::Error);
+            error(&e.to_string());
             return Err(e);
         }
-    }
-
-    if cli.backup {
-        backup(
-            Path::new(&cfg.paths.output_dir),
-            Path::new(&cfg.paths.archive_dir),
-            cli.force,
-        )?;
-    }
-    if cli.clean {
-        delete(Path::new(&cfg.paths.output_dir), cli.force)?;
-    }
-    if cli.prune {
-        prune_archives(&cfg, false, cli.backup)?;
     }
 
     // Handle subcommands
@@ -223,12 +191,7 @@ fn main() -> Result<()> {
                 prune_archives(&cfg, true, false)?;
             }
         }
-        Some(Commands::Build {
-            backup: do_backup,
-            clean: do_clean,
-            force: do_force,
-            legacy,
-        }) => {
+        Some(Commands::Build { backup: do_backup, clean: do_clean, force: do_force, legacy }) => {
             let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
             warn_legacy_mode(*legacy);
             build(
@@ -266,3 +229,4 @@ fn main() -> Result<()> {
 
     Ok(())
 }
+
