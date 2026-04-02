@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use tar::Builder;
 
 use crate::config::Config;
-use crate::messages::{info, warn, error};
+use crate::messages::error;
 
 const VERSION_FILE: &str = "version";
 
@@ -164,7 +164,14 @@ pub fn backup(data_dir: &Path, backup_dir: &Path, force: bool) -> Result<()> {
         return Err(e.into());
     }
 
-    let (mut files, version, manifest_opt) = gather_files(data_dir, force)?;
+    // let (mut files, version, manifest_opt) = gather_files(data_dir, force)?;
+    let (mut files, version, manifest_opt) = match gather_files(data_dir, force) {
+        Ok(v) => v,
+        Err(e) => {
+            error(&format!("Failed to gather backup files: {}", e));
+            return Err(e);
+        }
+};
 
     if force {
         if files.is_empty() {
