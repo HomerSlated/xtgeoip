@@ -13,6 +13,7 @@ use sha2::{Digest, Sha256};
 use tar::Builder;
 
 use crate::config::Config;
+use crate::messages::{info, warn, error};
 
 const VERSION_FILE: &str = "version";
 
@@ -157,7 +158,11 @@ fn gather_files(
 /// Backup IV files, version file, and manifest. Force option allows backup even
 /// if version/manifest missing.
 pub fn backup(data_dir: &Path, backup_dir: &Path, force: bool) -> Result<()> {
-    fs::create_dir_all(backup_dir)?;
+    // fs::create_dir_all(backup_dir)?;
+    if let Err(e) = fs::create_dir_all(backup_dir) {
+        error(&format!("Failed to create backup directory {}: {}", backup_dir.display(), e));
+        return Err(e.into());
+    }
 
     let (mut files, version, manifest_opt) = gather_files(data_dir, force)?;
 
