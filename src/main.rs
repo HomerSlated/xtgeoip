@@ -141,12 +141,10 @@ fn main() -> Result<()> {
 
     // Enforce flag rules
     if cli.force && !(cli.backup || cli.clean) {
-        error("Error: --force only applies to --backup or --clean");
         std::process::exit(1);
     }
 
     if cli.prune && !cli.backup {
-        error("Error: --prune requires --backup at top-level");
         std::process::exit(1);
     }
 
