@@ -160,17 +160,11 @@ fn main() -> Result<()> {
     }
 
     if cli.clean {
-        if let Err(e) = delete(Path::new(&cfg.paths.output_dir), cli.force) {
-            error(&e.to_string());
-            return Err(e);
-        }
+       delete(Path::new(&cfg.paths.archive_dir), cli.force)?;
     }
 
     if cli.prune {
-        if let Err(e) = prune_archives(&cfg, false, cli.backup) {
-            error(&e.to_string());
-            return Err(e);
-        }
+        prune_archives(Path::new(&cfg.paths.archive_dir))?;
     }
 
     // Handle subcommands
