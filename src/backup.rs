@@ -127,6 +127,7 @@ fn gather_files(
         .unwrap_or_else(|_| "unknown_version".to_string());
     let manifest_path = manifest_path_for_version(data_dir, &version);
 
+    // If force is used, include all files without verifying version/manifest
     if force {
         let mut files = iv_files(data_dir)?;
         let version_file = version_path(data_dir);
@@ -139,20 +140,21 @@ fn gather_files(
         return Ok((files, version, Some(manifest_path)));
     }
 
+    // Optional manifest, only if it exists
     let manifest_opt = if manifest_path.exists() {
         Some(manifest_path.clone())
     } else {
         None
     };
 
+    // If version file is missing, propagate error (caller handles logging)
     if version_result.is_err() {
-        let msg = format!(
+        bail!(
             "Failed to gather backup files: Version file missing: {}. Use -f to force operation",
             version_path(data_dir).display()
         );
-        error(&msg);
-        bail!(msg);
     }
+
     Ok((Vec::new(), version, manifest_opt))
 }
 
