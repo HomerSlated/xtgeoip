@@ -26,7 +26,7 @@ use crate::{
     build::build,
     config::{load_config, run_conf, ConfAction},
     fetch::{fetch, FetchMode},
-    messages::{init_logger, log_early_error, warn},
+    messages::{init_logger, log_early_error, warn, error},
 };
 
 #[derive(Parser)]
@@ -141,28 +141,39 @@ fn main() -> Result<()> {
 
     // Enforce flag rules
     if cli.force && !(cli.backup || cli.clean) {
+        error("Error: --force only applies to --backup or --clean");
         std::process::exit(1);
     }
 
     if cli.prune && !cli.backup {
+        error("Error: --prune requires --backup at top-level");
         std::process::exit(1);
     }
 
     // Handle top-level flags (backup/clean/prune)
     if cli.backup {
-        backup(
+        if let Err(e) = backup(
             Path::new(&cfg.paths.output_dir),
             Path::new(&cfg.paths.archive_dir),
             cli.force,
-        )?;
+        ) {
+            error(&e.to_string());
+            return Err(e);
+        }
     }
 
     if cli.clean {
-       delete(Path::new(&cfg.paths.archive_dir), cli.force)?;
+        if let Err(e) = delete(Path::new(&cfg.paths.output_dir), cli.force) {
+            error(&e.to_string());
+            return Err(e);
+        }
     }
 
     if cli.prune {
-        prune_archives(&cfg, false, cli.backup)?;
+        if let Err(e) = prune_archives(&cfg, false, cli.backup) {
+            error(&e.to_string());
+            return Err(e);
+        }
     }
 
     // Handle subcommands
