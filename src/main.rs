@@ -164,6 +164,7 @@ fn main() -> Result<()> {
     }
 
     if cli.prune {
+        prune_archives(&cfg, false, cli.backup)?;
         prune_archives(Path::new(&cfg.paths.archive_dir))?;
     }
 
