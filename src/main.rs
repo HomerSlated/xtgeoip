@@ -108,7 +108,12 @@ fn warn_legacy_mode(legacy: bool) {
 }
 
 fn main() -> Result<()> {
-    let cli = Cli::parse();
+    // let cli = Cli::parse();
+    let cli = Cli::try_parse().unwrap_or_else(|e| {
+        log_early_error(&format!("CLI argument parsing failed: {}", e.kind()));
+        eprintln!("{e}");
+        std::process::exit(2);
+    });
 
     // Handle `xtgeoip conf` subcommand before loading config
     if let Some(Commands::Conf {
