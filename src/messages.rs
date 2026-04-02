@@ -69,6 +69,7 @@ pub fn warn(msg: &str) {
     log_print(msg, Level::Warn);
 }
 
+#[allow(dead_code)]
 pub fn error(msg: &str) {
     log_print(msg, Level::Error);
 }
