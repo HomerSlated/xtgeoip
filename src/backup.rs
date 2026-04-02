@@ -157,6 +157,12 @@ fn gather_files(
         );
     }
 
+    if version_result.is_err() {
+        return Err(anyhow!(
+                "Version file missing: {}. Use -f to force operation",
+                version_path(data_dir).display()
+        ));
+    }
     Ok((Vec::new(), version, manifest_opt))
 }
 
