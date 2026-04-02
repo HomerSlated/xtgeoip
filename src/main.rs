@@ -152,12 +152,15 @@ fn main() -> Result<()> {
 
     // Handle top-level flags (backup/clean/prune)
     if cli.backup {
-        backup(
+        if let Err(e) = backup(
             Path::new(&cfg.paths.output_dir),
             Path::new(&cfg.paths.archive_dir),
             cli.force,
-        )?;
-    } 
+        ) {
+            error(&e.to_string());
+            return Err(e);
+        }
+    }
 
     if cli.clean {
         if let Err(e) = delete(Path::new(&cfg.paths.output_dir), cli.force) {

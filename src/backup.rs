@@ -13,7 +13,6 @@ use sha2::{Digest, Sha256};
 use tar::Builder;
 
 use crate::config::Config;
-use crate::messages::error;
 
 const VERSION_FILE: &str = "version";
 
@@ -63,11 +62,7 @@ fn verify_manifest_files(
         let (expected_hash, file_name) = line
             .split_once("  ")
             .or_else(|| line.split_once(' '))
-            .ok_or_else(|| {
-                let msg = format!("Malformed manifest at line {}", idx + 1);
-                error(&msg);
-                anyhow!(msg)
-        })?;
+            .ok_or_else(|| anyhow!("Malformed manifest at line {}", idx + 1))?;
 
         let file_name = file_name.trim();
         if file_name.is_empty() {
@@ -153,12 +148,10 @@ fn gather_files(
 
     // If version file is missing, propagate error to caller
     if version_result.is_err() {
-       let msg = format!(
-           "Version file missing: {}. Use -f to force operation",
-           version_path(data_dir).display()
-       );
-       error(&msg); // logs + prints to console
-       std::process::exit(1); // terminate immediately, no further Err propagated
+        return Err(anyhow!(
+            "Version file missing: {}. Use -f to force operation",
+            version_path(data_dir).display()
+        ));
     }
 
     // At this point, we have a valid version and possibly a manifest
