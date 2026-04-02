@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use tar::Builder;
 
 use crate::config::Config;
-use crate::messages::{info, warn, error};
+use crate::messages::error;
 
 const VERSION_FILE: &str = "version";
 
@@ -152,13 +152,6 @@ fn gather_files(
     };
 
     // If version file is missing, propagate error to caller
-    if version_result.is_err() {
-        return Err(anyhow!(
-            "Version file missing: {}. Use -f to force operation",
-            version_path(data_dir).display()
-        ));
-    }
-
     if version_result.is_err() {
        let msg = format!(
            "Version file missing: {}. Use -f to force operation",
