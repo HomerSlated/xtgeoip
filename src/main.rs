@@ -156,9 +156,7 @@ fn main() -> Result<()> {
             Path::new(&cfg.paths.output_dir),
             Path::new(&cfg.paths.archive_dir),
             cli.force,
-        ) {
-            return Err(e);
-        }
+        )
     }
 
     if cli.clean {
