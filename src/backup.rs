@@ -165,24 +165,26 @@ pub fn backup(data_dir: &Path, backup_dir: &Path, force: bool) -> Result<()> {
     fs::create_dir_all(backup_dir)
         .with_context(|| format!("Failed to create backup directory {}", backup_dir.display()))?;
 
-    // Gather files (will return error if version missing and not forced)
+    // Gather files (force or normal)
     let (mut files, version, manifest_opt) = gather_files(data_dir, force)?;
 
     if force {
         if files.is_empty() {
             bail!("Nothing to back up");
         }
-
         let output_path = backup_dir.join(format!(
             "GeoLite2-Country-bin_unverified_{}.tar.gz",
             version
         ));
         create_tarball(&output_path, &files)?;
-        info!("Backed up unverified binary data to {}", output_path.display());
+        info!(
+            "Backed up unverified binary data to {}",
+            output_path.display()
+        );
         return Ok(());
     }
 
-    // Non-force: verify manifest
+    // Non-force: manifest must exist
     let manifest_path = manifest_opt.ok_or_else(|| {
         anyhow!(
             "Manifest missing: {}\nExpected manifest not found. Use -f to force backup",
@@ -190,7 +192,7 @@ pub fn backup(data_dir: &Path, backup_dir: &Path, force: bool) -> Result<()> {
         )
     })?;
 
-    // Verify checksums and include version + manifest files
+    // Verify manifest files
     files = verify_manifest_files(data_dir, &manifest_path)?;
     files.push(version_path(data_dir));
     files.push(manifest_path.clone());
