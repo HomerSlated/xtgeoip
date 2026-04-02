@@ -13,7 +13,6 @@ use sha2::{Digest, Sha256};
 use tar::Builder;
 
 use crate::config::Config;
-use crate::messages::error;
 
 const VERSION_FILE: &str = "version";
 
@@ -116,53 +115,46 @@ fn create_tarball(output_path: &Path, files: &[PathBuf]) -> Result<()> {
 
 /// Helper: collect files for backup or delete.
 /// Returns (files_to_process, version, optional_manifest_path)
-/// Helper: collect files for backup or delete.
-/// Returns (files_to_process, version, optional_manifest_path)
 fn gather_files(
     data_dir: &Path,
     force: bool,
 ) -> Result<(Vec<PathBuf>, String, Option<PathBuf>)> {
+    // Try reading the version file
     let version_result = fs::read_to_string(version_path(data_dir));
     let version = version_result
         .as_ref()
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| "unknown_version".to_string());
+
     let manifest_path = manifest_path_for_version(data_dir, &version);
 
-    // If force is used, include all files without verifying version/manifest
     if force {
+        // Include all files without verifying version/manifest
         let mut files = iv_files(data_dir)?;
         let version_file = version_path(data_dir);
         if version_file.exists() {
             files.push(version_file);
         }
-        for sha in all_sha256_files(data_dir)? {
-            files.push(sha);
-        }
+        files.extend(all_sha256_files(data_dir)?);
         return Ok((files, version, Some(manifest_path)));
     }
 
-    // Optional manifest, only if it exists
+    // Non-force: optional manifest if it exists
     let manifest_opt = if manifest_path.exists() {
         Some(manifest_path.clone())
     } else {
         None
     };
 
-    // If version file is missing, propagate error (caller handles logging)
-    if version_result.is_err() {
-        bail!(
-            "Failed to gather backup files: Version file missing: {}. Use -f to force operation",
-            version_path(data_dir).display()
-        );
-    }
-
+    // If version file is missing, propagate error to caller
     if version_result.is_err() {
         return Err(anyhow!(
-                "Version file missing: {}. Use -f to force operation",
-                version_path(data_dir).display()
+            "Version file missing: {}. Use -f to force operation",
+            version_path(data_dir).display()
         ));
     }
+
+    // At this point, we have a valid version and possibly a manifest
     Ok((Vec::new(), version, manifest_opt))
 }
 
