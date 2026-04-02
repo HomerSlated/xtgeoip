@@ -9,83 +9,198 @@
 use std::path::Path;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 
-use xtgeoip::{
+mod backup;
+mod build;
+mod config;
+mod fetch;
+mod messages;
+
+use crate::{
     backup::{backup, delete, prune_archives},
-    config::Config,
-    messages::{init_logger, info, warn, error},
+    build::build,
+    config::{load_config, run_conf, ConfAction},
+    fetch::{fetch, FetchMode},
+    messages::{init_logger, log_early_error, log_print, warn, error},
 };
 
 #[derive(Parser)]
-#[command(author, version, about, long_about = None)]
+#[command(
+    name = "xtgeoip",
+    version,
+    about = "Downloads and builds GeoIP databases"
+)]
 struct Cli {
-    /// Path to configuration file
-    #[arg(short, long, default_value = "/etc/xtgeoip/config.toml")]
-    config: String,
+    #[arg(short, long)]
+    backup: bool,
 
-    /// Force operation (backup/delete) ignoring version/manifest checks
+    #[arg(short, long)]
+    clean: bool,
+
     #[arg(short, long)]
     force: bool,
 
+    #[arg(short, long)]
+    prune: bool,
+
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Backup binary GeoLite2 data
-    Backup,
-
-    /// Delete binary GeoLite2 data
-    Delete,
-
-    /// Prune old archives
-    Prune {
-        /// Prune CSV archives
-        #[arg(long)]
-        csv: bool,
-
-        /// Prune bin archives
-        #[arg(long)]
-        bin: bool,
+    Run {
+        #[arg(short, long)]
+        prune: bool,
+        #[arg(short = 'l', long)]
+        legacy: bool,
+    },
+    Build {
+        #[arg(short, long)]
+        backup: bool,
+        #[arg(short, long)]
+        clean: bool,
+        #[arg(short, long)]
+        force: bool,
+        #[arg(short = 'l', long)]
+        legacy: bool,
+    },
+    Fetch {
+        #[arg(short, long)]
+        prune: bool,
+    },
+    #[command(group(
+        clap::ArgGroup::new("conf_action")
+            .required(true)
+            .multiple(false)
+    ))]
+    Conf {
+        #[arg(short = 'd', long = "default", group = "conf_action")]
+        default: bool,
+        #[arg(short = 's', long = "show", group = "conf_action")]
+        show: bool,
+        #[arg(short = 'e', long = "edit", group = "conf_action")]
+        edit: bool,
     },
 }
 
+fn warn_legacy_mode(legacy: bool) {
+    if legacy {
+        warn("Warning: Legacy Mode activated. See documentation for collisions.");
+    }
+}
+
 fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let cli = Cli::try_parse().unwrap_or_else(|e| {
+        log_early_error(&format!("CLI argument parsing failed: {}", e.kind()));
+        eprintln!("{e}");
+        std::process::exit(2);
+    });
 
-    // Initialize logger first
-    init_logger("/var/log/xtgeoip.log")?;
+    if let Some(Commands::Conf { default, show, edit: _ }) = &cli.command {
+        let action = if *default {
+            ConfAction::Default
+        } else if *show {
+            ConfAction::Show
+        } else {
+            ConfAction::Edit
+        };
+        run_conf(action)?;
+        return Ok(());
+    }
 
-    info("Starting xtgeoip...");
-
-    // Load config
-    let cfg = match Config::load(&cli.config) {
-        Ok(cfg) => cfg,
+    let cfg = match load_config() {
+        Ok(c) => c,
         Err(e) => {
-            error(&format!("Failed to load config {}: {}", cli.config, e));
-            return Err(e);
+            log_early_error(&format!("Failed to load config: {}", e));
+            eprintln!("Fatal: Failed to load config: {}", e);
+            std::process::exit(1);
         }
     };
 
-    match cli.command {
-        Commands::Backup => {
-            backup(Path::new(&cfg.paths.data_dir), Path::new(&cfg.paths.archive_dir), cli.force)?;
-            info("Backup completed successfully.");
-        }
-        Commands::Delete => {
-            delete(Path::new(&cfg.paths.data_dir), cli.force)?;
-            info("Deletion completed successfully.");
-        }
-        Commands::Prune { csv, bin } => {
-            if !csv && !bin {
-                warn("No prune option selected. Use --csv and/or --bin.");
-            } else {
-                prune_archives(&cfg, csv, bin)?;
-                info("Prune operation completed successfully.");
+    if let Some(log_file) = cfg.logging.as_ref().map(|l| l.log_file.as_str()) {
+        init_logger(log_file)?;
+    }
+
+    if cli.force && !(cli.backup || cli.clean) {
+        log_print("Error: --force only applies to --backup or --clean", log::Level::Error);
+        std::process::exit(1);
+    }
+
+    if cli.prune && !cli.backup {
+        log_print("Error: --prune requires --backup at top-level", log::Level::Error);
+        std::process::exit(1);
+    }
+
+    // Top-level flags
+    if cli.backup {
+        backup(
+            Path::new(&cfg.paths.output_dir),
+            Path::new(&cfg.paths.archive_dir),
+            cli.force,
+        )?;
+    }
+    if cli.clean {
+        delete(Path::new(&cfg.paths.output_dir), cli.force)?;
+    }
+    if cli.prune {
+        prune_archives(&cfg, false, cli.backup)?;
+    }
+
+    match &cli.command {
+        Some(Commands::Run { prune, legacy }) => {
+            let (temp_dir, version) = fetch(&cfg, FetchMode::Remote)?;
+            warn_legacy_mode(*legacy);
+            build(
+                temp_dir.path(),
+                Path::new(&cfg.paths.output_dir),
+                &version,
+                *legacy,
+            )?;
+            if *prune {
+                prune_archives(&cfg, true, false)?;
             }
         }
+        Some(Commands::Build {
+            backup: do_backup,
+            clean: do_clean,
+            force: do_force,
+            legacy,
+        }) => {
+            let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
+            warn_legacy_mode(*legacy);
+            build(
+                temp_dir.path(),
+                Path::new(&cfg.paths.output_dir),
+                &version,
+                *legacy,
+            )?;
+            if *do_backup {
+                backup(
+                    Path::new(&cfg.paths.output_dir),
+                    Path::new(&cfg.paths.archive_dir),
+                    *do_force,
+                )?;
+            }
+            if *do_clean {
+                delete(Path::new(&cfg.paths.output_dir), *do_force)?;
+            }
+        }
+        Some(Commands::Fetch { prune }) => {
+            let _ = fetch(&cfg, FetchMode::Remote)?;
+            if *prune {
+                prune_archives(&cfg, true, false)?;
+            }
+        }
+        None => {
+            if !(cli.backup || cli.clean || cli.prune) {
+                Cli::command().print_help()?;
+                println!();
+                std::process::exit(1);
+            }
+        }
+        Some(Commands::Conf { .. }) => unreachable!(),
     }
 
     Ok(())
