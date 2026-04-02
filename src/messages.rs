@@ -44,7 +44,7 @@ pub fn init_logger(log_file: &str) -> Result<()> {
 }
 
 /// Log configuration load failures to syslog
-pub fn log_config_failure(msg: &str) {
+pub fn log_early_error(msg: &str) {
     if let Ok(mut logger) = syslog::unix(Formatter3164 {
         facility: Facility::LOG_DAEMON,
         hostname: None,
