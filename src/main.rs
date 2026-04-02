@@ -157,7 +157,6 @@ fn main() -> Result<()> {
             Path::new(&cfg.paths.archive_dir),
             cli.force,
         ) {
-            error(&e.to_string());
             return Err(e);
         }
     }
