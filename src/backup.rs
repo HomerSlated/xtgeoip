@@ -162,8 +162,9 @@ fn gather_files(
 /// if version/manifest missing.
 pub fn backup(data_dir: &Path, backup_dir: &Path, force: bool) -> Result<()> {
     // Ensure backup directory exists
-    fs::create_dir_all(backup_dir)
-        .with_context(|| format!("Failed to create backup directory {}", backup_dir.display()))?;
+    fs::create_dir_all(backup_dir).with_context(|| {
+        format!("Failed to create backup directory {}", backup_dir.display())
+    })?;
 
     // Gather files (force or normal)
     let (mut files, version, manifest_opt) = gather_files(data_dir, force)?;
@@ -187,7 +188,8 @@ pub fn backup(data_dir: &Path, backup_dir: &Path, force: bool) -> Result<()> {
     // Non-force: manifest must exist
     let manifest_path = manifest_opt.ok_or_else(|| {
         anyhow!(
-            "Manifest missing: {}\nExpected manifest not found. Use -f to force backup",
+            "Manifest missing: {}\nExpected manifest not found. Use -f to \
+             force backup",
             manifest_path_for_version(data_dir, &version).display()
         )
     })?;
@@ -197,7 +199,8 @@ pub fn backup(data_dir: &Path, backup_dir: &Path, force: bool) -> Result<()> {
     files.push(version_path(data_dir));
     files.push(manifest_path.clone());
 
-    let output_path = backup_dir.join(format!("GeoLite2-Country-bin_{}.tar.gz", version));
+    let output_path =
+        backup_dir.join(format!("GeoLite2-Country-bin_{}.tar.gz", version));
     create_tarball(&output_path, &files)?;
     info!("Backed up binary data to {}", output_path.display());
 

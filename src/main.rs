@@ -8,7 +8,7 @@
 /// Prindeville), now part of Debian's xtables-addons package.
 use std::path::Path;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use clap::{CommandFactory, Parser, Subcommand};
 
 mod backup;
@@ -20,9 +20,9 @@ mod messages;
 use crate::{
     backup::{backup, delete, prune_archives},
     build::build,
-    config::{load_config, run_conf, ConfAction},
-    fetch::{fetch, FetchMode},
-    messages::{init_logger, log_early_error, warn, error},
+    config::{ConfAction, load_config, run_conf},
+    fetch::{FetchMode, fetch},
+    messages::{error, init_logger, log_early_error, warn},
 };
 
 #[derive(Parser)]
@@ -89,17 +89,34 @@ enum Commands {
 
 /// Normalized CLI action type for internal dispatch
 enum Action {
-    Run { prune: bool, legacy: bool },
-    Build { backup: bool, clean: bool, force: bool, legacy: bool },
-    Fetch { prune: bool },
+    Run {
+        prune: bool,
+        legacy: bool,
+    },
+    Build {
+        backup: bool,
+        clean: bool,
+        force: bool,
+        legacy: bool,
+    },
+    Fetch {
+        prune: bool,
+    },
     Conf(ConfAction),
-    TopLevel { backup: bool, clean: bool, prune: bool, force: bool },
+    TopLevel {
+        backup: bool,
+        clean: bool,
+        prune: bool,
+        force: bool,
+    },
 }
 
 /// Warn user if legacy mode is enabled
 fn warn_legacy_mode(legacy: bool) {
     if legacy {
-        warn("Warning: Legacy Mode activated. See documentation for collisions.");
+        warn(
+            "Warning: Legacy Mode activated. See documentation for collisions.",
+        );
     }
 }
 
@@ -159,19 +176,28 @@ fn run(cli: Cli) -> Result<()> {
 
     // Convert CLI subcommand + top-level flags into normalized internal Action
     let action: Action = match &cli.command {
-        Some(Commands::Conf { default, show, edit: _ }) => {
-            Action::Conf(conf_action(*default, *show))
-        }
-    }
-    
-        Some(Commands::Run { prune, legacy }) => Action::Run { prune: *prune, legacy: *legacy },
-        Some(Commands::Build { backup, clean, force, legacy }) => Action::Build {
+        Some(Commands::Conf {
+            default,
+            show,
+            edit: _,
+        }) => Action::Conf(conf_action(*default, *show)),
+
+        Some(Commands::Run { prune, legacy }) => Action::Run {
+            prune: *prune,
+            legacy: *legacy,
+        },
+        Some(Commands::Build {
+            backup,
+            clean,
+            force,
+            legacy,
+        }) => Action::Build {
             backup: *backup,
             clean: *clean,
             force: *force,
             legacy: *legacy,
         },
-        
+
         Some(Commands::Fetch { prune }) => Action::Fetch { prune: *prune },
         None => Action::TopLevel {
             backup: cli.backup,
@@ -203,7 +229,12 @@ fn run(cli: Cli) -> Result<()> {
             }
         }
 
-        Action::Build { backup: do_backup, clean: do_clean, force: do_force, legacy } => {
+        Action::Build {
+            backup: do_backup,
+            clean: do_clean,
+            force: do_force,
+            legacy,
+        } => {
             let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
             warn_legacy_mode(legacy);
             build(
@@ -232,7 +263,12 @@ fn run(cli: Cli) -> Result<()> {
             }
         }
 
-        Action::TopLevel { backup: do_backup, clean: do_clean, prune: do_prune, force } => {
+        Action::TopLevel {
+            backup: do_backup,
+            clean: do_clean,
+            prune: do_prune,
+            force,
+        } => {
             if do_backup {
                 backup(
                     Path::new(&cfg.paths.output_dir),
@@ -244,7 +280,7 @@ fn run(cli: Cli) -> Result<()> {
             if do_clean {
                 delete(Path::new(&cfg.paths.output_dir), force)?;
             }
-            
+
             if do_prune {
                 prune_archives(&cfg, false, do_backup)?;
             }
@@ -253,7 +289,9 @@ fn run(cli: Cli) -> Result<()> {
             if !(do_backup || do_clean || do_prune) {
                 Cli::command().print_help()?;
                 println!();
-                return Err(anyhow!("No command or top-level action specified"));
+                return Err(anyhow!(
+                    "No command or top-level action specified"
+                ));
             }
         }
     }
