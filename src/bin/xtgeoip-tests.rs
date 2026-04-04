@@ -38,7 +38,6 @@ fn main() -> anyhow::Result<()> {
 
         // Split command into program + args
         let mut parts = tc.cmd.split_whitespace();
-        let program = match parts.next() {
             Some(p) => p,
             None => continue,
         };
