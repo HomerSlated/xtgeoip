@@ -109,18 +109,42 @@ fn conf_action(default: bool, show: bool) -> ConfAction {
     }
 }
 
-/// Enforce rules for global flags
-fn enforce_flag_rules(cli: &Cli) -> Result<()> {
-    if cli.force && !(cli.backup || cli.clean) {
-        error("Error: --force only applies to --backup or --clean");
-        return Err(anyhow!("--force only applies to --backup or --clean"));
+/// Enforce rules for global flags before executing any subcommand
+fn validate_flags(cli: &Cli) -> Result<()> {
+    match &cli.command {
+        Some(Commands::Fetch { .. }) => {
+            if cli.backup {
+                return Err(anyhow!("unsupported option, -b is not valid for fetch"));
+            }
+            if cli.clean {
+                return Err(anyhow!("unsupported option, -c is not valid for fetch"));
+            }
+            if cli.force {
+                return Err(anyhow!("unsupported option, -f is not valid for fetch"));
+            }
+        }
+        Some(Commands::Build { .. }) => {
+            if cli.prune && !cli.backup {
+                return Err(anyhow!("unsupported option, -p requires --backup"));
+            }
+            if cli.force && !(cli.backup || cli.clean) {
+                return Err(anyhow!("unsupported option, -f only applies to -b or -c"));
+            }
+            if cli.backup && cli.prune && cli.force {
+                return Err(anyhow!(
+                    "unsupported option, ambiguous and prune does not support force"
+                ));
+            }
+        }
+        Some(Commands::Run { .. }) => {
+            if cli.backup && cli.prune && cli.clean {
+                return Err(anyhow!(
+                    "unsupported option, ambiguous (does prune apply to fetch or backup?)"
+                ));
+            }
+        }
+        _ => {}
     }
-
-    if cli.prune && !cli.backup {
-        error("Error: --prune requires --backup");
-        return Err(anyhow!("--prune requires --backup"));
-    }
-
     Ok(())
 }
 
@@ -137,7 +161,7 @@ fn main() -> Result<()> {
 }
 
 fn run(cli: Cli) -> Result<()> {
-    // Load system configuration (needed for most actions)
+    // Load system configuration
     let cfg = load_config().map_err(|e| {
         log_early_error(&format!("Failed to load config: {}", e));
         eprintln!("Fatal: Failed to load config: {}", e);
@@ -149,10 +173,10 @@ fn run(cli: Cli) -> Result<()> {
         init_logger(log_file)?;
     }
 
-    // Enforce top-level flag rules
-    enforce_flag_rules(&cli)?;
+    // Validate flag rules according to spec
+    validate_flags(&cli)?;
 
-    // First, handle global flags in order: backup → clean → prune
+    // Execute top-level flags only if valid for the command
     if cli.backup {
         backup(
             Path::new(&cfg.paths.output_dir),
@@ -160,11 +184,9 @@ fn run(cli: Cli) -> Result<()> {
             cli.force,
         )?;
     }
-
     if cli.clean {
         delete(Path::new(&cfg.paths.output_dir), cli.force)?;
     }
-
     if cli.prune {
         prune_archives(&cfg, false, cli.backup)?;
     }
