@@ -62,3 +62,7 @@
 
 `xtgeoip run -c -f`
 
+- display version:
+
+`xtgeoip -V`
+
