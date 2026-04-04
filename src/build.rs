@@ -71,7 +71,7 @@ pub fn build(
     let overwrite_count = files_to_write.iter().filter(|f| f.exists()).count();
     if overwrite_count > 0 {
         messages::warn(&format!(
-            "Warning: {} country files (iv4/iv6) will be overwritten.",
+            "{} country files (iv4/iv6) will be overwritten.",
             overwrite_count
         ));
     }
@@ -147,7 +147,7 @@ pub fn build(
                 .join("\n"),
         )?;
         messages::warn(&format!(
-            "Warning: {} orphaned files detected in \"{}\".",
+            "{} orphaned files detected in \"{}\".",
             orphaned.len(),
             target_dir.display()
         ));

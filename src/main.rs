@@ -114,7 +114,7 @@ enum Action {
 fn warn_legacy_mode(legacy: bool) {
     if legacy {
         warn(
-            "Warning: Legacy Mode activated. See documentation for collisions.",
+            "Legacy Mode activated. See documentation for collisions.",
         );
     }
 }
