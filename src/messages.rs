@@ -6,8 +6,7 @@ use syslog::{Facility, Formatter3164};
 /// Initialize logging
 /// `log_file` is mandatory; logs to stdout/stderr and optionally to file
 pub fn init_logger(log_file: &str) -> Result<()> {
-    let base_dispatch = fern::Dispatch::new()
-        .level(log::LevelFilter::Info);
+    let base_dispatch = fern::Dispatch::new().level(log::LevelFilter::Info);
 
     // stdout/stderr logging with custom formatting
     let stdout_dispatch = fern::Dispatch::new()
@@ -44,7 +43,7 @@ pub fn init_logger(log_file: &str) -> Result<()> {
 }
 
 /// Log configuration load failures to syslog
-pub fn log_config_failure(msg: &str) {
+pub fn log_early_error(msg: &str) {
     if let Ok(mut logger) = syslog::unix(Formatter3164 {
         facility: Facility::LOG_DAEMON,
         hostname: None,
@@ -69,6 +68,7 @@ pub fn warn(msg: &str) {
     log_print(msg, Level::Warn);
 }
 
+#[allow(dead_code)]
 pub fn error(msg: &str) {
     log_print(msg, Level::Error);
 }
