@@ -6,13 +6,9 @@
 ///
 /// Inspired by xt_geoip_build_maxmind (Jan Engelhardt, Philip
 /// Prindeville), now part of Debian's xtables-addons package.
-/// xtgeoip © Haze N Sparkle 2026 (MIT)
-///
-/// Downloads, extracts, and converts GeoIP CSV databases into binary IP
-/// range data files, compatible with the Linux x_tables xt_geoip module.
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use clap::{CommandFactory, Parser, Subcommand};
 
 mod backup;
@@ -36,19 +32,15 @@ use crate::{
     about = "Downloads and builds GeoIP databases"
 )]
 struct Cli {
-    /// Backup existing binary files
     #[arg(short, long)]
     backup: bool,
 
-    /// Delete existing binary files
     #[arg(short, long)]
     clean: bool,
 
-    /// Force backup and/or clean without verification
     #[arg(short, long)]
     force: bool,
 
-    /// Prune old binary archives (requires backup)
     #[arg(short, long)]
     prune: bool,
 
@@ -62,7 +54,6 @@ enum Commands {
         #[arg(short, long)]
         prune: bool,
 
-        /// Use legacy mode
         #[arg(short = 'l', long)]
         legacy: bool,
     },
@@ -74,7 +65,6 @@ enum Commands {
         #[arg(short, long)]
         force: bool,
 
-        /// Use legacy MaxMind-compatible continent mappings
         #[arg(short = 'l', long)]
         legacy: bool,
     },
@@ -104,79 +94,68 @@ fn warn_legacy_mode(legacy: bool) {
     }
 }
 
+/// Convert Conf CLI args to ConfAction enum
+fn conf_action(default: bool, show: bool) -> ConfAction {
+    if default {
+        ConfAction::Default
+    } else if show {
+        ConfAction::Show
+    } else {
+        ConfAction::Edit
+    }
+}
+
+/// Enforce top-level flag rules
+fn enforce_flag_rules(cli: &Cli) -> Result<()> {
+    if cli.force && !(cli.backup || cli.clean) {
+        error("Error: --force only applies to --backup or --clean");
+        return Err(anyhow!("--force only applies to --backup or --clean"));
+    }
+
+    if cli.prune && !cli.backup {
+        error("Error: --prune requires --backup at top-level");
+        return Err(anyhow!("--prune requires --backup at top-level"));
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
-    let cli = Cli::try_parse().unwrap_or_else(|e| {
+    let cli = Cli::try_parse().map_err(|e| {
         log_early_error(&format!("CLI argument parsing failed: {}", e.kind()));
         eprintln!("{e}");
-        std::process::exit(2);
-    });
+        e
+    })?;
 
-    // Handle `xtgeoip conf` subcommand before loading config
-    if let Some(Commands::Conf { default, show, edit: _ }) = &cli.command {
-        let action = if *default {
-            ConfAction::Default
-        } else if *show {
-            ConfAction::Show
-        } else {
-            ConfAction::Edit
-        };
-        run_conf(action)?;
+    run(cli)?;
+
+    Ok(())
+}
+
+fn run(cli: Cli) -> Result<()> {
+    // Handle `Conf` early
+    if let Some(Commands::Conf { default, show, edit }) = &cli.command {
+        let action = conf_action(*default, *show);
+        run_conf(&action)?;
         return Ok(());
     }
 
-    // Load system configuration
-    let cfg = match load_config() {
-        Ok(c) => c,
-        Err(e) => {
-            log_early_error(&format!("Failed to load config: {}", e));
-            eprintln!("Fatal: Failed to load config: {}", e);
-            std::process::exit(1);
-        }
-    };
+    // Load system config
+    let cfg = load_config().map_err(|e| {
+        log_early_error(&format!("Failed to load config: {}", e));
+        eprintln!("Fatal: Failed to load config: {}", e);
+        e
+    })?;
 
     // Initialize logging
     if let Some(log_file) = cfg.logging.as_ref().map(|l| l.log_file.as_str()) {
         init_logger(log_file)?;
     }
 
-    // Enforce flag rules
-    if cli.force && !(cli.backup || cli.clean) {
-        error("Error: --force only applies to --backup or --clean");
-        std::process::exit(1);
-    }
+    // Enforce top-level flag rules
+    enforce_flag_rules(&cli)?;
 
-    if cli.prune && !cli.backup {
-        error("Error: --prune requires --backup at top-level");
-        std::process::exit(1);
-    }
-
-    // Handle top-level flags (backup/clean/prune)
-    if cli.backup {
-        if let Err(e) = backup(
-            Path::new(&cfg.paths.output_dir),
-            Path::new(&cfg.paths.archive_dir),
-            cli.force,
-        ) {
-            error(&e.to_string());
-            return Err(e);
-        }
-    }
-
-    if cli.clean {
-        if let Err(e) = delete(Path::new(&cfg.paths.output_dir), cli.force) {
-            error(&e.to_string());
-            return Err(e);
-        }
-    }
-
-    if cli.prune {
-        if let Err(e) = prune_archives(&cfg, false, cli.backup) {
-            error(&e.to_string());
-            return Err(e);
-        }
-    }
-
-    // Handle subcommands
+    // Dispatch subcommands
     match &cli.command {
         Some(Commands::Run { prune, legacy }) => {
             let (temp_dir, version) = fetch(&cfg, FetchMode::Remote)?;
@@ -191,7 +170,13 @@ fn main() -> Result<()> {
                 prune_archives(&cfg, true, false)?;
             }
         }
-        Some(Commands::Build { backup: do_backup, clean: do_clean, force: do_force, legacy }) => {
+
+        Some(Commands::Build {
+            backup: do_backup,
+            clean: do_clean,
+            force: do_force,
+            legacy,
+        }) => {
             let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
             warn_legacy_mode(*legacy);
             build(
@@ -211,22 +196,43 @@ fn main() -> Result<()> {
                 delete(Path::new(&cfg.paths.output_dir), *do_force)?;
             }
         }
+
         Some(Commands::Fetch { prune }) => {
             let _ = fetch(&cfg, FetchMode::Remote)?;
             if *prune {
                 prune_archives(&cfg, true, false)?;
             }
         }
+
+        Some(Commands::Conf { .. }) => {
+            // Already handled above
+        }
+
         None => {
             if !(cli.backup || cli.clean || cli.prune) {
                 Cli::command().print_help()?;
                 println!();
-                std::process::exit(1);
+                return Err(anyhow!("No command or top-level action specified"));
             }
         }
-        Some(Commands::Conf { .. }) => unreachable!(), // already handled above
+    }
+
+    // Handle top-level flags
+    if cli.backup {
+        backup(
+            Path::new(&cfg.paths.output_dir),
+            Path::new(&cfg.paths.archive_dir),
+            cli.force,
+        )?;
+    }
+
+    if cli.clean {
+        delete(Path::new(&cfg.paths.output_dir), cli.force)?;
+    }
+
+    if cli.prune {
+        prune_archives(&cfg, false, cli.backup)?;
     }
 
     Ok(())
 }
-
