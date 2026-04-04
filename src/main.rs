@@ -6,7 +6,6 @@
 ///
 /// Inspired by xt_geoip_build_maxmind (Jan Engelhardt, Philip
 /// Prindeville), now part of Debian's xtables-addons package.
-/// xtgeoip © Haze N Sparkle 2026 (MIT)
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
@@ -30,19 +29,20 @@ use crate::{
 #[command(
     name = "xtgeoip",
     version,
-    about = "Downloads and builds GeoIP databases"
+    about = "Downloads and builds GeoIP databases",
+    propagate_version = true
 )]
 struct Cli {
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     backup: bool,
 
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     clean: bool,
 
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     force: bool,
 
-    #[arg(short, long)]
+    #[arg(short, long, global = true)]
     prune: bool,
 
     #[command(subcommand)]
@@ -87,7 +87,6 @@ enum Action {
     Build { legacy: bool },
     Fetch { prune: bool },
     Conf(ConfAction),
-    TopLevel,
 }
 
 /// Warn user if legacy mode is enabled
@@ -110,7 +109,7 @@ fn conf_action(default: bool, show: bool) -> ConfAction {
     }
 }
 
-/// Enforce top-level flag rules
+/// Enforce rules for global flags
 fn enforce_flag_rules(cli: &Cli) -> Result<()> {
     if cli.force && !(cli.backup || cli.clean) {
         error("Error: --force only applies to --backup or --clean");
@@ -118,8 +117,8 @@ fn enforce_flag_rules(cli: &Cli) -> Result<()> {
     }
 
     if cli.prune && !cli.backup {
-        error("Error: --prune requires --backup at top-level");
-        return Err(anyhow!("--prune requires --backup at top-level"));
+        error("Error: --prune requires --backup");
+        return Err(anyhow!("--prune requires --backup"));
     }
 
     Ok(())
@@ -138,7 +137,7 @@ fn main() -> Result<()> {
 }
 
 fn run(cli: Cli) -> Result<()> {
-    // Load system configuration
+    // Load system configuration (needed for most actions)
     let cfg = load_config().map_err(|e| {
         log_early_error(&format!("Failed to load config: {}", e));
         eprintln!("Fatal: Failed to load config: {}", e);
@@ -153,7 +152,7 @@ fn run(cli: Cli) -> Result<()> {
     // Enforce top-level flag rules
     enforce_flag_rules(&cli)?;
 
-    // === Handle top-level flags first, always in correct order ===
+    // First, handle global flags in order: backup → clean → prune
     if cli.backup {
         backup(
             Path::new(&cfg.paths.output_dir),
@@ -170,61 +169,62 @@ fn run(cli: Cli) -> Result<()> {
         prune_archives(&cfg, false, cli.backup)?;
     }
 
-    // If no subcommand and no top-level action, show help
-    if cli.command.is_none() && !(cli.backup || cli.clean || cli.prune) {
-        Cli::command().print_help()?;
-        println!();
-        return Err(anyhow!("No command or top-level action specified"));
-    }
-
-    // Map CLI subcommand into normalized internal Action
-    let action = match &cli.command {
-        Some(Commands::Conf { default, show, edit: _ }) => Action::Conf(conf_action(*default, *show)),
-        Some(Commands::Run { prune, legacy }) => Action::Run { prune: *prune, legacy: *legacy },
-        Some(Commands::Build { legacy }) => Action::Build { legacy: *legacy },
-        Some(Commands::Fetch { prune }) => Action::Fetch { prune: *prune },
-        None => Action::TopLevel,
+    // Convert CLI subcommand into normalized internal Action
+    let action: Option<Action> = match &cli.command {
+        Some(Commands::Conf { default, show, edit: _ }) => {
+            Some(Action::Conf(conf_action(*default, *show)))
+        }
+        Some(Commands::Run { prune, legacy }) => Some(Action::Run {
+            prune: *prune,
+            legacy: *legacy,
+        }),
+        Some(Commands::Build { legacy }) => Some(Action::Build { legacy: *legacy }),
+        Some(Commands::Fetch { prune }) => Some(Action::Fetch { prune: *prune }),
+        None => None,
     };
 
     // Dispatch subcommands
-    match action {
-        Action::Conf(conf) => run_conf(conf)?,
+    if let Some(action) = action {
+        match action {
+            Action::Conf(conf) => run_conf(conf)?,
 
-        Action::Run { prune, legacy } => {
-            let (temp_dir, version) = fetch(&cfg, FetchMode::Remote)?;
-            warn_legacy_mode(legacy);
-            build(
-                temp_dir.path(),
-                Path::new(&cfg.paths.output_dir),
-                &version,
-                legacy,
-            )?;
-            if prune {
-                prune_archives(&cfg, true, false)?;
+            Action::Run { prune, legacy } => {
+                let (temp_dir, version) = fetch(&cfg, FetchMode::Remote)?;
+                warn_legacy_mode(legacy);
+                build(
+                    temp_dir.path(),
+                    Path::new(&cfg.paths.output_dir),
+                    &version,
+                    legacy,
+                )?;
+                if prune {
+                    prune_archives(&cfg, true, false)?;
+                }
+            }
+
+            Action::Build { legacy } => {
+                let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
+                warn_legacy_mode(legacy);
+                build(
+                    temp_dir.path(),
+                    Path::new(&cfg.paths.output_dir),
+                    &version,
+                    legacy,
+                )?;
+            }
+
+            Action::Fetch { prune } => {
+                let _ = fetch(&cfg, FetchMode::Remote)?;
+                if prune {
+                    prune_archives(&cfg, true, false)?;
+                }
             }
         }
-
-        Action::Build { legacy } => {
-            let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
-            warn_legacy_mode(legacy);
-            build(
-                temp_dir.path(),
-                Path::new(&cfg.paths.output_dir),
-                &version,
-                legacy,
-            )?;
-        }
-
-        Action::Fetch { prune } => {
-            let _ = fetch(&cfg, FetchMode::Remote)?;
-            if prune {
-                prune_archives(&cfg, true, false)?;
-            }
-        }
-
-        Action::TopLevel => {
-            // already handled top-level flags above
-        }
+    } else if !(cli.backup || cli.clean || cli.prune) {
+        // If no flags or subcommands, show help
+        Cli::command().print_help()?;
+        println!();
+        return Err(anyhow!("No command or top-level action specified"));
     }
 
     Ok(())
