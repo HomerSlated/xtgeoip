@@ -100,7 +100,11 @@ fn main() -> anyhow::Result<()> {
         "src/generated/cli_matrix.rs",
         generate_cli_matrix_rs(&spec)?,
     )?;
-
+    fs::write(
+        "docs/generated/testcases.yaml",
+        generate_testcases_yaml(&spec)?,
+    )?;
+    println!("Testcases YAML generated successfully.");
     println!("Documentation and generated code updated successfully.");
     Ok(())
 }
