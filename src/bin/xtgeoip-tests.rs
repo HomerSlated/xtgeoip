@@ -40,7 +40,6 @@ fn main() -> anyhow::Result<()> {
         let mut parts = tc.cmd.split_whitespace();
             Some(p) => p,
             None => continue,
-        };
         let args: Vec<&str> = parts.collect();
 
         let status = Command::new("sudo")
