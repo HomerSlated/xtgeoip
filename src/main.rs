@@ -14,7 +14,7 @@
 
 use std::{
     path::Path,
-    std::process,
+    process,
 };
 
 use anyhow::{anyhow, Result};
