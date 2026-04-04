@@ -174,24 +174,10 @@ fn run(cli: Cli) -> Result<()> {
     // Enforce top-level flag rules
     enforce_flag_rules(&cli)?;
 
-    // Execute top-level flags that must run before any subcommand
-    if cli.backup {
-        backup(
-            Path::new(&cfg.paths.output_dir),
-            Path::new(&cfg.paths.archive_dir),
-            cli.force,
-        )?;
-    }
-
-    if cli.clean {
-        delete(Path::new(&cfg.paths.output_dir), cli.force)?;
-    }
-
     // Convert CLI subcommand + top-level flags into normalized internal Action
     let action: Action = match &cli.command {
         Some(Commands::Conf { default, show, edit: _ }) => {
-            let conf = conf_action(*default, *show);
-            Action::Conf(conf)
+            Action::Conf(conf_action(*default, *show))
         }
 
         Some(Commands::Run { prune, legacy }) => Action::Run { prune: *prune, legacy: *legacy },
@@ -201,7 +187,6 @@ fn run(cli: Cli) -> Result<()> {
             force: *force,
             legacy: *legacy,
         },
-
         Some(Commands::Fetch { prune }) => Action::Fetch { prune: *prune },
         None => Action::TopLevel {
             backup: cli.backup,
@@ -214,7 +199,34 @@ fn run(cli: Cli) -> Result<()> {
     // Dispatch subcommands
     match action {
         Action::Conf(conf) => {
+            // run_conf still runs before config is used elsewhere
             run_conf(conf)?;
+        }
+
+        Action::TopLevel { backup: do_backup, clean: do_clean, prune: do_prune, force: do_force } => {
+            // Always handle top-level flags first
+            if do_backup {
+                backup(
+                    Path::new(&cfg.paths.output_dir),
+                    Path::new(&cfg.paths.archive_dir),
+                    do_force,
+                )?;
+            }
+
+            if do_clean {
+                delete(Path::new(&cfg.paths.output_dir), do_force)?;
+            }
+
+            if do_prune {
+                prune_archives(&cfg, false, do_backup)?;
+            }
+
+            // If no flags were specified, show help
+            if !(do_backup || do_clean || do_prune) {
+                Cli::command().print_help()?;
+                println!();
+                return Err(anyhow!("No command or top-level action specified"));
+            }
         }
 
         Action::Run { prune, legacy } => {
@@ -233,7 +245,15 @@ fn run(cli: Cli) -> Result<()> {
         }
 
         Action::Build { backup: do_backup, clean: do_clean, force: do_force, legacy } => {
-            // Respect ordering: backup → clean → build
+            let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
+            warn_legacy_mode(legacy);
+            build(
+                temp_dir.path(),
+                Path::new(&cfg.paths.output_dir),
+                &version,
+                legacy,
+            )?;
+
             if do_backup {
                 backup(
                     Path::new(&cfg.paths.output_dir),
@@ -245,35 +265,12 @@ fn run(cli: Cli) -> Result<()> {
             if do_clean {
                 delete(Path::new(&cfg.paths.output_dir), do_force)?;
             }
-
-            let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
-            warn_legacy_mode(legacy);
-            build(
-                temp_dir.path(),
-                Path::new(&cfg.paths.output_dir),
-                &version,
-                legacy,
-            )?;
         }
 
         Action::Fetch { prune } => {
             let _ = fetch(&cfg, FetchMode::Remote)?;
             if prune {
                 prune_archives(&cfg, true, false)?;
-            }
-        }
-
-        Action::TopLevel { prune: do_prune, .. } => {
-            // Only prune left, as backup/clean already handled
-            if do_prune {
-                prune_archives(&cfg, false, cli.backup)?;
-            }
-
-            // If no flags or subcommand, show help
-            if !(cli.backup || cli.clean || do_prune) {
-                Cli::command().print_help()?;
-                println!();
-                return Err(anyhow!("No command or top-level action specified"));
             }
         }
     }
