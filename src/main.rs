@@ -87,6 +87,15 @@ enum Commands {
     },
 }
 
+/// Normalized CLI action type for internal dispatch
+enum Action {
+    Run { prune: bool, legacy: bool },
+    Build { backup: bool, clean: bool, force: bool, legacy: bool },
+    Fetch { prune: bool },
+    Conf(ConfAction),
+    TopLevel { backup: bool, clean: bool, prune: bool, force: bool },
+}
+
 /// Warn user if legacy mode is enabled
 fn warn_legacy_mode(legacy: bool) {
     if legacy {
