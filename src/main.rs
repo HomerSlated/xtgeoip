@@ -190,13 +190,7 @@ fn run(cli: Cli) -> Result<()> {
     // Convert CLI subcommand + top-level flags into normalized internal Action
     let action: Action = match &cli.command {
         Some(Commands::Conf { default, show, edit: _ }) => {
-            let conf = if *default {
-                ConfAction::Default
-            } else if *show {
-                ConfAction::Show
-            } else {
-                ConfAction::Edit
-            };
+            let conf = conf_action(*default, *show);
             Action::Conf(conf)
         }
 
