@@ -45,7 +45,7 @@ fn main() -> anyhow::Result<()> {
         let args: Vec<&str> = parts.collect();
 
         let status = Command::new("sudo")
-            .arg(program)
+            .arg("target/release/xtgeoip"
             .args(args)
             .status()?;
 
