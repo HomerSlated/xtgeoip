@@ -6,8 +6,7 @@ use syslog::{Facility, Formatter3164};
 /// Initialize logging
 /// `log_file` is mandatory; logs to stdout/stderr and optionally to file
 pub fn init_logger(log_file: &str) -> Result<()> {
-    let base_dispatch = fern::Dispatch::new()
-        .level(log::LevelFilter::Info);
+    let base_dispatch = fern::Dispatch::new().level(log::LevelFilter::Info);
 
     // stdout/stderr logging with custom formatting
     let stdout_dispatch = fern::Dispatch::new()
