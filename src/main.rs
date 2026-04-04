@@ -186,34 +186,43 @@ fn run_action(cfg: &crate::config::Config, action: Action) -> Result<()> {
                 prune_archives(cfg, true, false)?;
             }
         }
-        Action::Run { backup, clean, force, prune, legacy } => {
-            if backup {
-                backup(Path::new(&cfg.paths.output_dir), Path::new(&cfg.paths.archive_dir), force)?;
+
+        Action::Run {
+            backup: do_backup,
+            clean: do_clean,
+            force,
+            prune,
+            legacy,
+        } => {
+            if do_backup {
+                backup(
+                    Path::new(&cfg.paths.output_dir),
+                    Path::new(&cfg.paths.archive_dir),
+                    force,
+                )?;
             }
-            if clean {
+            
+            if do_clean {
                 delete(Path::new(&cfg.paths.output_dir), force)?;
             }
+
             let (temp_dir, version) = fetch(cfg, FetchMode::Remote)?;
             warn_legacy_mode(legacy);
-            build(temp_dir.path(), Path::new(&cfg.paths.output_dir), &version, legacy)?;
+            build(
+                temp_dir.path(),
+                Path::new(&cfg.paths.output_dir),
+                &version,
+                legacy,
+            )?;
+
             if prune {
                 prune_archives(cfg, true, false)?;
             }
         }
-        Action::Build { backup, clean, force, prune, legacy } => {
-            if backup {
-                backup(Path::new(&cfg.paths.output_dir), Path::new(&cfg.paths.archive_dir), force)?;
-            }
-            if clean {
-                delete(Path::new(&cfg.paths.output_dir), force)?;
-            }
-            let (temp_dir, version) = fetch(cfg, FetchMode::Local)?;
-            warn_legacy_mode(legacy);
-            build(temp_dir.path(), Path::new(&cfg.paths.output_dir), &version, legacy)?;
-            if prune {
-                prune_archives(cfg, true, false)?;
-            }
-        }
+    }
+}        
+
+
     }
     Ok(())
 }
