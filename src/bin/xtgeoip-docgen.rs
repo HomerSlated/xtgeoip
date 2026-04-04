@@ -71,6 +71,12 @@ pub struct ReasonTemplate {
     pub text: String,
 }
 
+#[derive(Debug, Serialize)]
+struct Testcase {
+    key: String,
+    cmd: String,
+}
+
 fn main() -> anyhow::Result<()> {
     let yaml_str = fs::read_to_string("docs/spec/cli.yaml")?;
     let spec: Spec = serde_yaml::from_str(&yaml_str)?;
@@ -362,4 +368,26 @@ fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
     }
 
     Ok(out)
+}
+
+fn generate_testcases_yaml(spec: &Spec) -> anyhow::Result<String> {
+    let mut testcases = Vec::new();
+
+    for cmd in spec.commands.values() {
+        let examples = match cmd {
+            CommandSpec::FlagCommand { examples, .. } => examples,
+            CommandSpec::SelectorCommand { examples, .. } => examples,
+        };
+
+        for ex in examples {
+            let key = if ex.valid { "p" } else { "f" };
+            testcases.push(Testcase {
+                key: key.to_string(),
+                cmd: ex.cmd.clone(),
+            });
+        }
+    }
+
+    let yaml = serde_yaml::to_string(&testcases)?;
+    Ok(yaml)
 }
