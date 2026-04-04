@@ -9,7 +9,7 @@
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, CommandFactory};
 
 mod backup;
 mod build;
