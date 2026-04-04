@@ -12,10 +12,17 @@
 /// Downloads, extracts, and converts GeoIP CSV databases into binary IP
 /// range data files, compatible with the Linux x_tables xt_geoip module.
 
-use std::path::Path;
+use std::{
+    path::Path,
+    std::process,
+};
 
 use anyhow::{anyhow, Result};
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{
+    error::ErrorKind,
+    CommandFactory,
+    Parser,Subcommand,
+};
 
 mod backup;
 mod build;
@@ -300,12 +307,22 @@ fn run(cli: Cli) -> Result<()> {
     Ok(())
 }
 
+
 fn main() -> Result<()> {
-    let cli = Cli::try_parse().map_err(|e| {
-        log_early_error(&format!("CLI argument parsing failed: {}", e.kind()));
-        eprintln!("{e}");
-        e
-    })?;
+    let cli = match Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(e) => match e.kind() {
+            ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => {
+                e.print()?;
+                return Ok(());
+            }
+            _ => {
+                log_early_error(&format!("CLI argument parsing failed: {}", e.kind()));
+                e.print()?;
+                process::exit(2);
+            }
+        },
+    };
 
     run(cli)?;
     Ok(())
