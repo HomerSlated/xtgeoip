@@ -2,7 +2,10 @@
 //! Generates documentation and test matrices from cli.yaml
 use std::{collections::BTreeMap, fs};
 
-use serde::Deserialize;
+use serde::{
+    Deserialize,
+    Serialize,
+};
 
 #[derive(Debug, Deserialize)]
 pub struct Spec {
