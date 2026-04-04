@@ -8,7 +8,7 @@
 /// Prindeville), now part of Debian's xtables-addons package.
 use std::path::Path;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use clap::{CommandFactory, Parser, Subcommand};
 
 mod backup;
@@ -18,7 +18,7 @@ mod fetch;
 mod messages;
 
 use crate::{
-    backup::{backup, delete, prune_archives},
+    backup::{delete, prune_archives, backup as backup_fn},
     build::build,
     config::{ConfAction, load_config, run_conf},
     fetch::{FetchMode, fetch},
@@ -53,6 +53,7 @@ enum Commands {
     Run {
         #[arg(short, long)]
         prune: bool,
+
         #[arg(short = 'l', long)]
         legacy: bool,
     },
@@ -63,6 +64,7 @@ enum Commands {
         clean: bool,
         #[arg(short, long)]
         force: bool,
+
         #[arg(short = 'l', long)]
         legacy: bool,
     },
@@ -155,26 +157,37 @@ fn run(cli: Cli) -> Result<()> {
     // Enforce top-level flag rules
     enforce_flag_rules(&cli)?;
 
-    // Normalize CLI subcommand + top-level flags into a single internal Action
+    // Handle top-level flags FIRST (always)
+    if cli.backup {
+        backup_fn(
+            Path::new(&cfg.paths.output_dir),
+            Path::new(&cfg.paths.archive_dir),
+            cli.force,
+        )?;
+    }
+
+    if cli.clean {
+        delete(Path::new(&cfg.paths.output_dir), cli.force)?;
+    }
+
+    if cli.prune {
+        prune_archives(&cfg, false, cli.backup)?;
+    }
+
+    // Convert CLI subcommand + top-level flags into normalized internal Action
     let action: Action = match &cli.command {
         Some(Commands::Conf { default, show, edit: _ }) => {
             Action::Conf(conf_action(*default, *show))
         }
 
         Some(Commands::Run { prune, legacy }) => Action::Run { prune: *prune, legacy: *legacy },
-
-        Some(Commands::Build { backup, clean, force, legacy }) => {
-            // Merge top-level backup/clean flags with Build subcommand
-            Action::Build {
-                backup: *backup || cli.backup,
-                clean: *clean || cli.clean,
-                force: *force || cli.force,
-                legacy: *legacy,
-            }
-        }
-
+        Some(Commands::Build { backup, clean, force, legacy }) => Action::Build {
+            backup: *backup,
+            clean: *clean,
+            force: *force,
+            legacy: *legacy,
+        },
         Some(Commands::Fetch { prune }) => Action::Fetch { prune: *prune },
-
         None => Action::TopLevel {
             backup: cli.backup,
             clean: cli.clean,
@@ -183,31 +196,20 @@ fn run(cli: Cli) -> Result<()> {
         },
     };
 
-    // **Unified handling for backup/clean/prune BEFORE main subcommand**
-    match &action {
-        Action::Build { backup, clean, force, .. } | Action::TopLevel { backup, clean, prune: _, force } => {
-            if *backup {
-                backup(
-                    Path::new(&cfg.paths.output_dir),
-                    Path::new(&cfg.paths.archive_dir),
-                    *force,
-                )?;
-            }
-            if *clean {
-                delete(Path::new(&cfg.paths.output_dir), *force)?;
-            }
-            if let Action::TopLevel { prune, .. } = action {
-                if prune {
-                    prune_archives(&cfg, false, *backup)?;
-                }
+    // Dispatch subcommands
+    match action {
+        Action::Conf(conf) => {
+            run_conf(conf)?;
+        }
+
+        Action::TopLevel { backup: _, clean: _, prune: _, force: _ } => {
+            // If no subcommand or top-level flags, show help
+            if !(cli.backup || cli.clean || cli.prune) {
+                Cli::command().print_help()?;
+                println!();
+                return Err(anyhow!("No command or top-level action specified"));
             }
         }
-        _ => {}
-    }
-
-    // Dispatch main subcommand logic
-    match action {
-        Action::Conf(conf) => run_conf(conf)?,
 
         Action::Run { prune, legacy } => {
             let (temp_dir, version) = fetch(&cfg, FetchMode::Remote)?;
@@ -218,12 +220,13 @@ fn run(cli: Cli) -> Result<()> {
                 &version,
                 legacy,
             )?;
+
             if prune {
                 prune_archives(&cfg, true, false)?;
             }
         }
 
-        Action::Build { backup: _, clean: _, force: _, legacy } => {
+        Action::Build { backup: do_backup, clean: do_clean, force: do_force, legacy } => {
             let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
             warn_legacy_mode(legacy);
             build(
@@ -232,21 +235,24 @@ fn run(cli: Cli) -> Result<()> {
                 &version,
                 legacy,
             )?;
+
+            if do_backup {
+                backup_fn(
+                    Path::new(&cfg.paths.output_dir),
+                    Path::new(&cfg.paths.archive_dir),
+                    do_force,
+                )?;
+            }
+
+            if do_clean {
+                delete(Path::new(&cfg.paths.output_dir), do_force)?;
+            }
         }
 
         Action::Fetch { prune } => {
             let _ = fetch(&cfg, FetchMode::Remote)?;
             if prune {
                 prune_archives(&cfg, true, false)?;
-            }
-        }
-
-        Action::TopLevel { backup: _, clean: _, prune: _, force: _ } => {
-            // Already handled in unified top-level backup/clean above
-            if !(cli.backup || cli.clean || cli.prune) {
-                Cli::command().print_help()?;
-                println!();
-                return Err(anyhow!("No command or top-level action specified"));
             }
         }
     }
