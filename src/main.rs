@@ -180,6 +180,7 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
 fn run_action(cfg: &crate::config::Config, action: Action) -> Result<()> {
     match action {
         Action::Conf(conf) => run_conf(conf)?,
+
         Action::Fetch { prune } => {
             fetch(cfg, FetchMode::Remote)?;
             if prune {
@@ -201,7 +202,6 @@ fn run_action(cfg: &crate::config::Config, action: Action) -> Result<()> {
                     force,
                 )?;
             }
-            
             if do_clean {
                 delete(Path::new(&cfg.paths.output_dir), force)?;
             }
@@ -219,7 +219,40 @@ fn run_action(cfg: &crate::config::Config, action: Action) -> Result<()> {
                 prune_archives(cfg, true, false)?;
             }
         }
+
+        Action::Build {
+            backup: do_backup,
+            clean: do_clean,
+            force,
+            prune,
+            legacy,
+        } => {
+            if do_backup {
+                backup(
+                    Path::new(&cfg.paths.output_dir),
+                    Path::new(&cfg.paths.archive_dir),
+                    force,
+                )?;
+            }
+            if do_clean {
+                delete(Path::new(&cfg.paths.output_dir), force)?;
+            }
+
+            let (temp_dir, version) = fetch(cfg, FetchMode::Local)?;
+            warn_legacy_mode(legacy);
+            build(
+                temp_dir.path(),
+                Path::new(&cfg.paths.output_dir),
+                &version,
+                legacy,
+            )?;
+
+            if prune {
+                prune_archives(cfg, true, false)?;
+            }
+        }
     }
+
     Ok(())
 }
 
