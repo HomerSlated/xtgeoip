@@ -220,10 +220,7 @@ fn run_action(cfg: &crate::config::Config, action: Action) -> Result<()> {
             }
         }
     }
-}        
 
-
-    }
     Ok(())
 }
 
