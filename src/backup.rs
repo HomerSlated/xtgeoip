@@ -149,7 +149,7 @@ fn gather_files(
     // If version file is missing, propagate error to caller
     if version_result.is_err() {
         return Err(anyhow!(
-            "This is a test: {}. Use -f to force operation",
+            "Version file missing: {}. Use -f to force operation",
             version_path(data_dir).display()
         ));
     }
