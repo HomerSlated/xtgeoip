@@ -176,21 +176,45 @@ fn run(cli: Cli) -> Result<()> {
     // Enforce top-level flag rules
     enforce_flag_rules(&cli)?;
 
-    // Handle global flags: backup → clean → prune
-    if cli.backup {
-        backup(
-            Path::new(&cfg.paths.output_dir),
-            Path::new(&cfg.paths.archive_dir),
-            cli.force,
-        )?;
+    // Validate unsupported/ambiguous flag combinations for subcommands
+    if let Some(action) = &cli.command {
+        match action {
+            Commands::Build { prune, force, .. } => {
+                if *prune && *force {
+                    return Err(anyhow!("Unsupported: --prune cannot be used with --force for build"));
+                }
+            }
+            Commands::Run { prune, force, backup: do_backup, .. } => {
+                if *prune && *force && *do_backup {
+                    return Err(anyhow!("Unsupported: -b -p -f combination is ambiguous in run"));
+                }
+            }
+            Commands::Fetch { .. } => {
+                if cli.backup || cli.clean {
+                    return Err(anyhow!("Unsupported: -b or -c is invalid for fetch"));
+                }
+            }
+            Commands::Conf { .. } => {
+                // handled by clap; nothing special
+            }
+        }
     }
 
-    if cli.clean {
-        delete(Path::new(&cfg.paths.output_dir), cli.force)?;
-    }
-
-    if cli.prune {
-        prune_archives(&cfg, false, cli.backup)?;
+    // Top-level global flags only if no subcommand
+    if cli.command.is_none() {
+        if cli.backup {
+            backup(
+                Path::new(&cfg.paths.output_dir),
+                Path::new(&cfg.paths.archive_dir),
+                cli.force,
+            )?;
+        }
+        if cli.clean {
+            delete(Path::new(&cfg.paths.output_dir), cli.force)?;
+        }
+        if cli.prune {
+            prune_archives(&cfg, false, cli.backup)?;
+        }
     }
 
     // Convert CLI subcommand into normalized Action
@@ -222,6 +246,7 @@ fn run(cli: Cli) -> Result<()> {
             Action::Conf(conf) => run_conf(conf)?,
 
             Action::Run { prune, legacy, backup: do_backup, clean: do_clean, force } => {
+                // Only call each operation once
                 if do_backup {
                     backup(
                         Path::new(&cfg.paths.output_dir),
@@ -232,9 +257,12 @@ fn run(cli: Cli) -> Result<()> {
                 if do_clean {
                     delete(Path::new(&cfg.paths.output_dir), force)?;
                 }
+
                 let (temp_dir, version) = fetch(&cfg, FetchMode::Remote)?;
                 warn_legacy_mode(legacy);
+
                 build(temp_dir.path(), Path::new(&cfg.paths.output_dir), &version, legacy)?;
+
                 if prune {
                     prune_archives(&cfg, true, false)?;
                 }
@@ -251,8 +279,10 @@ fn run(cli: Cli) -> Result<()> {
                 if do_clean {
                     delete(Path::new(&cfg.paths.output_dir), force)?;
                 }
+
                 let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
                 warn_legacy_mode(legacy);
+
                 build(temp_dir.path(), Path::new(&cfg.paths.output_dir), &version, legacy)?;
 
                 if do_prune {
