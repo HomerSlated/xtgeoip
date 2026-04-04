@@ -11,18 +11,10 @@
 ///
 /// Downloads, extracts, and converts GeoIP CSV databases into binary IP
 /// range data files, compatible with the Linux x_tables xt_geoip module.
+use std::{path::Path, process};
 
-use std::{
-    path::Path,
-    process,
-};
-
-use anyhow::{anyhow, Result};
-use clap::{
-    error::ErrorKind,
-    CommandFactory,
-    Parser,Subcommand,
-};
+use anyhow::{Result, anyhow};
+use clap::{CommandFactory, Parser, Subcommand, error::ErrorKind};
 
 mod backup;
 mod build;
@@ -105,16 +97,32 @@ enum Commands {
 
 /// Internal normalized CLI actions
 enum Action {
-    Run { prune: bool, legacy: bool, backup: bool, clean: bool, force: bool },
-    Build { legacy: bool, backup: bool, clean: bool, force: bool, prune: bool },
-    Fetch { prune: bool },
+    Run {
+        prune: bool,
+        legacy: bool,
+        backup: bool,
+        clean: bool,
+        force: bool,
+    },
+    Build {
+        legacy: bool,
+        backup: bool,
+        clean: bool,
+        force: bool,
+        prune: bool,
+    },
+    Fetch {
+        prune: bool,
+    },
     Conf(ConfAction),
 }
 
 /// Warn user if legacy mode is enabled
 fn warn_legacy_mode(legacy: bool) {
     if legacy {
-        warn("Warning: Legacy Mode activated. See documentation for collisions.");
+        warn(
+            "Warning: Legacy Mode activated. See documentation for collisions.",
+        );
     }
 }
 
@@ -144,12 +152,22 @@ fn enforce_flag_rules(cli: &Cli) -> Result<()> {
 fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
     if let Some(cmd) = &cli.command {
         match cmd {
-            Commands::Conf { default, show, edit: _ } => {
-                Ok(Some(Action::Conf(conf_action(*default, *show))))
-            }
-            Commands::Run { prune, legacy, backup, clean, force } => {
+            Commands::Conf {
+                default,
+                show,
+                edit: _,
+            } => Ok(Some(Action::Conf(conf_action(*default, *show)))),
+            Commands::Run {
+                prune,
+                legacy,
+                backup,
+                clean,
+                force,
+            } => {
                 if *prune && *force && *backup {
-                    return Err(anyhow!("Unsupported: -b -p -f combination is ambiguous in run"));
+                    return Err(anyhow!(
+                        "Unsupported: -b -p -f combination is ambiguous in run"
+                    ));
                 }
                 Ok(Some(Action::Run {
                     prune: *prune,
@@ -159,9 +177,18 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                     force: *force,
                 }))
             }
-            Commands::Build { prune, force, legacy, backup, clean } => {
+            Commands::Build {
+                prune,
+                force,
+                legacy,
+                backup,
+                clean,
+            } => {
                 if *prune && *force {
-                    return Err(anyhow!("Unsupported: --prune cannot be used with --force for build"));
+                    return Err(anyhow!(
+                        "Unsupported: --prune cannot be used with --force for \
+                         build"
+                    ));
                 }
                 Ok(Some(Action::Build {
                     legacy: *legacy,
@@ -173,7 +200,9 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
             }
             Commands::Fetch { prune } => {
                 if cli.backup || cli.clean {
-                    return Err(anyhow!("Unsupported: -b or -c is invalid for fetch"));
+                    return Err(anyhow!(
+                        "Unsupported: -b or -c is invalid for fetch"
+                    ));
                 }
                 Ok(Some(Action::Fetch { prune: *prune }))
             }
@@ -282,7 +311,11 @@ fn run(cli: Cli) -> Result<()> {
     // Handle global flags only if no subcommand
     if cli.command.is_none() {
         if cli.backup {
-            backup(Path::new(&cfg.paths.output_dir), Path::new(&cfg.paths.archive_dir), cli.force)?;
+            backup(
+                Path::new(&cfg.paths.output_dir),
+                Path::new(&cfg.paths.archive_dir),
+                cli.force,
+            )?;
         }
         if cli.clean {
             delete(Path::new(&cfg.paths.output_dir), cli.force)?;
@@ -307,7 +340,6 @@ fn run(cli: Cli) -> Result<()> {
     Ok(())
 }
 
-
 fn main() -> Result<()> {
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
@@ -317,7 +349,10 @@ fn main() -> Result<()> {
                 return Ok(());
             }
             _ => {
-                log_early_error(&format!("CLI argument parsing failed: {}", e.kind()));
+                log_early_error(&format!(
+                    "CLI argument parsing failed: {}",
+                    e.kind()
+                ));
                 e.print()?;
                 process::exit(2);
             }
