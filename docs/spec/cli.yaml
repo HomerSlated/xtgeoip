@@ -127,6 +127,15 @@ commands:
           code: ambiguous_prune_target
           args: { left: "fetch", right: "backup" }
 
+  version:
+    kind: FlagCommand
+    summary: Show the program version.
+    allowed_flags: []
+    examples:
+      - cmd: "xtgeoip -V"
+        outcome: "display version"
+        valid: true
+
   conf:
     kind: SelectorCommand
     summary: Configuration operations.

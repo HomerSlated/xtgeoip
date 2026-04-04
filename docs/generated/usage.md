@@ -41,3 +41,8 @@ Fetch, then build, optionally wrapping with backup/clean/prune.
 - `xtgeoip run -c -p -f` → unsupported option, ambiguous and prune does not support force
 - `xtgeoip run -b -c -p` → unsupported option, ambiguous (does prune apply to fetch or backup?)
 
+## version
+Show the program version.
+
+- `xtgeoip -V` → display version
+

@@ -22,6 +22,7 @@ pub const CLI_MATRIX: &[CliExample] = &[
     CliExample { cmd: "xtgeoip run -c -f", valid: true, outcome: "force clean without manifest, then fetch, then build" },
     CliExample { cmd: "xtgeoip run -c -p -f", valid: false, outcome: "" },
     CliExample { cmd: "xtgeoip run -b -c -p", valid: false, outcome: "" },
+    CliExample { cmd: "xtgeoip -V", valid: true, outcome: "display version" },
 ];
 
 #[cfg(test)]

@@ -16,3 +16,7 @@ Command: run
 Summary: Fetch, then build, optionally wrapping with backup/clean/prune.
 Flags: ["b", "c", "p", "f", "l"]
 
+Command: version
+Summary: Show the program version.
+Flags: []
+
