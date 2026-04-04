@@ -174,24 +174,34 @@ fn run(cli: Cli) -> Result<()> {
     // Enforce top-level flag rules
     enforce_flag_rules(&cli)?;
 
+    // Execute top-level flags that must run before any subcommand
+    if cli.backup {
+        backup(
+            Path::new(&cfg.paths.output_dir),
+            Path::new(&cfg.paths.archive_dir),
+            cli.force,
+        )?;
+    }
+
+    if cli.clean {
+        delete(Path::new(&cfg.paths.output_dir), cli.force)?;
+    }
+
     // Convert CLI subcommand + top-level flags into normalized internal Action
     let action: Action = match &cli.command {
-        Some(Commands::Conf {
-            default,
-            show,
-            edit: _,
-        }) => Action::Conf(conf_action(*default, *show)),
+        Some(Commands::Conf { default, show, edit: _ }) => {
+            let conf = if *default {
+                ConfAction::Default
+            } else if *show {
+                ConfAction::Show
+            } else {
+                ConfAction::Edit
+            };
+            Action::Conf(conf)
+        }
 
-        Some(Commands::Run { prune, legacy }) => Action::Run {
-            prune: *prune,
-            legacy: *legacy,
-        },
-        Some(Commands::Build {
-            backup,
-            clean,
-            force,
-            legacy,
-        }) => Action::Build {
+        Some(Commands::Run { prune, legacy }) => Action::Run { prune: *prune, legacy: *legacy },
+        Some(Commands::Build { backup, clean, force, legacy }) => Action::Build {
             backup: *backup,
             clean: *clean,
             force: *force,
@@ -210,7 +220,6 @@ fn run(cli: Cli) -> Result<()> {
     // Dispatch subcommands
     match action {
         Action::Conf(conf) => {
-            // run_conf still runs before config is used elsewhere
             run_conf(conf)?;
         }
 
@@ -229,12 +238,20 @@ fn run(cli: Cli) -> Result<()> {
             }
         }
 
-        Action::Build {
-            backup: do_backup,
-            clean: do_clean,
-            force: do_force,
-            legacy,
-        } => {
+        Action::Build { backup: do_backup, clean: do_clean, force: do_force, legacy } => {
+            // Respect ordering: backup → clean → build
+            if do_backup {
+                backup(
+                    Path::new(&cfg.paths.output_dir),
+                    Path::new(&cfg.paths.archive_dir),
+                    do_force,
+                )?;
+            }
+
+            if do_clean {
+                delete(Path::new(&cfg.paths.output_dir), do_force)?;
+            }
+
             let (temp_dir, version) = fetch(&cfg, FetchMode::Local)?;
             warn_legacy_mode(legacy);
             build(
@@ -243,17 +260,6 @@ fn run(cli: Cli) -> Result<()> {
                 &version,
                 legacy,
             )?;
-
-            if do_backup {
-                backup(
-                    Path::new(&cfg.paths.output_dir),
-                    Path::new(&cfg.paths.archive_dir),
-                    do_force,
-                )?;
-            }
-            if do_clean {
-                delete(Path::new(&cfg.paths.output_dir), do_force)?;
-            }
         }
 
         Action::Fetch { prune } => {
@@ -263,54 +269,19 @@ fn run(cli: Cli) -> Result<()> {
             }
         }
 
-        Action::TopLevel {
-            backup: do_backup,
-            clean: do_clean,
-            prune: do_prune,
-            force,
-        } => {
-            if do_backup {
-                backup(
-                    Path::new(&cfg.paths.output_dir),
-                    Path::new(&cfg.paths.archive_dir),
-                    force,
-                )?;
-            }
-
-            if do_clean {
-                delete(Path::new(&cfg.paths.output_dir), force)?;
-            }
-
+        Action::TopLevel { prune: do_prune, .. } => {
+            // Only prune left, as backup/clean already handled
             if do_prune {
-                prune_archives(&cfg, false, do_backup)?;
+                prune_archives(&cfg, false, cli.backup)?;
             }
 
-            // If no flags were specified, show help
-            if !(do_backup || do_clean || do_prune) {
+            // If no flags or subcommand, show help
+            if !(cli.backup || cli.clean || do_prune) {
                 Cli::command().print_help()?;
                 println!();
-                return Err(anyhow!(
-                    "No command or top-level action specified"
-                ));
+                return Err(anyhow!("No command or top-level action specified"));
             }
         }
-    }
-
-    // Handle top-level flags
-    if cli.backup {
-        backup(
-            Path::new(&cfg.paths.output_dir),
-            Path::new(&cfg.paths.archive_dir),
-            cli.force,
-        )?;
-    }
-
-    if cli.clean {
-        delete(Path::new(&cfg.paths.output_dir), cli.force)?;
-    }
-
-    if cli.prune {
-        prune_archives(&cfg, false, cli.backup)?;
     }
 
     Ok(())
