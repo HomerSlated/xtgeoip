@@ -133,14 +133,7 @@ fn main() -> Result<()> {
 }
 
 fn run(cli: Cli) -> Result<()> {
-    // Handle `Conf` early
-    if let Some(Commands::Conf { default, show, edit }) = &cli.command {
-        let action = conf_action(*default, *show);
-        run_conf(action)?;
-        return Ok(());
-    }
-
-    // Load system config
+    // Load system configuration (needed for most actions except Conf)
     let cfg = load_config().map_err(|e| {
         log_early_error(&format!("Failed to load config: {}", e));
         eprintln!("Fatal: Failed to load config: {}", e);
@@ -154,6 +147,36 @@ fn run(cli: Cli) -> Result<()> {
 
     // Enforce top-level flag rules
     enforce_flag_rules(&cli)?;
+
+    // Convert CLI subcommand + top-level flags into normalized internal Action
+    let action: Action = match &cli.command {
+        Some(Commands::Conf { default, show, edit: _ }) => {
+            let conf = if *default {
+                ConfAction::Default
+                    } else if *show {
+                        ConfAction::Show
+                    } else {
+                        ConfAction::Edit
+                    };
+            Action::Conf(conf)
+        }
+    
+        Some(Commands::Run { prune, legacy }) => Action::Run { prune: *prune, legacy: *legacy },
+        Some(Commands::Build { backup, clean, force, legacy }) => Action::Build {
+            backup: *backup,
+            clean: *clean,
+            force: *force,
+            legacy: *legacy,
+        },
+        
+        Some(Commands::Fetch { prune }) => Action::Fetch { prune: *prune },
+        None => Action::TopLevel {
+            backup: cli.backup,
+            clean: cli.clean,
+            prune: cli.prune,
+            force: cli.force,
+        },
+    };
 
     // Dispatch subcommands
     match &cli.command {
