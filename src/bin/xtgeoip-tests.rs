@@ -3,7 +3,7 @@
 
 use serde::Deserialize;
 use std::fs;
-use std::process::{Command, exit};
+use std::process::Command;
 use std::env;
 
 #[derive(Debug, Deserialize)]
