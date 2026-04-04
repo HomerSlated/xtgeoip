@@ -240,7 +240,7 @@ fn run(cli: Cli) -> Result<()> {
                 }
             }
 
-            Action::Build { legacy, backup: do_backup, clean: do_clean, force, prune: } => {
+            Action::Build { legacy, backup: do_backup, clean: do_clean, force, prune: do_prune } => {
                 if do_backup {
                     backup(
                         Path::new(&cfg.paths.output_dir),
@@ -255,7 +255,7 @@ fn run(cli: Cli) -> Result<()> {
                 warn_legacy_mode(legacy);
                 build(temp_dir.path(), Path::new(&cfg.paths.output_dir), &version, legacy)?;
 
-                if prune {
+                if do_prune {
                     prune_archives(&cfg, true, false)?;
                 }
             }
