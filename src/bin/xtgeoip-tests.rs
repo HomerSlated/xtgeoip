@@ -3,7 +3,7 @@
 
 use serde::Deserialize;
 use std::fs;
-use std::process::Command;
+use std::process::{Command, exit};
 use std::env;
 
 #[derive(Debug, Deserialize)]
@@ -38,12 +38,11 @@ fn main() -> anyhow::Result<()> {
 
         // Split command into program + args
         let mut parts = tc.cmd.split_whitespace();
-            Some(p) => p,
-            None => continue,
+        let program = parts.next().unwrap();
         let args: Vec<&str> = parts.collect();
-
+        let xtgeoip_path = format!("target/release/{}", program);
         let status = Command::new("sudo")
-            .arg("target/release/xtgeoip")
+            .arg(&xtgeoip_path)
             .args(args)
             .status()?;
 
