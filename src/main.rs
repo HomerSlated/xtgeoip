@@ -6,11 +6,6 @@
 ///
 /// Inspired by xt_geoip_build_maxmind (Jan Engelhardt, Philip
 /// Prindeville), now part of Debian's xtables-addons package.
-/// xtgeoip © Haze N Sparkle 2026 (MIT)
-/// xtgeoip © Haze N Sparkle 2026 (MIT)
-///
-/// Downloads, extracts, and converts GeoIP CSV databases into binary IP
-/// range data files, compatible with the Linux x_tables xt_geoip module.
 use std::{path::Path, process};
 
 use anyhow::{Result, anyhow};
@@ -95,7 +90,6 @@ enum Commands {
     },
 }
 
-/// Internal normalized CLI actions
 enum Action {
     Run {
         prune: bool,
@@ -117,7 +111,6 @@ enum Action {
     Conf(ConfAction),
 }
 
-/// Warn user if legacy mode is enabled
 fn warn_legacy_mode(legacy: bool) {
     if legacy {
         warn(
@@ -126,7 +119,6 @@ fn warn_legacy_mode(legacy: bool) {
     }
 }
 
-/// Convert CLI conf args to ConfAction
 fn conf_action(default: bool, show: bool) -> ConfAction {
     if default {
         ConfAction::Default
@@ -137,13 +129,23 @@ fn conf_action(default: bool, show: bool) -> ConfAction {
     }
 }
 
-/// Enforce global flag rules
+/// Enforce global flag rules exactly per spec
 fn enforce_flag_rules(cli: &Cli) -> Result<()> {
-    if cli.force && !(cli.backup || cli.clean) {
-        return Err(anyhow!("--force only applies to --backup or --clean"));
-    }
-    if cli.prune && !cli.backup {
-        return Err(anyhow!("--prune requires --backup"));
+    if cli.command.is_none() {
+        let b = cli.backup;
+        let c = cli.clean;
+        let p = cli.prune;
+        let f = cli.force;
+
+        // -p alone is invalid
+        if p && !b && !c {
+            return Err(anyhow!("Unsupported: -p alone is ambiguous"));
+        }
+
+        // force only applies to backup or clean
+        if f && !(b || c) {
+            return Err(anyhow!("--force only applies to --backup or --clean"));
+        }
     }
     Ok(())
 }
@@ -152,11 +154,10 @@ fn enforce_flag_rules(cli: &Cli) -> Result<()> {
 fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
     if let Some(cmd) = &cli.command {
         match cmd {
-            Commands::Conf {
-                default,
-                show,
-                edit: _,
-            } => Ok(Some(Action::Conf(conf_action(*default, *show)))),
+            Commands::Conf { default, show, edit: _ } => {
+                Ok(Some(Action::Conf(conf_action(*default, *show))))
+            }
+
             Commands::Run {
                 prune,
                 legacy,
@@ -164,9 +165,15 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                 clean,
                 force,
             } => {
-                if *prune && *force && *backup {
+                // Ambiguous combinations
+                if *prune && *force && *clean {
                     return Err(anyhow!(
-                        "Unsupported: -b -p -f combination is ambiguous in run"
+                        "Unsupported: -c -p -f combination is ambiguous in run"
+                    ));
+                }
+                if *backup && *clean && *prune {
+                    return Err(anyhow!(
+                        "Unsupported: -b -c -p combination is ambiguous in run"
                     ));
                 }
                 Ok(Some(Action::Run {
@@ -177,6 +184,7 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                     force: *force,
                 }))
             }
+
             Commands::Build {
                 prune,
                 force,
@@ -184,10 +192,14 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                 backup,
                 clean,
             } => {
-                if *prune && *force {
+                // prune alone invalid
+                if *prune && !*backup {
+                    return Err(anyhow!("Unsupported: --prune cannot be used without --backup for build"));
+                }
+                // ambiguous combination
+                if *prune && *force && *backup && *clean {
                     return Err(anyhow!(
-                        "Unsupported: --prune cannot be used with --force for \
-                         build"
+                        "Unsupported: -b -c -p -f combination is ambiguous for build"
                     ));
                 }
                 Ok(Some(Action::Build {
@@ -198,21 +210,35 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                     prune: *prune,
                 }))
             }
+
             Commands::Fetch { prune } => {
                 if cli.backup || cli.clean {
-                    return Err(anyhow!(
-                        "Unsupported: -b or -c is invalid for fetch"
-                    ));
+                    return Err(anyhow!("Unsupported: -b or -c is invalid for fetch"));
                 }
                 Ok(Some(Action::Fetch { prune: *prune }))
             }
         }
     } else {
-        Ok(None)
+        // Top-level flags → synthetic Action::Run
+        let b = cli.backup;
+        let c = cli.clean;
+        let p = cli.prune;
+        let f = cli.force;
+
+        if !b && !c && !p {
+            return Ok(None);
+        }
+
+        Ok(Some(Action::Run {
+            backup: b,
+            clean: c,
+            force: f,
+            prune: p,
+            legacy: false,
+        }))
     }
 }
 
-/// Run an Action
 fn run_action(cfg: &crate::config::Config, action: Action) -> Result<()> {
     match action {
         Action::Conf(conf) => run_conf(conf)?,
@@ -293,42 +319,20 @@ fn run_action(cfg: &crate::config::Config, action: Action) -> Result<()> {
 }
 
 fn run(cli: Cli) -> Result<()> {
-    // Load config
     let cfg = load_config().map_err(|e| {
         log_early_error(&format!("Failed to load config: {}", e));
         eprintln!("Fatal: Failed to load config: {}", e);
         e
     })?;
 
-    // Init logger if configured
     if let Some(log_file) = cfg.logging.as_ref().map(|l| l.log_file.as_str()) {
         init_logger(log_file)?;
     }
 
-    // Validate global flags
     enforce_flag_rules(&cli)?;
 
-    // Handle global flags only if no subcommand
-    if cli.command.is_none() {
-        if cli.backup {
-            backup(
-                Path::new(&cfg.paths.output_dir),
-                Path::new(&cfg.paths.archive_dir),
-                cli.force,
-            )?;
-        }
-        if cli.clean {
-            delete(Path::new(&cfg.paths.output_dir), cli.force)?;
-        }
-        if cli.prune {
-            prune_archives(&cfg, false, cli.backup)?;
-        }
-    }
-
-    // Normalize CLI to Action
     let action = normalize_cli_to_action(&cli)?;
 
-    // Execute
     if let Some(action) = action {
         run_action(&cfg, action)?;
     } else if !(cli.backup || cli.clean || cli.prune) {
