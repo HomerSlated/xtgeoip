@@ -136,7 +136,7 @@ fn run(cli: Cli) -> Result<()> {
     // Handle `Conf` early
     if let Some(Commands::Conf { default, show, edit }) = &cli.command {
         let action = conf_action(*default, *show);
-        run_conf(&action)?;
+        run_conf(action)?;
         return Ok(());
     }
 
