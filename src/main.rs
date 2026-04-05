@@ -212,21 +212,8 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
             }
 
             Commands::Fetch { prune } => {
-                if cli.backup || cli.clean || cli.legacy {
-                    // -b, -c, or -l are not allowed for fetch
-                    return Err(anyhow!(
-                            "Unsupported: {} is not valid for fetch",
-                            [
-                            if cli.backup { Some("-b") } else { None },
-                            if cli.clean { Some("-c") } else { None },
-                            if cli.legacy { Some("-l") } else { None },
-                            ]
-                            .iter()
-                            .flatten()
-                            .cloned()
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    ));
+                if cli.backup || cli.clean {
+                    return Err(anyhow!("Unsupported: -b or -c is invalid for fetch"));
                 }
                 Ok(Some(Action::Fetch { prune: *prune }))
             }
