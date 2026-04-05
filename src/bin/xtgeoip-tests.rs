@@ -1,10 +1,9 @@
 //! xtgeoip-tests
 //! Run xtgeoip commands from docs/generated/testcases.yaml
 
+use std::{env, fs, process::Command};
+
 use serde::Deserialize;
-use std::fs;
-use std::process::Command;
-use std::env;
 
 #[derive(Debug, Deserialize)]
 struct Testcase {
