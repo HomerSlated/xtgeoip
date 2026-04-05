@@ -113,9 +113,7 @@ enum Action {
 
 fn warn_legacy_mode(legacy: bool) {
     if legacy {
-        warn(
-            "Legacy Mode activated. See documentation for collisions.",
-        );
+        warn("Legacy Mode activated. See documentation for collisions.");
     }
 }
 
@@ -154,9 +152,11 @@ fn enforce_flag_rules(cli: &Cli) -> Result<()> {
 fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
     if let Some(cmd) = &cli.command {
         match cmd {
-            Commands::Conf { default, show, edit: _ } => {
-                Ok(Some(Action::Conf(conf_action(*default, *show))))
-            }
+            Commands::Conf {
+                default,
+                show,
+                edit: _,
+            } => Ok(Some(Action::Conf(conf_action(*default, *show)))),
 
             Commands::Run {
                 prune,
@@ -194,12 +194,16 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
             } => {
                 // prune alone invalid
                 if *prune && !*backup {
-                    return Err(anyhow!("Unsupported: --prune cannot be used without --backup for build"));
+                    return Err(anyhow!(
+                        "Unsupported: --prune cannot be used without --backup \
+                         for build"
+                    ));
                 }
                 // ambiguous combination
                 if *prune && *force && *backup && *clean {
                     return Err(anyhow!(
-                        "Unsupported: -b -c -p -f combination is ambiguous for build"
+                        "Unsupported: -b -c -p -f combination is ambiguous \
+                         for build"
                     ));
                 }
                 Ok(Some(Action::Build {
@@ -213,7 +217,9 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
 
             Commands::Fetch { prune } => {
                 if cli.backup || cli.clean {
-                    return Err(anyhow!("Unsupported: -b or -c is invalid for fetch"));
+                    return Err(anyhow!(
+                        "Unsupported: -b or -c is invalid for fetch"
+                    ));
                 }
                 Ok(Some(Action::Fetch { prune: *prune }))
             }
