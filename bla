@@ -1,0 +1,33 @@
+30-[f] [xtgeoip build -p]
+31-Error: Unsupported: --prune cannot be used without --backup for build
+32:FAILED (exit 1)
+33-
+34-[f] [xtgeoip build -c -f]
+35-Force deleted binary data files from /usr/share/xt_geoip
+--
+52-[f] [xtgeoip build -b -c -p -f]
+53-Error: Unsupported: -b -c -p -f combination is ambiguous for build
+54:FAILED (exit 1)
+55-
+56-[f] [xtgeoip fetch]
+57-Checking remote archive version...
+--
+73-
+74-For more information, try '--help'.
+75:FAILED (exit 2)
+76-
+77-[f] [xtgeoip fetch -b]
+78-Error: Unsupported: -b or -c is invalid for fetch
+79:FAILED (exit 1)
+80-
+81-[f] [xtgeoip run]
+82-Checking remote archive version...
+--
+138-[f] [xtgeoip run -c -p -f]
+139-Error: Unsupported: -c -p -f combination is ambiguous in run
+140:FAILED (exit 1)
+141-
+142-[f] [xtgeoip run -b -c -p]
+143-Error: Unsupported: -b -c -p combination is ambiguous in run
+144:FAILED (exit 1)
+145-
