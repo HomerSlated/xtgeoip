@@ -301,7 +301,7 @@ fn run_action(cfg: &crate::config::Config, action: Action) -> Result<()> {
 fn run(cli: Cli) -> Result<()> {
     let cfg = load_config().map_err(|e| {
         log_early_error(&format!("Failed to load config: {}", e));
-        eprintln!("Fatal: Failed to load config: {}", e);
+        // eprintln!("Fatal: Failed to load config: {}", e);
         e
     })?;
 
