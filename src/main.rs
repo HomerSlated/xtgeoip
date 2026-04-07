@@ -111,12 +111,6 @@ enum Action {
     Conf(ConfAction),
 }
 
-fn warn_legacy_mode(legacy: bool) {
-    if legacy {
-        warn("Legacy Mode activated. See documentation for collisions.");
-    }
-}
-
 fn conf_action(default: bool, show: bool) -> ConfAction {
     if default {
         ConfAction::Default
@@ -275,7 +269,6 @@ fn run_action(cfg: &crate::config::Config, action: Action) -> Result<()> {
             }
 
             let (temp_dir, version) = fetch(cfg, FetchMode::Remote)?;
-            warn_legacy_mode(legacy);
             build(
                 temp_dir.path(),
                 Path::new(&cfg.paths.output_dir),
@@ -307,7 +300,6 @@ fn run_action(cfg: &crate::config::Config, action: Action) -> Result<()> {
             }
 
             let (temp_dir, version) = fetch(cfg, FetchMode::Local)?;
-            warn_legacy_mode(legacy);
             build(
                 temp_dir.path(),
                 Path::new(&cfg.paths.output_dir),
