@@ -356,6 +356,5 @@ fn main() -> Result<()> {
         process::exit(1);
     }
 
-    run(cli)?;
     Ok(())
 }
