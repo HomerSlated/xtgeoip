@@ -12,35 +12,35 @@
   cmd: xtgeoip build -b -c -p
 - key: f
   cmd: xtgeoip build -b -c -p -f
-- key: f
+- key: p
   cmd: xtgeoip conf
-- key: f
+- key: p
   cmd: xtgeoip conf -s
-- key: f
+- key: p
   cmd: xtgeoip conf -d
 - key: p
   cmd: xtgeoip conf -e
-- key: p
-  cmd: xtgeoip fetch
-- key: p
-  cmd: xtgeoip fetch -p
-- key: p
-  cmd: xtgeoip fetch -l
-- key: p
-  cmd: xtgeoip fetch -b
-- key: p
-  cmd: xtgeoip run
-- key: p
-  cmd: xtgeoip run -l
-- key: p
-  cmd: xtgeoip run -p
-- key: p
-  cmd: xtgeoip run -c -p
-- key: p
-  cmd: xtgeoip run -c -f
-- key: p
-  cmd: xtgeoip run -c -p -f
-- key: p
-  cmd: xtgeoip run -b -c -p
 - key: f
+  cmd: xtgeoip fetch
+- key: f
+  cmd: xtgeoip fetch -p
+- key: f
+  cmd: xtgeoip fetch -l
+- key: f
+  cmd: xtgeoip fetch -b
+- key: f
+  cmd: xtgeoip run
+- key: f
+  cmd: xtgeoip run -l
+- key: f
+  cmd: xtgeoip run -p
+- key: f
+  cmd: xtgeoip run -c -p
+- key: f
+  cmd: xtgeoip run -c -f
+- key: f
+  cmd: xtgeoip run -c -p -f
+- key: f
+  cmd: xtgeoip run -b -c -p
+- key: p
   cmd: xtgeoip -V

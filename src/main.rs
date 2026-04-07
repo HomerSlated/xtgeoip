@@ -22,7 +22,7 @@ use crate::{
     build::build,
     config::{ConfAction, load_config, run_conf},
     fetch::{FetchMode, fetch},
-    messages::{init_logger, log_early_error, warn},
+    messages::{init_logger, log_early_error},
 };
 
 #[derive(Parser)]
@@ -41,6 +41,8 @@ struct Cli {
     force: bool,
     #[arg(short, long, global = true)]
     prune: bool,
+    #[arg(short = 'l', long, global = true)]
+    legacy: bool, // <-- now global
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -50,8 +52,6 @@ enum Commands {
     Run {
         #[arg(short, long)]
         prune: bool,
-        #[arg(short = 'l', long)]
-        legacy: bool,
         #[arg(short, long)]
         backup: bool,
         #[arg(short, long)]
@@ -60,8 +60,6 @@ enum Commands {
         force: bool,
     },
     Build {
-        #[arg(short = 'l', long)]
-        legacy: bool,
         #[arg(short, long)]
         backup: bool,
         #[arg(short, long)]
@@ -144,21 +142,25 @@ fn enforce_flag_rules(cli: &Cli) -> Result<()> {
 
 /// Convert CLI input into normalized Action with validation
 fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
+    // Reject invalid uses of --legacy
+    if cli.legacy {
+        match &cli.command {
+            Some(Commands::Build { .. }) | Some(Commands::Run { .. }) => {} // OK
+            _ => {
+                return Err(anyhow!(
+                    "Unsupported: --legacy only valid with build or run"
+                ));
+            }
+        }
+    }
+
     if let Some(cmd) = &cli.command {
         match cmd {
-            Commands::Conf {
-                default,
-                show,
-                edit: _,
-            } => Ok(Some(Action::Conf(conf_action(*default, *show)))),
+            Commands::Conf { default, show, edit: _ } => {
+                Ok(Some(Action::Conf(conf_action(*default, *show))))
+            }
 
-            Commands::Run {
-                prune,
-                legacy,
-                backup,
-                clean,
-                force,
-            } => {
+            Commands::Run { prune, backup, clean, force } => {
                 // Ambiguous combinations
                 if *prune && *force && *clean {
                     return Err(anyhow!(
@@ -172,36 +174,28 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                 }
                 Ok(Some(Action::Run {
                     prune: *prune,
-                    legacy: *legacy,
+                    legacy: cli.legacy,
                     backup: *backup,
                     clean: *clean,
                     force: *force,
                 }))
             }
 
-            Commands::Build {
-                prune,
-                force,
-                legacy,
-                backup,
-                clean,
-            } => {
+            Commands::Build { prune, force, backup, clean } => {
                 // prune alone invalid
                 if *prune && !*backup {
                     return Err(anyhow!(
-                        "Unsupported: --prune cannot be used without --backup \
-                         for build"
+                        "Unsupported: --prune cannot be used without --backup for build"
                     ));
                 }
                 // ambiguous combination
                 if *prune && *force && *backup && *clean {
                     return Err(anyhow!(
-                        "Unsupported: -b -c -p -f combination is ambiguous \
-                         for build"
+                        "Unsupported: -b -c -p -f combination is ambiguous for build"
                     ));
                 }
                 Ok(Some(Action::Build {
-                    legacy: *legacy,
+                    legacy: cli.legacy,
                     backup: *backup,
                     clean: *clean,
                     force: *force,
@@ -234,7 +228,7 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
             clean: c,
             force: f,
             prune: p,
-            legacy: false,
+            legacy: cli.legacy,
         }))
     }
 }
@@ -250,13 +244,7 @@ fn run_action(cfg: &crate::config::Config, action: Action) -> Result<()> {
             }
         }
 
-        Action::Run {
-            backup: do_backup,
-            clean: do_clean,
-            force,
-            prune,
-            legacy,
-        } => {
+        Action::Run { backup: do_backup, clean: do_clean, force, prune, legacy } => {
             if do_backup {
                 backup(
                     Path::new(&cfg.paths.output_dir),
@@ -281,13 +269,7 @@ fn run_action(cfg: &crate::config::Config, action: Action) -> Result<()> {
             }
         }
 
-        Action::Build {
-            backup: do_backup,
-            clean: do_clean,
-            force,
-            prune,
-            legacy,
-        } => {
+        Action::Build { backup: do_backup, clean: do_clean, force, prune, legacy } => {
             if do_backup {
                 backup(
                     Path::new(&cfg.paths.output_dir),
