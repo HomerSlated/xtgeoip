@@ -145,7 +145,7 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
     // Reject invalid uses of --legacy
     if cli.legacy {
         match &cli.command {
-            Some(Commands::Build { .. }) | Some(Commands::Run { .. }) => {} // OK
+            Some(Commands::Build { .. }) | Some(Commands::Run { .. }) => {} /* OK */
             _ => {
                 return Err(anyhow!(
                     "Unsupported: --legacy only valid with build or run"
@@ -156,11 +156,18 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
 
     if let Some(cmd) = &cli.command {
         match cmd {
-            Commands::Conf { default, show, edit: _ } => {
-                Ok(Some(Action::Conf(conf_action(*default, *show))))
-            }
+            Commands::Conf {
+                default,
+                show,
+                edit: _,
+            } => Ok(Some(Action::Conf(conf_action(*default, *show)))),
 
-            Commands::Run { prune, backup, clean, force } => {
+            Commands::Run {
+                prune,
+                backup,
+                clean,
+                force,
+            } => {
                 // Ambiguous combinations
                 if *prune && *force && *clean {
                     return Err(anyhow!(
@@ -181,17 +188,24 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                 }))
             }
 
-            Commands::Build { prune, force, backup, clean } => {
+            Commands::Build {
+                prune,
+                force,
+                backup,
+                clean,
+            } => {
                 // prune alone invalid
                 if *prune && !*backup {
                     return Err(anyhow!(
-                        "Unsupported: --prune cannot be used without --backup for build"
+                        "Unsupported: --prune cannot be used without --backup \
+                         for build"
                     ));
                 }
                 // ambiguous combination
                 if *prune && *force && *backup && *clean {
                     return Err(anyhow!(
-                        "Unsupported: -b -c -p -f combination is ambiguous for build"
+                        "Unsupported: -b -c -p -f combination is ambiguous \
+                         for build"
                     ));
                 }
                 Ok(Some(Action::Build {
@@ -244,7 +258,13 @@ fn run_action(cfg: &crate::config::Config, action: Action) -> Result<()> {
             }
         }
 
-        Action::Run { backup: do_backup, clean: do_clean, force, prune, legacy } => {
+        Action::Run {
+            backup: do_backup,
+            clean: do_clean,
+            force,
+            prune,
+            legacy,
+        } => {
             if do_backup {
                 backup(
                     Path::new(&cfg.paths.output_dir),
@@ -269,7 +289,13 @@ fn run_action(cfg: &crate::config::Config, action: Action) -> Result<()> {
             }
         }
 
-        Action::Build { backup: do_backup, clean: do_clean, force, prune, legacy } => {
+        Action::Build {
+            backup: do_backup,
+            clean: do_clean,
+            force,
+            prune,
+            legacy,
+        } => {
             if do_backup {
                 backup(
                     Path::new(&cfg.paths.output_dir),
@@ -344,11 +370,11 @@ fn main() -> Result<()> {
     };
 
     if let Err(e) = run(cli) {
-        if let Some(os_err) = e.downcast_ref::<std::io::Error>() {
-            if os_err.kind() == std::io::ErrorKind::PermissionDenied {
-                eprintln!("Error: You must be root to run xtgeoip");
-                process::exit(1);
-            }
+        if let Some(os_err) = e.downcast_ref::<std::io::Error>()
+            && os_err.kind() == std::io::ErrorKind::PermissionDenied
+        {
+            eprintln!("Error: You must be root to run xtgeoip");
+            process::exit(1);
         }
 
         // fallback for other errors

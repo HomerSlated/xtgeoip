@@ -27,7 +27,9 @@ pub fn build(
     legacy: bool,
 ) -> std::io::Result<()> {
     if legacy {
-        messages::warn("Legacy Mode activated. See documentation for collisions.");
+        messages::warn(
+            "Legacy Mode activated. See documentation for collisions.",
+        );
     }
     let (country_id, mut country_name) = load_countries(source_dir, legacy)?;
 
