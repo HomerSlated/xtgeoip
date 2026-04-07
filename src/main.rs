@@ -343,6 +343,19 @@ fn main() -> Result<()> {
         },
     };
 
+    if let Err(e) = run(cli) {
+        if let Some(os_err) = e.downcast_ref::<std::io::Error>() {
+            if os_err.kind() == std::io::ErrorKind::PermissionDenied {
+                eprintln!("Error: You must be root to run xtgeoip");
+                process::exit(1);
+            }
+        }
+
+        // fallback for other errors
+        eprintln!("Error: {}", e);
+        process::exit(1);
+    }
+
     run(cli)?;
     Ok(())
 }
