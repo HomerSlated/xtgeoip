@@ -1,22 +1,22 @@
-- key: p
+- key: f
   cmd: xtgeoip build
-- key: p
+- key: f
   cmd: xtgeoip build -l
-- key: p
+- key: f
   cmd: xtgeoip build -b -p
 - key: f
   cmd: xtgeoip build -p
-- key: p
+- key: f
   cmd: xtgeoip build -c -f
-- key: p
+- key: f
   cmd: xtgeoip build -b -c -p
 - key: f
   cmd: xtgeoip build -b -c -p -f
 - key: f
   cmd: xtgeoip conf
-- key: p
+- key: f
   cmd: xtgeoip conf -s
-- key: p
+- key: f
   cmd: xtgeoip conf -d
 - key: p
   cmd: xtgeoip conf -e
@@ -24,9 +24,9 @@
   cmd: xtgeoip fetch
 - key: p
   cmd: xtgeoip fetch -p
-- key: f
+- key: p
   cmd: xtgeoip fetch -l
-- key: f
+- key: p
   cmd: xtgeoip fetch -b
 - key: p
   cmd: xtgeoip run
@@ -38,9 +38,9 @@
   cmd: xtgeoip run -c -p
 - key: p
   cmd: xtgeoip run -c -f
-- key: f
-  cmd: xtgeoip run -c -p -f
-- key: f
-  cmd: xtgeoip run -b -c -p
 - key: p
+  cmd: xtgeoip run -c -p -f
+- key: p
+  cmd: xtgeoip run -b -c -p
+- key: f
   cmd: xtgeoip -V
