@@ -7,57 +7,28 @@
 /// Inspired by xt_geoip_build_maxmind (Jan Engelhardt, Philip
 /// Prindeville), now part of Debian's xtables-addons package.
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
-use std::{path::Path, process};
-use anyhow::{Result};
-use clap::error::ErrorKind;
-use clap::{CommandFactory, Parser};
+use std::{process, path::Path};
+
+use anyhow::{Result, anyhow};
+use clap::{Parser, CommandFactory, error::ErrorKind};
+
+mod action;
 mod backup;
 mod build;
 mod config;
 mod fetch;
 mod messages;
 mod cli;
-mod action;
 
 use crate::{
-    cli::{Cli, enforce_flag_rules, normalize_cli_to_action},
-    action::Action,
-    backup::{backup, delete, prune_archives},
-    build::build,
-    config::{load_config, run_conf},
-    fetch::{FetchMode, fetch},
+    action::{Action, run_action},
+    config::{ConfAction, load_config, run_conf},
     messages::{init_logger, log_early_error},
 };
+use crate::cli::Cli;
 
-fn run_action(cfg: &crate::config::Config, action: Action) -> Result<()> {
-    match action {
-        Action::Conf(conf) => run_conf(conf)?,
-        Action::TopLevelBackup { clean, force, prune } => {
-            backup(Path::new(&cfg.paths.output_dir), Path::new(&cfg.paths.archive_dir), force)?;
-            if clean { delete(Path::new(&cfg.paths.output_dir), force)?; }
-            if prune { prune_archives(cfg, true, false)?; }
-        }
-        Action::TopLevelClean { force } => { delete(Path::new(&cfg.paths.output_dir), force)?; }
-        Action::Fetch { prune } => {
-            fetch(cfg, FetchMode::Remote)?;
-            if prune { prune_archives(cfg, true, false)?; }
-        }
-        Action::Run { backup: do_backup, clean: do_clean, force, prune, legacy } => {
-            if do_backup { backup(Path::new(&cfg.paths.output_dir), Path::new(&cfg.paths.archive_dir), force)?; }
-            if do_clean { delete(Path::new(&cfg.paths.output_dir), force)?; }
-            let (temp_dir, version) = fetch(cfg, FetchMode::Remote)?;
-            build(temp_dir.path(), Path::new(&cfg.paths.output_dir), &version, legacy)?;
-            if prune { prune_archives(cfg, true, false)?; }
-        }
-        Action::Build { backup: do_backup, clean: do_clean, force, prune, legacy } => {
-            if do_backup { backup(Path::new(&cfg.paths.output_dir), Path::new(&cfg.paths.archive_dir), force)?; }
-            if do_clean { delete(Path::new(&cfg.paths.output_dir), force)?; }
-            let (temp_dir, version) = fetch(cfg, FetchMode::Local)?;
-            build(temp_dir.path(), Path::new(&cfg.paths.output_dir), &version, legacy)?;
-            if prune { prune_archives(cfg, true, false)?; }
-        }
-    }
-    Ok(())
+fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
+    crate::cli::normalize_cli_to_action(cli)
 }
 
 fn run(cli: Cli) -> Result<()> {
@@ -70,7 +41,6 @@ fn run(cli: Cli) -> Result<()> {
         init_logger(log_file)?;
     }
 
-    enforce_flag_rules(&cli)?;
     let action = normalize_cli_to_action(&cli)?;
 
     if let Some(action) = action {
@@ -78,7 +48,7 @@ fn run(cli: Cli) -> Result<()> {
     } else {
         Cli::command().print_help()?;
         println!();
-        return Err(anyhow::anyhow!("No command or top-level action specified"));
+        return Err(anyhow!("No command or top-level action specified"));
     }
 
     Ok(())
@@ -95,7 +65,10 @@ fn main() -> Result<()> {
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(e) => match e.kind() {
-            ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => { e.print()?; return Ok(()); }
+            ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => {
+                e.print()?;
+                return Ok(());
+            }
             _ => {
                 log_early_error(&format!("CLI argument parsing failed: {}", e.kind()));
                 e.print()?;
@@ -111,6 +84,7 @@ fn main() -> Result<()> {
             eprintln!("Error: You must be root to run xtgeoip");
             process::exit(1);
         }
+
         eprintln!("Error: {}", e);
         process::exit(1);
     }
