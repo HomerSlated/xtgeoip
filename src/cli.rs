@@ -10,7 +10,7 @@ use crate::config::ConfAction;
 #[derive(Parser)]
 #[command(
     name = "xtgeoip",
-    version = "2026",
+    version,
     about = "Downloads and builds GeoIP databases",
     propagate_version = true
 )]
