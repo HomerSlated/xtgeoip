@@ -7,7 +7,7 @@
 /// Inspired by xt_geoip_build_maxmind (Jan Engelhardt, Philip
 /// Prindeville), now part of Debian's xtables-addons package.
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
-use std::{process, path::Path};
+use std::process;
 
 use anyhow::{Result, anyhow};
 use clap::{Parser, CommandFactory, error::ErrorKind};
@@ -22,7 +22,7 @@ mod cli;
 
 use crate::{
     action::{Action, run_action},
-    config::{ConfAction, load_config, run_conf},
+    config::load_config,
     messages::{init_logger, log_early_error},
 };
 use crate::cli::Cli;
