@@ -99,7 +99,9 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
 
     if let Some(cmd) = &cli.command {
         match cmd {
-            Conf { default, show, edit: _ } => Ok(Some(Action::Conf(conf_action(*default, *show)))),
+            Conf { default, show, edit: _ } => {
+                Ok(Some(Action::Conf(conf_action(*default, *show))))
+            }
 
             Run { prune, backup, clean, force } => {
                 let mut invalid_flags = vec![];
@@ -153,6 +155,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
             }
         }
     } else {
+        // Top-level flags
         let b = cli.backup;
         let c = cli.clean;
         let p = cli.prune;
