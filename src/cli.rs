@@ -1,5 +1,6 @@
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 /// xtgeoip CLI parsing and normalization
+
 use clap::{Parser, Subcommand};
 use anyhow::{Result, anyhow};
 
@@ -71,8 +72,7 @@ pub enum Commands {
 
 /// Build a dynamic error message for unsupported flags
 fn unsupported_flags_message(flags: &[&str], context: &str) -> String {
-    let joined = flags.join(" ");
-    format!("Unsupported: {} {}.", joined, context)
+    format!("Unsupported: {} {}.", flags.join(" "), context)
 }
 
 /// Convert CLI args into ConfAction for the conf command
@@ -84,30 +84,6 @@ fn conf_action(default: bool, show: bool) -> ConfAction {
     } else {
         ConfAction::Edit
     }
-}
-
-/// Enforce top-level flag rules
-pub fn enforce_flag_rules(cli: &Cli) -> Result<()> {
-    if cli.command.is_none() {
-        let b = cli.backup;
-        let c = cli.clean;
-        let p = cli.prune;
-        let f = cli.force;
-
-        if p && !b && !c {
-            return Err(anyhow!("Unsupported: -p alone is ambiguous"));
-        }
-        if f && !(b || c) {
-            return Err(anyhow!("--force only applies to --backup or --clean"));
-        }
-        if c && p {
-            return Err(anyhow!(unsupported_flags_message(&["--clean", "--prune"], "cannot be combined")));
-        }
-        if b && p && f {
-            return Err(anyhow!(unsupported_flags_message(&["--backup", "--prune", "--force"], "combination is ambiguous")));
-        }
-    }
-    Ok(())
 }
 
 /// Normalize CLI input into Action
