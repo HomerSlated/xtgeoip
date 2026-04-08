@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 pub struct Spec {
     pub meta: Meta,
     pub version: String,
+    pub top_level: Option<CommandSpec>,
     pub commands: BTreeMap<String, CommandSpec>,
     pub reason_templates: BTreeMap<String, ReasonTemplate>,
 }
@@ -58,6 +59,8 @@ pub struct Example {
     pub valid: bool,
     pub outcome: Option<String>,
     pub reason: Option<Reason>,
+    pub exit_status: Option<i32>,
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -106,8 +109,27 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Ensure that all example flags exist
+/// Ensure that all example reason codes exist
 fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
+    if let Some(cmd) = &spec.top_level {
+        match cmd {
+            CommandSpec::FlagCommand { examples, .. }
+            | CommandSpec::SelectorCommand { examples, .. } => {
+                for ex in examples {
+                    if let Some(reason) = &ex.reason
+                        && !spec.reason_templates.contains_key(&reason.code)
+                    {
+                        anyhow::bail!(
+                            "Unknown reason code {} in top_level example {}",
+                            reason.code,
+                            ex.cmd
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     for cmd in spec.commands.values() {
         match cmd {
             CommandSpec::FlagCommand { examples, .. }
@@ -134,6 +156,63 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
     let mut out =
         format!("# {}\n\n{}\n\n", spec.meta.program, spec.meta.summary);
 
+    if let Some(cmd) = &spec.top_level {
+        match cmd {
+            CommandSpec::FlagCommand {
+                summary, examples, ..
+            } => {
+                out.push_str(&format!("## top level\n{}\n\n", summary));
+                for ex in examples {
+                    let outcome = if ex.valid {
+                        ex.outcome.clone().unwrap_or_default()
+                    } else if let Some(r) = &ex.reason {
+                        render_reason(spec, r)?
+                    } else {
+                        "(invalid)".to_string()
+                    };
+                    out.push_str(&format!("- `{}` → {}", ex.cmd, outcome));
+                    if let Some(status) = ex.exit_status {
+                        out.push_str(&format!(" (exit {})", status));
+                    }
+                    if let Some(note) = &ex.note {
+                        out.push_str(&format!(" — {}", note));
+                    }
+                    out.push('\n');
+                }
+                out.push('\n');
+            }
+            CommandSpec::SelectorCommand {
+                summary,
+                usage,
+                examples,
+                ..
+            } => {
+                out.push_str(&format!(
+                    "## top level\n{}\nUsage: {}\n\n",
+                    summary, usage
+                ));
+                for ex in examples {
+                    let outcome = if ex.valid {
+                        ex.outcome.clone().unwrap_or_default()
+                    } else if let Some(r) = &ex.reason {
+                        render_reason(spec, r)?
+                    } else {
+                        "(invalid)".to_string()
+                    };
+                    out.push_str(&format!("- `{}` → {}", ex.cmd, outcome));
+                    if let Some(status) = ex.exit_status {
+                        out.push_str(&format!(" (exit {})", status));
+                    }
+                    if let Some(note) = &ex.note {
+                        out.push_str(&format!(" — {}", note));
+                    }
+                    out.push('\n');
+                }
+                out.push('\n');
+            }
+        }
+    }
+
     for (cmd_name, cmd) in &spec.commands {
         match cmd {
             CommandSpec::FlagCommand {
@@ -148,7 +227,14 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
                     } else {
                         "(invalid)".to_string()
                     };
-                    out.push_str(&format!("- `{}` → {}\n", ex.cmd, outcome));
+                    out.push_str(&format!("- `{}` → {}", ex.cmd, outcome));
+                    if let Some(status) = ex.exit_status {
+                        out.push_str(&format!(" (exit {})", status));
+                    }
+                    if let Some(note) = &ex.note {
+                        out.push_str(&format!(" — {}", note));
+                    }
+                    out.push('\n');
                 }
                 out.push('\n');
             }
@@ -170,7 +256,14 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
                     } else {
                         "(invalid)".to_string()
                     };
-                    out.push_str(&format!("- `{}` → {}\n", ex.cmd, outcome));
+                    out.push_str(&format!("- `{}` → {}", ex.cmd, outcome));
+                    if let Some(status) = ex.exit_status {
+                        out.push_str(&format!(" (exit {})", status));
+                    }
+                    if let Some(note) = &ex.note {
+                        out.push_str(&format!(" — {}", note));
+                    }
+                    out.push('\n');
                 }
                 out.push('\n');
             }
@@ -184,6 +277,23 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
 fn generate_tldr_md(spec: &Spec) -> anyhow::Result<String> {
     let mut out =
         format!("# {}\n\n> {}\n\n", spec.meta.program, spec.meta.summary);
+
+    if let Some(cmd) = &spec.top_level {
+        match cmd {
+            CommandSpec::FlagCommand { examples, .. }
+            | CommandSpec::SelectorCommand { examples, .. } => {
+                for ex in examples {
+                    if ex.valid {
+                        let outcome = ex.outcome.clone().unwrap_or_default();
+                        out.push_str(&format!(
+                            "- {}:\n\n`{}`\n\n",
+                            outcome, ex.cmd
+                        ));
+                    }
+                }
+            }
+        }
+    }
 
     for cmd in spec.commands.values() {
         match cmd {
@@ -208,6 +318,34 @@ fn generate_tldr_md(spec: &Spec) -> anyhow::Result<String> {
 /// Generate SCD (simplified command descriptor)
 fn generate_scd(spec: &Spec) -> anyhow::Result<String> {
     let mut out = String::new();
+
+    if let Some(cmd) = &spec.top_level {
+        match cmd {
+            CommandSpec::FlagCommand {
+                summary,
+                allowed_flags,
+                ..
+            } => {
+                out.push_str(&format!(
+                    "Command: top_level\nSummary: {}\nFlags: {:?}\n\n",
+                    summary, allowed_flags
+                ));
+            }
+            CommandSpec::SelectorCommand {
+                summary,
+                usage,
+                positional,
+                constraints,
+                ..
+            } => {
+                out.push_str(&format!(
+                    "Command: top_level\nSummary: {}\nUsage: {}\nPositional: \
+                     {:?}\nConstraints: {:?}\n\n",
+                    summary, usage, positional.name, constraints
+                ));
+            }
+        }
+    }
 
     for (cmd_name, cmd) in &spec.commands {
         match cmd {
@@ -259,6 +397,22 @@ fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
                    bool, pub outcome: &'static str }\n"
         .to_string();
     out.push_str("pub const CLI_MATRIX: &[CliExample] = &[\n");
+
+    if let Some(cmd) = &spec.top_level {
+        match cmd {
+            CommandSpec::FlagCommand { examples, .. }
+            | CommandSpec::SelectorCommand { examples, .. } => {
+                for ex in examples {
+                    let outcome = ex.outcome.clone().unwrap_or_default();
+                    out.push_str(&format!(
+                        "    CliExample {{ cmd: \"{}\", valid: {}, outcome: \
+                         \"{}\" }},\n",
+                        ex.cmd, ex.valid, outcome
+                    ));
+                }
+            }
+        }
+    }
 
     for cmd in spec.commands.values() {
         match cmd {
@@ -318,6 +472,65 @@ fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
         spec.meta.program, spec.meta.summary
     ));
 
+    if let Some(cmd) = &spec.top_level {
+        match cmd {
+            CommandSpec::FlagCommand {
+                summary, examples, ..
+            } => {
+                out.push_str(&format!(".SH TOP LEVEL\n{}\n", summary));
+                for ex in examples {
+                    let outcome = if ex.valid {
+                        ex.outcome.clone().unwrap_or_default()
+                    } else if let Some(reason) = &ex.reason {
+                        render_reason(spec, reason)?
+                    } else {
+                        String::new()
+                    };
+                    out.push_str(&format!(".TP\n{}\n", ex.cmd));
+                    if !outcome.is_empty() {
+                        out.push_str(&format!("{}\n", outcome));
+                    }
+                    if let Some(status) = ex.exit_status {
+                        out.push_str(&format!("Exit status: {}\n", status));
+                    }
+                    if let Some(note) = &ex.note {
+                        out.push_str(&format!("{}\n", note));
+                    }
+                }
+            }
+            CommandSpec::SelectorCommand {
+                summary,
+                usage,
+                examples,
+                ..
+            } => {
+                out.push_str(&format!(
+                    ".SH TOP LEVEL\n{}\nUsage: {}\n",
+                    summary, usage
+                ));
+                for ex in examples {
+                    let outcome = if ex.valid {
+                        ex.outcome.clone().unwrap_or_default()
+                    } else if let Some(reason) = &ex.reason {
+                        render_reason(spec, reason)?
+                    } else {
+                        String::new()
+                    };
+                    out.push_str(&format!(".TP\n{}\n", ex.cmd));
+                    if !outcome.is_empty() {
+                        out.push_str(&format!("{}\n", outcome));
+                    }
+                    if let Some(status) = ex.exit_status {
+                        out.push_str(&format!("Exit status: {}\n", status));
+                    }
+                    if let Some(note) = &ex.note {
+                        out.push_str(&format!("{}\n", note));
+                    }
+                }
+            }
+        }
+    }
+
     for (cmd_name, cmd) in &spec.commands {
         match cmd {
             CommandSpec::FlagCommand {
@@ -339,6 +552,12 @@ fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
                     out.push_str(&format!(".TP\n{}\n", ex.cmd));
                     if !outcome.is_empty() {
                         out.push_str(&format!("{}\n", outcome));
+                    }
+                    if let Some(status) = ex.exit_status {
+                        out.push_str(&format!("Exit status: {}\n", status));
+                    }
+                    if let Some(note) = &ex.note {
+                        out.push_str(&format!("{}\n", note));
                     }
                 }
             }
@@ -366,6 +585,12 @@ fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
                     if !outcome.is_empty() {
                         out.push_str(&format!("{}\n", outcome));
                     }
+                    if let Some(status) = ex.exit_status {
+                        out.push_str(&format!("Exit status: {}\n", status));
+                    }
+                    if let Some(note) = &ex.note {
+                        out.push_str(&format!("{}\n", note));
+                    }
                 }
             }
         }
@@ -376,6 +601,21 @@ fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
 
 fn generate_testcases_yaml(spec: &Spec) -> anyhow::Result<String> {
     let mut testcases = Vec::new();
+
+    if let Some(cmd) = &spec.top_level {
+        let examples = match cmd {
+            CommandSpec::FlagCommand { examples, .. } => examples,
+            CommandSpec::SelectorCommand { examples, .. } => examples,
+        };
+
+        for ex in examples {
+            let key = if ex.valid { "p" } else { "f" };
+            testcases.push(Testcase {
+                key: key.to_string(),
+                cmd: ex.cmd.clone(),
+            });
+        }
+    }
 
     for cmd in spec.commands.values() {
         let examples = match cmd {
