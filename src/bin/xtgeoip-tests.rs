@@ -14,8 +14,9 @@ struct Testcase {
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().collect();
 
-    // Default mode is "--all"
+    // Flags
     let filter_failed_only = args.iter().any(|a| a == "--failed");
+    let rebuild_after_clean = args.iter().any(|a| a == "--rebuild");
 
     // Read testcases YAML
     let yaml_str = fs::read_to_string("docs/generated/testcases.yaml")?;
@@ -40,13 +41,35 @@ fn main() -> anyhow::Result<()> {
         let program = parts.next().unwrap();
         let args: Vec<&str> = parts.collect();
         let xtgeoip_path = format!("target/release/{}", program);
+
         let status = Command::new("sudo")
             .arg(&xtgeoip_path)
-            .args(args)
+            .args(&args)
             .status()?;
 
         if status.success() {
             println!("Success");
+
+            // Check for rebuild condition
+            if rebuild_after_clean
+                && args.contains(&"-c")
+                && !args.contains(&"-f")
+            {
+                println!("--rebuild active: running `build` to repopulate target dir");
+                let build_status = Command::new("sudo")
+                    .arg(&xtgeoip_path)
+                    .arg("build")
+                    .status()?;
+
+                if build_status.success() {
+                    println!("Rebuild succeeded");
+                } else if let Some(code) = build_status.code() {
+                    println!("Rebuild FAILED (exit {})", code);
+                } else {
+                    println!("Rebuild FAILED (terminated by signal)");
+                }
+            }
+
         } else if let Some(code) = status.code() {
             println!("FAILED (exit {})", code);
         } else {
