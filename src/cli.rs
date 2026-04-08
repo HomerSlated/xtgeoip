@@ -3,6 +3,7 @@
 use clap::{Parser, Subcommand};
 use anyhow::{Result, anyhow};
 
+use crate::config::ConfAction;
 use crate::action::{Action, ConfAction};
 
 #[derive(Parser)]
