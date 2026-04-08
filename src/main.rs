@@ -6,6 +6,11 @@
 ///
 /// Inspired by xt_geoip_build_maxmind (Jan Engelhardt, Philip
 /// Prindeville), now part of Debian's xtables-addons package.
+/// xtgeoip © Haze N Sparkle 2026 (MIT)
+///
+/// Downloads, extracts, and converts GeoIP CSV databases into binary IP
+/// range data files, compatible with the Linux x_tables xt_geoip module,
+/// which can filter packets based on GeoIP country labels.
 use std::{path::Path, process};
 
 use anyhow::{Result, anyhow};
@@ -117,6 +122,12 @@ enum Action {
     Conf(ConfAction),
 }
 
+/// Build a dynamic error message for unsupported flags
+fn unsupported_flags_message(flags: &[&str], context: &str) -> String {
+    let joined = flags.join(" ");
+    format!("Unsupported: {} {}.", joined, context)
+}
+
 fn conf_action(default: bool, show: bool) -> ConfAction {
     if default {
         ConfAction::Default
@@ -127,7 +138,7 @@ fn conf_action(default: bool, show: bool) -> ConfAction {
     }
 }
 
-/// Enforce top-level flag rules exactly per spec
+/// Enforce top-level flag rules
 fn enforce_flag_rules(cli: &Cli) -> Result<()> {
     if cli.command.is_none() {
         let b = cli.backup;
@@ -147,16 +158,12 @@ fn enforce_flag_rules(cli: &Cli) -> Result<()> {
 
         // -c -p unsupported
         if c && p {
-            return Err(anyhow!(
-                "Unsupported: --clean cannot be combined with --prune"
-            ));
+            return Err(anyhow!(unsupported_flags_message(&["--clean", "--prune"], "cannot be combined")));
         }
 
-        // -b -p -f unsupported (ambiguous)
+        // -b -p -f unsupported
         if b && p && f {
-            return Err(anyhow!(
-                "Unsupported: --backup --prune --force is ambiguous"
-            ));
+            return Err(anyhow!(unsupported_flags_message(&["--backup", "--prune", "--force"], "combination is ambiguous")));
         }
     }
 
@@ -170,37 +177,26 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
         match &cli.command {
             Some(Commands::Build { .. }) | Some(Commands::Run { .. }) => {}
             _ => {
-                return Err(anyhow!(
-                    "Unsupported: --legacy only valid with build or run"
-                ));
+                return Err(anyhow!("Unsupported: --legacy only valid with build or run"));
             }
         }
     }
 
     if let Some(cmd) = &cli.command {
         match cmd {
-            Commands::Conf {
-                default,
-                show,
-                edit: _,
-            } => Ok(Some(Action::Conf(conf_action(*default, *show)))),
+            Commands::Conf { default, show, edit: _ } => {
+                Ok(Some(Action::Conf(conf_action(*default, *show))))
+            }
 
-            Commands::Run {
-                prune,
-                backup,
-                clean,
-                force,
-            } => {
-                // Ambiguous combinations
+            Commands::Run { prune, backup, clean, force } => {
+                let mut invalid_flags = vec![];
                 if *prune && *force && *clean {
-                    return Err(anyhow!(
-                        "Unsupported: -c -p -f combination is ambiguous in run"
-                    ));
+                    invalid_flags.extend(&["-c", "-p", "-f"]);
+                    return Err(anyhow!(unsupported_flags_message(&invalid_flags, "combination is ambiguous in run")));
                 }
                 if *backup && *clean && *prune {
-                    return Err(anyhow!(
-                        "Unsupported: -b -c -p combination is ambiguous in run"
-                    ));
+                    invalid_flags.extend(&["-b", "-c", "-p"]);
+                    return Err(anyhow!(unsupported_flags_message(&invalid_flags, "combination is ambiguous in run")));
                 }
 
                 Ok(Some(Action::Run {
@@ -212,26 +208,16 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                 }))
             }
 
-            Commands::Build {
-                prune,
-                force,
-                backup,
-                clean,
-            } => {
+            Commands::Build { prune, force, backup, clean } => {
                 // prune alone invalid
                 if *prune && !*backup {
-                    return Err(anyhow!(
-                        "Unsupported: --prune cannot be used without --backup \
-                         for build"
-                    ));
+                    return Err(anyhow!("Unsupported: --prune cannot be used without --backup for build"));
                 }
 
                 // ambiguous combination
                 if *prune && *force && *backup && *clean {
-                    return Err(anyhow!(
-                        "Unsupported: -b -c -p -f combination is ambiguous \
-                         for build"
-                    ));
+                    let flags = ["-b", "-c", "-p", "-f"];
+                    return Err(anyhow!(unsupported_flags_message(&flags, "combination is ambiguous for build")));
                 }
 
                 Ok(Some(Action::Build {
@@ -244,17 +230,19 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
             }
 
             Commands::Fetch { prune } => {
-                if cli.backup || cli.clean || cli.force {
-                    return Err(anyhow!(
-                        "Unsupported: - -b, -c, or -f is invalid for fetch"
-                    ));
+                let mut invalid_flags = vec![];
+                if cli.backup { invalid_flags.push("-b"); }
+                if cli.clean { invalid_flags.push("-c"); }
+                if cli.force { invalid_flags.push("-f"); }
+
+                if !invalid_flags.is_empty() {
+                    return Err(anyhow!(unsupported_flags_message(&invalid_flags, "is invalid for fetch")));
                 }
 
                 Ok(Some(Action::Fetch { prune: *prune }))
             }
         }
     } else {
-        // Top-level flags map to legacy-style actions, NOT synthetic Run
         let b = cli.backup;
         let c = cli.clean;
         let p = cli.prune;
@@ -265,11 +253,7 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
         }
 
         if b {
-            return Ok(Some(Action::TopLevelBackup {
-                clean: c,
-                force: f,
-                prune: p,
-            }));
+            return Ok(Some(Action::TopLevelBackup { clean: c, force: f, prune: p }));
         }
 
         if c {
