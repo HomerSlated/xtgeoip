@@ -42,7 +42,7 @@ struct Cli {
     #[arg(short, long, global = true)]
     prune: bool,
     #[arg(short = 'l', long, global = true)]
-    legacy: bool, // <-- now global
+    legacy: bool,
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -89,6 +89,14 @@ enum Commands {
 }
 
 enum Action {
+    TopLevelBackup {
+        clean: bool,
+        force: bool,
+        prune: bool,
+    },
+    TopLevelClean {
+        force: bool,
+    },
     Run {
         prune: bool,
         legacy: bool,
@@ -119,7 +127,7 @@ fn conf_action(default: bool, show: bool) -> ConfAction {
     }
 }
 
-/// Enforce global flag rules exactly per spec
+/// Enforce top-level flag rules exactly per spec
 fn enforce_flag_rules(cli: &Cli) -> Result<()> {
     if cli.command.is_none() {
         let b = cli.backup;
@@ -136,7 +144,22 @@ fn enforce_flag_rules(cli: &Cli) -> Result<()> {
         if f && !(b || c) {
             return Err(anyhow!("--force only applies to --backup or --clean"));
         }
+
+        // -c -p unsupported
+        if c && p {
+            return Err(anyhow!(
+                "Unsupported: --clean cannot be combined with --prune"
+            ));
+        }
+
+        // -b -p -f unsupported (ambiguous)
+        if b && p && f {
+            return Err(anyhow!(
+                "Unsupported: --backup --prune --force is ambiguous"
+            ));
+        }
     }
+
     Ok(())
 }
 
@@ -145,7 +168,7 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
     // Reject invalid uses of --legacy
     if cli.legacy {
         match &cli.command {
-            Some(Commands::Build { .. }) | Some(Commands::Run { .. }) => {} /* OK */
+            Some(Commands::Build { .. }) | Some(Commands::Run { .. }) => {}
             _ => {
                 return Err(anyhow!(
                     "Unsupported: --legacy only valid with build or run"
@@ -179,6 +202,7 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                         "Unsupported: -b -c -p combination is ambiguous in run"
                     ));
                 }
+
                 Ok(Some(Action::Run {
                     prune: *prune,
                     legacy: cli.legacy,
@@ -201,6 +225,7 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                          for build"
                     ));
                 }
+
                 // ambiguous combination
                 if *prune && *force && *backup && *clean {
                     return Err(anyhow!(
@@ -208,6 +233,7 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                          for build"
                     ));
                 }
+
                 Ok(Some(Action::Build {
                     legacy: cli.legacy,
                     backup: *backup,
@@ -223,11 +249,12 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                         "Unsupported: -b or -c is invalid for fetch"
                     ));
                 }
+
                 Ok(Some(Action::Fetch { prune: *prune }))
             }
         }
     } else {
-        // Top-level flags → synthetic Action::Run
+        // Top-level flags map to legacy-style actions, NOT synthetic Run
         let b = cli.backup;
         let c = cli.clean;
         let p = cli.prune;
@@ -237,19 +264,45 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
             return Ok(None);
         }
 
-        Ok(Some(Action::Run {
-            backup: b,
-            clean: c,
-            force: f,
-            prune: p,
-            legacy: cli.legacy,
-        }))
+        if b {
+            return Ok(Some(Action::TopLevelBackup {
+                clean: c,
+                force: f,
+                prune: p,
+            }));
+        }
+
+        if c {
+            return Ok(Some(Action::TopLevelClean { force: f }));
+        }
+
+        Err(anyhow!("Unsupported top-level flag combination"))
     }
 }
 
 fn run_action(cfg: &crate::config::Config, action: Action) -> Result<()> {
     match action {
         Action::Conf(conf) => run_conf(conf)?,
+
+        Action::TopLevelBackup { clean, force, prune } => {
+            backup(
+                Path::new(&cfg.paths.output_dir),
+                Path::new(&cfg.paths.archive_dir),
+                force,
+            )?;
+
+            if clean {
+                delete(Path::new(&cfg.paths.output_dir), force)?;
+            }
+
+            if prune {
+                prune_archives(cfg, true, false)?;
+            }
+        }
+
+        Action::TopLevelClean { force } => {
+            delete(Path::new(&cfg.paths.output_dir), force)?;
+        }
 
         Action::Fetch { prune } => {
             fetch(cfg, FetchMode::Remote)?;
@@ -272,6 +325,7 @@ fn run_action(cfg: &crate::config::Config, action: Action) -> Result<()> {
                     force,
                 )?;
             }
+
             if do_clean {
                 delete(Path::new(&cfg.paths.output_dir), force)?;
             }
@@ -303,6 +357,7 @@ fn run_action(cfg: &crate::config::Config, action: Action) -> Result<()> {
                     force,
                 )?;
             }
+
             if do_clean {
                 delete(Path::new(&cfg.paths.output_dir), force)?;
             }
@@ -327,7 +382,6 @@ fn run_action(cfg: &crate::config::Config, action: Action) -> Result<()> {
 fn run(cli: Cli) -> Result<()> {
     let cfg = load_config().map_err(|e| {
         log_early_error(&format!("Failed to load config: {}", e));
-        // eprintln!("Fatal: Failed to load config: {}", e);
         e
     })?;
 
@@ -341,7 +395,8 @@ fn run(cli: Cli) -> Result<()> {
 
     if let Some(action) = action {
         run_action(&cfg, action)?;
-    } else if !(cli.backup || cli.clean || cli.prune) {
+    } else {
+        // Should only happen if main() didn't already catch true no-args.
         Cli::command().print_help()?;
         println!();
         return Err(anyhow!("No command or top-level action specified"));
@@ -351,6 +406,15 @@ fn run(cli: Cli) -> Result<()> {
 }
 
 fn main() -> Result<()> {
+    // Preserve original behavior:
+    // no args => print help and exit non-zero
+    if std::env::args_os().len() == 1 {
+        let mut cmd = Cli::command();
+        cmd.print_help()?;
+        println!();
+        process::exit(1);
+    }
+
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(e) => match e.kind() {
@@ -377,7 +441,6 @@ fn main() -> Result<()> {
             process::exit(1);
         }
 
-        // fallback for other errors
         eprintln!("Error: {}", e);
         process::exit(1);
     }
