@@ -10,7 +10,7 @@
 use std::{path::Path, process};
 use anyhow::{Result};
 use clap::error::ErrorKind;
-
+use clap::{CommandFactory, Parser};
 mod backup;
 mod build;
 mod config;
@@ -24,7 +24,7 @@ use crate::{
     action::Action,
     backup::{backup, delete, prune_archives},
     build::build,
-    config::{ConfAction, load_config, run_conf},
+    config::{load_config, run_conf},
     fetch::{FetchMode, fetch},
     messages::{init_logger, log_early_error},
 };

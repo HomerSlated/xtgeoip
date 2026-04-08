@@ -3,8 +3,7 @@
 use clap::{Parser, Subcommand};
 use anyhow::{Result, anyhow};
 
-pub mod action;
-use action::{Action, ConfAction};
+use crate::action::{Action, ConfAction};
 
 #[derive(Parser)]
 #[command(
