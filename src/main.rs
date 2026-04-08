@@ -244,9 +244,9 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
             }
 
             Commands::Fetch { prune } => {
-                if cli.backup || cli.clean {
+                if cli.backup || cli.clean || cli.force {
                     return Err(anyhow!(
-                        "Unsupported: -b or -c is invalid for fetch"
+                        "Unsupported: - -b, -c, or -f is invalid for fetch"
                     ));
                 }
 
