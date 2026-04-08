@@ -53,7 +53,6 @@ fn main() -> anyhow::Result<()> {
             // Check for rebuild condition
             if rebuild_after_clean
                 && args.contains(&"-c")
-                && !args.contains(&"-f")
             {
                 println!("--rebuild active: running `build` to repopulate target dir");
                 let build_status = Command::new("sudo")
