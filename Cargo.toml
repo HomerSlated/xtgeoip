@@ -1,6 +1,6 @@
 [package]
 name = "xtgeoip"
-version = "0.0.30"
+version = "0.0.31"
 edition = "2024"
 authors = ["Homer at hazensparkle.co.uk"]
 repository = "https://github.com/HomerSlated/xtgeoip"
