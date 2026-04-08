@@ -2,6 +2,42 @@
 
 > Build and manage xt_geoip data from MaxMind GeoLite2 CSVs.
 
+- display usage:
+
+`xtgeoip`
+
+- display usage:
+
+`xtgeoip -h`
+
+- back up binary data in /usr/share/xt_geoip/ using the manifest; store backups in /var/lib/xt_geoip/:
+
+`xtgeoip -b`
+
+- back up and clean binary data using the manifest:
+
+`xtgeoip -b -c`
+
+- force backup and clean even without a manifest:
+
+`xtgeoip -b -c -f`
+
+- force backup of binary data in /usr/share/xt_geoip/ even without a manifest:
+
+`xtgeoip -b -f`
+
+- back up binary data in /usr/share/xt_geoip/, then prune old backups in /var/lib/xt_geoip/:
+
+`xtgeoip -b -p`
+
+- clean (delete) binary data in /usr/share/xt_geoip/ using the manifest:
+
+`xtgeoip -c`
+
+- force clean (delete) binary data in /usr/share/xt_geoip/ even without a manifest:
+
+`xtgeoip -c -f`
+
 - build using local copy of database:
 
 `xtgeoip build`
@@ -38,7 +74,7 @@
 
 `xtgeoip fetch`
 
-- fetch CSVs, then prune CSVs:
+- fetch CSVs, then prune CSV archives:
 
 `xtgeoip fetch -p`
 
@@ -50,11 +86,11 @@
 
 `xtgeoip run -l`
 
-- fetch, then prune CSVs, then build:
+- fetch, then prune CSV archives, then build:
 
 `xtgeoip run -p`
 
-- clean using manifest, then fetch, then prune CSVs, then build:
+- clean using manifest, then fetch, then prune CSV archives, then build:
 
 `xtgeoip run -c -p`
 
