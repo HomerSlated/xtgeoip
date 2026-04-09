@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 /// xtgeoip CLI parsing and normalization
 use clap::{Parser, Subcommand};
@@ -39,9 +39,6 @@ pub enum Commands {
     #[command(disable_version_flag = true)]
     Run {
         #[arg(short, long)]
-        prune: bool,
-
-        #[arg(short, long)]
         backup: bool,
 
         #[arg(short, long)]
@@ -49,6 +46,12 @@ pub enum Commands {
 
         #[arg(short, long)]
         force: bool,
+
+        #[arg(short, long)]
+        prune: bool,
+
+        #[arg(short, long)]
+        legacy: bool,
     },
 
     #[command(disable_version_flag = true)]
@@ -64,6 +67,9 @@ pub enum Commands {
 
         #[arg(short, long)]
         prune: bool,
+
+        #[arg(short, long)]
+        legacy: bool,
     },
 
     #[command(disable_version_flag = true)]
@@ -156,7 +162,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
 
                 Ok(Some(Action::Run {
                     prune: *prune,
-                    legacy: cli.legacy,
+                    legacy: *legacy,
                     backup: *backup,
                     clean: *clean,
                     force: *force,
