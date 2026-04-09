@@ -2,7 +2,6 @@
 //! Run xtgeoip commands from docs/generated/testcases.yaml
 
 use std::{env, fs, process::Command};
-
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -42,34 +41,50 @@ fn main() -> anyhow::Result<()> {
         let args: Vec<&str> = parts.collect();
         let xtgeoip_path = format!("target/release/{}", program);
 
-        let status = Command::new("sudo")
+        // Run the command and capture output
+        let output = Command::new("sudo")
             .arg(&xtgeoip_path)
             .args(&args)
-            .status()?;
+            .output()?;
 
-        if status.success() {
+        // Print stdout/stderr
+        let stdout_str = String::from_utf8_lossy(&output.stdout);
+        let stderr_str = String::from_utf8_lossy(&output.stderr);
+
+        println!("{}", stdout_str);
+        println!("{}", stderr_str);
+
+        if output.status.success() {
             println!("Success");
 
             // Check for rebuild condition
             if rebuild_after_clean && args.contains(&"-c") {
-                println!(
-                    "--rebuild active: running `build` to repopulate target \
-                     dir"
-                );
-                let build_status = Command::new("sudo")
-                    .arg(&xtgeoip_path)
-                    .arg("build")
-                    .status()?;
+                if stdout_str.contains("Deleted old binary data files")
+                    || stdout_str.contains("Force deleted binary data files")
+                {
+                    println!(
+                        "--rebuild active: previous clean deleted binaries, running `build`"
+                    );
 
-                if build_status.success() {
-                    println!("Rebuild succeeded");
-                } else if let Some(code) = build_status.code() {
-                    println!("Rebuild FAILED (exit {})", code);
+                    let build_status = Command::new("sudo")
+                        .arg(&xtgeoip_path)
+                        .arg("build")
+                        .status()?;
+
+                    if build_status.success() {
+                        println!("Rebuild succeeded");
+                    } else if let Some(code) = build_status.code() {
+                        println!("Rebuild FAILED (exit {})", code);
+                    } else {
+                        println!("Rebuild FAILED (terminated by signal)");
+                    }
                 } else {
-                    println!("Rebuild FAILED (terminated by signal)");
+                    println!(
+                        "--rebuild active: no binary files deleted, skipping rebuild"
+                    );
                 }
             }
-        } else if let Some(code) = status.code() {
+        } else if let Some(code) = output.status.code() {
             println!("FAILED (exit {})", code);
         } else {
             println!("FAILED (terminated by signal)");
