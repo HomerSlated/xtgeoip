@@ -1,4 +1,11 @@
+/// xtgeoip © Haze N Sparkle 2026 (MIT)
+/// xtgeoip CLI parsing and normalization
+use clap::{Parser, Subcommand};
 use anyhow::{Result, anyhow};
+
+use crate::{action::Action, config::ConfAction};
+
+use anyhow::{anyhow, Result};
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 /// xtgeoip CLI parsing and normalization
 use clap::{Parser, Subcommand};
@@ -10,19 +17,26 @@ use crate::{action::Action, config::ConfAction};
     name = "xtgeoip",
     version,
     about = "Downloads and builds GeoIP databases",
-    propagate_version = true
+    propagate_version = true,
+    disable_help_subcommand = true,
+    args_conflicts_with_subcommands = true
 )]
 pub struct Cli {
-    #[arg(short, long, global = true)]
+    #[arg(short, long)]
     pub backup: bool,
-    #[arg(short, long, global = true)]
+
+    #[arg(short, long)]
     pub clean: bool,
-    #[arg(short, long, global = true)]
+
+    #[arg(short, long)]
     pub force: bool,
-    #[arg(short, long, global = true)]
+
+    #[arg(short, long)]
     pub prune: bool,
-    #[arg(short = 'l', long, global = true)]
+
+    #[arg(short = 'l', long)]
     pub legacy: bool,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
@@ -32,27 +46,36 @@ pub enum Commands {
     Run {
         #[arg(short, long)]
         prune: bool,
+
         #[arg(short, long)]
         backup: bool,
+
         #[arg(short, long)]
         clean: bool,
+
         #[arg(short, long)]
         force: bool,
     },
+
     Build {
         #[arg(short, long)]
         backup: bool,
+
         #[arg(short, long)]
         clean: bool,
+
         #[arg(short, long)]
         force: bool,
+
         #[arg(short, long)]
         prune: bool,
     },
+
     Fetch {
         #[arg(short, long)]
         prune: bool,
     },
+
     #[command(group(
         clap::ArgGroup::new("conf_action")
             .required(true)
@@ -61,8 +84,10 @@ pub enum Commands {
     Conf {
         #[arg(short = 'd', long = "default", group = "conf_action")]
         default: bool,
+
         #[arg(short = 's', long = "show", group = "conf_action")]
         show: bool,
+
         #[arg(short = 'e', long = "edit", group = "conf_action")]
         edit: bool,
     },
@@ -73,7 +98,7 @@ fn unsupported_flags_message(flags: &[&str], context: &str) -> String {
     format!("Unsupported: {} {}.", flags.join(" "), context)
 }
 
-/// Convert CLI args into ConfAction for the conf command
+/// Convert CLI args into ConfAction
 fn conf_action(default: bool, show: bool) -> ConfAction {
     if default {
         ConfAction::Default
@@ -88,6 +113,7 @@ fn conf_action(default: bool, show: bool) -> ConfAction {
 pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
     use Commands::*;
 
+    // --legacy only valid with build/run
     if cli.legacy {
         match &cli.command {
             Some(Build { .. }) | Some(Run { .. }) => {}
@@ -114,6 +140,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                 force,
             } => {
                 let mut invalid_flags = vec![];
+
                 if *prune && *force && *clean {
                     invalid_flags.extend(&["-c", "-p", "-f"]);
                     return Err(anyhow!(unsupported_flags_message(
@@ -121,6 +148,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                         "combination is ambiguous in run"
                     )));
                 }
+
                 if *backup && *clean && *prune {
                     invalid_flags.extend(&["-b", "-c", "-p"]);
                     return Err(anyhow!(unsupported_flags_message(
@@ -146,10 +174,10 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
             } => {
                 if *prune && !*backup {
                     return Err(anyhow!(
-                        "Unsupported: --prune cannot be used without --backup \
-                         for build"
+                        "Unsupported: --prune cannot be used without --backup for build"
                     ));
                 }
+
                 if *prune && *force && *backup && *clean {
                     let flags = ["-b", "-c", "-p", "-f"];
                     return Err(anyhow!(unsupported_flags_message(
@@ -169,6 +197,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
 
             Fetch { prune } => {
                 let mut invalid_flags = vec![];
+
                 if cli.backup {
                     invalid_flags.push("-b");
                 }
@@ -177,6 +206,9 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                 }
                 if cli.force {
                     invalid_flags.push("-f");
+                }
+                if cli.legacy {
+                    invalid_flags.push("-l");
                 }
 
                 if !invalid_flags.is_empty() {
@@ -190,7 +222,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
             }
         }
     } else {
-        // Top-level flags
+        // Top-level flag mode
         let b = cli.backup;
         let c = cli.clean;
         let p = cli.prune;
@@ -199,6 +231,33 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
         if !b && !c && !p {
             return Ok(None);
         }
+
+        // -p alone invalid
+        if p && !b && !c {
+            return Err(anyhow!("Unsupported top-level flag combination"));
+        }
+
+        // -f must attach to b or c
+        if f && !(b || c) {
+            return Err(anyhow!(
+                "--force only applies to --backup or --clean"
+            ));
+        }
+
+        // -c -p invalid
+        if c && p {
+            return Err(anyhow!(
+                unsupported_flags_message(&["--clean", "--prune"], "cannot be combined")
+            ));
+        }
+
+        // -b -p -f invalid
+        if b && p && f {
+            return Err(anyhow!(
+                unsupported_flags_message(&["--backup", "--prune", "--force"], "combination is ambiguous")
+            ));
+        }
+
         if b {
             return Ok(Some(Action::TopLevelBackup {
                 clean: c,
@@ -206,6 +265,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                 prune: p,
             }));
         }
+
         if c {
             return Ok(Some(Action::TopLevelClean { force: f }));
         }
