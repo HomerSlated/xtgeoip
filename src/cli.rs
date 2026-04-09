@@ -1,7 +1,7 @@
+use anyhow::{Result, anyhow};
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 /// xtgeoip CLI parsing and normalization
 use clap::{Parser, Subcommand};
-use anyhow::{Result, anyhow};
 
 use crate::{action::Action, config::ConfAction};
 
@@ -167,7 +167,8 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
             } => {
                 if *prune && !*backup {
                     return Err(anyhow!(
-                        "Unsupported: --prune cannot be used without --backup for build"
+                        "Unsupported: --prune cannot be used without --backup \
+                         for build"
                     ));
                 }
 
@@ -232,23 +233,23 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
 
         // -f must attach to b or c
         if f && !(b || c) {
-            return Err(anyhow!(
-                "--force only applies to --backup or --clean"
-            ));
+            return Err(anyhow!("--force only applies to --backup or --clean"));
         }
 
         // -c -p invalid
         if c && p {
-            return Err(anyhow!(
-                unsupported_flags_message(&["--clean", "--prune"], "cannot be combined")
-            ));
+            return Err(anyhow!(unsupported_flags_message(
+                &["--clean", "--prune"],
+                "cannot be combined"
+            )));
         }
 
         // -b -p -f invalid
         if b && p && f {
-            return Err(anyhow!(
-                unsupported_flags_message(&["--backup", "--prune", "--force"], "combination is ambiguous")
-            ));
+            return Err(anyhow!(unsupported_flags_message(
+                &["--backup", "--prune", "--force"],
+                "combination is ambiguous"
+            )));
         }
 
         if b {
