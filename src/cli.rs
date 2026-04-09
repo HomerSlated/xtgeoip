@@ -10,7 +10,7 @@ use crate::{action::Action, config::ConfAction};
     name = "xtgeoip",
     version,
     about = "Downloads and builds GeoIP databases",
-    propagate_version = true,
+    propagate_version = false,
     disable_help_subcommand = true,
     args_conflicts_with_subcommands = true
 )]
@@ -36,6 +36,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    #[command(disable_version_flag = true)]
     Run {
         #[arg(short, long)]
         prune: bool,
@@ -50,6 +51,7 @@ pub enum Commands {
         force: bool,
     },
 
+    #[command(disable_version_flag = true)]
     Build {
         #[arg(short, long)]
         backup: bool,
@@ -64,6 +66,7 @@ pub enum Commands {
         prune: bool,
     },
 
+    #[command(disable_version_flag = true)]
     Fetch {
         #[arg(short, long)]
         prune: bool,
@@ -74,6 +77,7 @@ pub enum Commands {
             .required(true)
             .multiple(false)
     ))]
+    #[command(disable_version_flag = true)]
     Conf {
         #[arg(short = 'd', long = "default", group = "conf_action")]
         default: bool,
