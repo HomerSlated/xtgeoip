@@ -5,13 +5,6 @@ use anyhow::{Result, anyhow};
 
 use crate::{action::Action, config::ConfAction};
 
-use anyhow::{anyhow, Result};
-/// xtgeoip © Haze N Sparkle 2026 (MIT)
-/// xtgeoip CLI parsing and normalization
-use clap::{Parser, Subcommand};
-
-use crate::{action::Action, config::ConfAction};
-
 #[derive(Parser)]
 #[command(
     name = "xtgeoip",
