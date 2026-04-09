@@ -1,11 +1,9 @@
+use anyhow::{Result, anyhow};
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 /// xtgeoip CLI parsing and normalization
-
 use clap::{Parser, Subcommand};
-use anyhow::{Result, anyhow};
 
-use crate::action::Action;
-use crate::config::ConfAction;
+use crate::{action::Action, config::ConfAction};
 
 #[derive(Parser)]
 #[command(
@@ -93,25 +91,42 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
     if cli.legacy {
         match &cli.command {
             Some(Build { .. }) | Some(Run { .. }) => {}
-            _ => return Err(anyhow!("Unsupported: --legacy only valid with build or run")),
+            _ => {
+                return Err(anyhow!(
+                    "Unsupported: --legacy only valid with build or run"
+                ));
+            }
         }
     }
 
     if let Some(cmd) = &cli.command {
         match cmd {
-            Conf { default, show, edit: _ } => {
-                Ok(Some(Action::Conf(conf_action(*default, *show))))
-            }
+            Conf {
+                default,
+                show,
+                edit: _,
+            } => Ok(Some(Action::Conf(conf_action(*default, *show)))),
 
-            Run { prune, backup, clean, force } => {
+            Run {
+                prune,
+                backup,
+                clean,
+                force,
+            } => {
                 let mut invalid_flags = vec![];
                 if *prune && *force && *clean {
                     invalid_flags.extend(&["-c", "-p", "-f"]);
-                    return Err(anyhow!(unsupported_flags_message(&invalid_flags, "combination is ambiguous in run")));
+                    return Err(anyhow!(unsupported_flags_message(
+                        &invalid_flags,
+                        "combination is ambiguous in run"
+                    )));
                 }
                 if *backup && *clean && *prune {
                     invalid_flags.extend(&["-b", "-c", "-p"]);
-                    return Err(anyhow!(unsupported_flags_message(&invalid_flags, "combination is ambiguous in run")));
+                    return Err(anyhow!(unsupported_flags_message(
+                        &invalid_flags,
+                        "combination is ambiguous in run"
+                    )));
                 }
 
                 Ok(Some(Action::Run {
@@ -123,13 +138,24 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                 }))
             }
 
-            Build { prune, force, backup, clean } => {
+            Build {
+                prune,
+                force,
+                backup,
+                clean,
+            } => {
                 if *prune && !*backup {
-                    return Err(anyhow!("Unsupported: --prune cannot be used without --backup for build"));
+                    return Err(anyhow!(
+                        "Unsupported: --prune cannot be used without --backup \
+                         for build"
+                    ));
                 }
                 if *prune && *force && *backup && *clean {
                     let flags = ["-b", "-c", "-p", "-f"];
-                    return Err(anyhow!(unsupported_flags_message(&flags, "combination is ambiguous for build")));
+                    return Err(anyhow!(unsupported_flags_message(
+                        &flags,
+                        "combination is ambiguous for build"
+                    )));
                 }
 
                 Ok(Some(Action::Build {
@@ -143,12 +169,21 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
 
             Fetch { prune } => {
                 let mut invalid_flags = vec![];
-                if cli.backup { invalid_flags.push("-b"); }
-                if cli.clean { invalid_flags.push("-c"); }
-                if cli.force { invalid_flags.push("-f"); }
+                if cli.backup {
+                    invalid_flags.push("-b");
+                }
+                if cli.clean {
+                    invalid_flags.push("-c");
+                }
+                if cli.force {
+                    invalid_flags.push("-f");
+                }
 
                 if !invalid_flags.is_empty() {
-                    return Err(anyhow!(unsupported_flags_message(&invalid_flags, "is invalid for fetch")));
+                    return Err(anyhow!(unsupported_flags_message(
+                        &invalid_flags,
+                        "is invalid for fetch"
+                    )));
                 }
 
                 Ok(Some(Action::Fetch { prune: *prune }))
@@ -165,7 +200,11 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
             return Ok(None);
         }
         if b {
-            return Ok(Some(Action::TopLevelBackup { clean: c, force: f, prune: p }));
+            return Ok(Some(Action::TopLevelBackup {
+                clean: c,
+                force: f,
+                prune: p,
+            }));
         }
         if c {
             return Ok(Some(Action::TopLevelClean { force: f }));
