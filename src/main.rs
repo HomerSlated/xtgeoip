@@ -10,22 +10,22 @@
 use std::process;
 
 use anyhow::{Result, anyhow};
-use clap::{Parser, CommandFactory, error::ErrorKind};
+use clap::{CommandFactory, Parser, error::ErrorKind};
 
 mod action;
 mod backup;
 mod build;
+mod cli;
 mod config;
 mod fetch;
 mod messages;
-mod cli;
 
 use crate::{
     action::{Action, run_action},
+    cli::Cli,
     config::load_config,
     messages::{init_logger, log_early_error},
 };
-use crate::cli::Cli;
 
 fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
     crate::cli::normalize_cli_to_action(cli)
@@ -70,7 +70,10 @@ fn main() -> Result<()> {
                 return Ok(());
             }
             _ => {
-                log_early_error(&format!("CLI argument parsing failed: {}", e.kind()));
+                log_early_error(&format!(
+                    "CLI argument parsing failed: {}",
+                    e.kind()
+                ));
                 e.print()?;
                 process::exit(2);
             }

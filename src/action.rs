@@ -2,7 +2,6 @@
 /// xtgeoip Actions
 /// xtgeoip action runner
 /// Handles all Action enum variants
-
 use std::path::Path;
 
 use anyhow::Result;
@@ -11,7 +10,7 @@ use crate::{
     backup::{backup, delete, prune_archives},
     build::build,
     config::{ConfAction, Config, run_conf},
-    fetch::{fetch, FetchMode},
+    fetch::{FetchMode, fetch},
 };
 
 #[derive(Debug)]
@@ -48,7 +47,11 @@ pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
     match action {
         Action::Conf(conf) => run_conf(conf)?,
 
-        Action::TopLevelBackup { clean, force, prune } => {
+        Action::TopLevelBackup {
+            clean,
+            force,
+            prune,
+        } => {
             backup(
                 Path::new(&cfg.paths.output_dir),
                 Path::new(&cfg.paths.archive_dir),

@@ -51,10 +51,11 @@ fn main() -> anyhow::Result<()> {
             println!("Success");
 
             // Check for rebuild condition
-            if rebuild_after_clean
-                && args.contains(&"-c")
-            {
-                println!("--rebuild active: running `build` to repopulate target dir");
+            if rebuild_after_clean && args.contains(&"-c") {
+                println!(
+                    "--rebuild active: running `build` to repopulate target \
+                     dir"
+                );
                 let build_status = Command::new("sudo")
                     .arg(&xtgeoip_path)
                     .arg("build")
@@ -68,7 +69,6 @@ fn main() -> anyhow::Result<()> {
                     println!("Rebuild FAILED (terminated by signal)");
                 }
             }
-
         } else if let Some(code) = status.code() {
             println!("FAILED (exit {})", code);
         } else {
