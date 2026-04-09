@@ -1,7 +1,7 @@
-use anyhow::{anyhow, Result};
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 /// xtgeoip CLI parsing and normalization
 use clap::{Parser, Subcommand};
+use anyhow::{anyhow, Result};
 
 use crate::{action::Action, config::ConfAction};
 
@@ -116,16 +116,11 @@ fn conf_action(default: bool, show: bool) -> ConfAction {
 pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
     use Commands::*;
 
-    // --legacy only valid with build/run
-    if cli.legacy {
-        match &cli.command {
-            Some(Build { .. }) | Some(Run { .. }) => {}
-            _ => {
-                return Err(anyhow!(
-                    "Unsupported: --legacy only valid with build or run"
-                ));
-            }
-        }
+    // Top-level --legacy is invalid unless used with build/run subcommands
+    if cli.legacy && cli.command.is_none() {
+        return Err(anyhow!(
+            "Unsupported: --legacy only valid with build or run"
+        ));
     }
 
     if let Some(cmd) = &cli.command {
@@ -141,6 +136,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                 backup,
                 clean,
                 force,
+                legacy,
             } => {
                 let mut invalid_flags = vec![];
 
@@ -174,6 +170,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                 force,
                 backup,
                 clean,
+                legacy,
             } => {
                 if *prune && !*backup {
                     return Err(anyhow!(
@@ -191,7 +188,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                 }
 
                 Ok(Some(Action::Build {
-                    legacy: cli.legacy,
+                    legacy: *legacy,
                     backup: *backup,
                     clean: *clean,
                     force: *force,
