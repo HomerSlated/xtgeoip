@@ -24,7 +24,7 @@ use crate::{
     action::{Action, run_action},
     cli::Cli,
     config::load_config,
-    messages::{init_logger, error, log_early_error},
+    messages::{error, init_logger, log_early_error},
 };
 
 fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {

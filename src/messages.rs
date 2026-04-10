@@ -14,7 +14,7 @@ pub fn init_logger(log_file: &str) -> Result<()> {
             let msg = match record.level() {
                 Level::Info => format!("{}", message),
                 Level::Warn => format!("Warning: {}", message),
-                Level::Error => format!("Error: {}", message),
+                // Level::Error => format!("Error: {}", message),
                 _ => format!("{}", message),
             };
             out.finish(format_args!("{}", msg));
