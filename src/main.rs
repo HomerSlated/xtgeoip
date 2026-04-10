@@ -9,7 +9,7 @@
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 use std::process;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use clap::{CommandFactory, Parser, error::ErrorKind};
 
 mod action;
