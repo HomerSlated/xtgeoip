@@ -49,9 +49,9 @@ fn run(cli: Cli) -> Result<()> {
         // Cli::command().print_help()?;
         println!();
 
-        let msg = "No command or top-level action specified";
-        eprintln!("Error: {msg}");
-        return Err(anyhow!(msg));
+        // let msg = "No command or top-level action specified";
+        // eprintln!("Error: {msg}");
+        // return Err(anyhow!(msg));
     }
 
     Ok(())
