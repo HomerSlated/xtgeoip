@@ -41,7 +41,6 @@ pub enum Action {
         prune: bool,
     },
     Conf(ConfAction),
-    NoArgs,
 }
 
 pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
@@ -141,12 +140,6 @@ pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
             if prune {
                 prune_archives(cfg, true, false)?;
             }
-        }
-
-        Action::NoArgs => {
-            Cli::command().print_help()?;
-            println!();
-            anyhow::bail!("No command or top-level action specified");
         }
     }
 

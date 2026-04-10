@@ -43,12 +43,18 @@ fn run(cli: Cli) -> Result<()> {
 
     let action = normalize_cli_to_action(&cli)?;
 
-    if let Some(action) = action {
-        run_action(&cfg, action)?;
-    } else {
-        Cli::command().print_help()?;
-        println!();
-        return Err(anyhow!("No command or top-level action specified"));
+    match action {
+        Some(action) => {
+            run_action(&cfg, action)?;
+        }
+
+        None => {
+            Cli::command().print_help()?;
+            println!();
+            return Err(anyhow::anyhow!(
+                "No command or top-level action specified"
+            ));
+        }
     }
 
     Ok(())
