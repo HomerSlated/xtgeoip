@@ -12,7 +12,7 @@ use crate::{action::Action, config::ConfAction};
     about = "Downloads and builds GeoIP databases",
     propagate_version = false,
     disable_help_subcommand = true,
-    args_conflicts_with_subcommands = false
+    args_conflicts_with_subcommands = true
 )]
 pub struct Cli {
     #[arg(short, long)]
@@ -248,7 +248,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
         let f = cli.force;
 
         if !b && !c && !p {
-            return Ok(None);
+            return Ok(Some(Action::NoArgs));
         }
 
         // -p alone invalid
