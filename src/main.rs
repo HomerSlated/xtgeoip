@@ -33,7 +33,7 @@ fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
 
 fn fail(msg: &str) -> anyhow::Error {
     error(msg);
-    anyhow::anyhow!(msg)
+    anyhow::anyhow!(msg.to_string())
 }
 
 fn run(cli: Cli) -> Result<()> {
