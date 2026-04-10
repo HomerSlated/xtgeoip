@@ -247,10 +247,6 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
         let p = cli.prune;
         let f = cli.force;
 
-        if !b && !c && !p {
-            return Ok(Some(Action::NoArgs));
-        }
-
         // -p alone invalid
         if p && !b && !c {
             return Err(anyhow!("Unsupported top-level flag combination"));
