@@ -76,6 +76,18 @@ pub enum Commands {
     Fetch {
         #[arg(short, long)]
         prune: bool,
+
+        #[arg(short, long)]
+        backup: bool,
+
+        #[arg(short, long)]
+        clean: bool,
+
+        #[arg(short, long)]
+        force: bool,
+
+        #[arg(short, long)]
+        legacy: bool,
     },
 
     #[command(group(
