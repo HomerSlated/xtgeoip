@@ -12,7 +12,7 @@ use crate::{action::Action, config::ConfAction};
     about = "Downloads and builds GeoIP databases",
     propagate_version = false,
     disable_help_subcommand = true,
-    args_conflicts_with_subcommands = true
+    args_conflicts_with_subcommands = false
 )]
 pub struct Cli {
     #[arg(short, long)]
