@@ -144,7 +144,9 @@ pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
         }
 
         Action::NoArgs => {
-           anyhow::bail!("No command or top-level action specified");
+            Cli::command().print_help()?;
+            println!();
+            anyhow::bail!("No command or top-level action specified");
         }
     }
 
