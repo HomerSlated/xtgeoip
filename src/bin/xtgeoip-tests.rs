@@ -2,6 +2,7 @@
 //! Run xtgeoip commands from docs/generated/testcases.yaml
 
 use std::{env, fs, process::Command};
+
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -35,7 +36,10 @@ fn main() -> anyhow::Result<()> {
 
         // Skip interactive editor
         if tc.cmd.contains("conf -e") {
-            println!("[{}] [{}] -> Skipped interactive testcase", tc.key, tc.cmd);
+            println!(
+                "[{}] [{}] -> Skipped interactive testcase",
+                tc.key, tc.cmd
+            );
             continue;
         }
 
@@ -55,23 +59,28 @@ fn main() -> anyhow::Result<()> {
         if status.success() {
             println!("Success");
 
+            // Rebuild logic
+            if rebuild_after_clean
+                && args.contains(&"-c")
+                && !args.contains(&"build")
+                && !args.contains(&"run")
+            {
+                println!("--rebuild active: running `build`");
 
-            // Check for rebuild condition
-            if rebuild_after_clean && args.contains(&"-c") && !args.contains(&"build") && !args.contains(&"run") {
-                println!("--rebuild active: running `build` to repopulate target dir");
-                let build_status = Command::new("sudo")
+                let rebuild_ok = Command::new("sudo")
                     .arg(&xtgeoip_path)
                     .arg("build")
-                    .status()?;
+                    .status()?
+                    .success();
 
-                if build_status.success() {
-                    println!("Rebuild succeeded");
-                } else if let Some(code) = build_status.code() {
-                    println!("Rebuild FAILED (exit {})", code);
+                if rebuild_ok {
+                    println!("Success");
                 } else {
-                    println!("Rebuild FAILED (terminated by signal)");
+                    println!("FAILED");
                 }
             }
+        } else {
+            println!("FAILED");
         }
 
         println!();

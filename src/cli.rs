@@ -1,7 +1,7 @@
+use anyhow::{Result, anyhow};
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 /// xtgeoip CLI parsing and normalization
 use clap::{Parser, Subcommand};
-use anyhow::{anyhow, Result};
 
 use crate::{action::Action, config::ConfAction};
 
