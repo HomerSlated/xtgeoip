@@ -41,29 +41,20 @@ fn run(cli: Cli) -> Result<()> {
         init_logger(log_file)?;
     }
 
-    let action = normalize_cli_to_action(&cli)?;
-
-    if let Some(action) = action {
-        run_action(&cfg, action)?;
-    } else {
-        // Cli::command().print_help()?;
-        println!();
-
-        // let msg = "No command or top-level action specified";
-        // eprintln!("Error: {msg}");
-        // return Err(anyhow!(msg));
+    let action = normalize_cli_to_action(&cli)?;                                                                                
+                                                                                                                                
+    if let Some(action) = action {                                                                                              
+        run_action(&cfg, action)?;                                                                                              
+    } else {                                                                                                                    
+        Cli::command().print_help()?;                                                                                           
+        println!();                                                                                                             
+        return Err(anyhow!("No command or top-level action specified"));                                                        
     }
 
     Ok(())
 }
 
 fn main() -> Result<()> {
-    if std::env::args_os().len() == 1 {
-        let mut cmd = Cli::command();
-        cmd.print_help()?;
-        println!();
-        process::exit(1);
-    }
 
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
