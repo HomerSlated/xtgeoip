@@ -196,19 +196,25 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                 }))
             }
 
-            Fetch { prune } => {
+            Fetch {
+                prune,
+                backup,
+                clean,
+                force,
+                legacy,
+            } => {
                 let mut invalid_flags = vec![];
 
-                if cli.backup {
+                if *backup {
                     invalid_flags.push("-b");
                 }
-                if cli.clean {
+                if *clean {
                     invalid_flags.push("-c");
                 }
-                if cli.force {
+                if *force {
                     invalid_flags.push("-f");
                 }
-                if cli.legacy {
+                if *legacy {
                     invalid_flags.push("-l");
                 }
 
