@@ -24,7 +24,7 @@ use crate::{
     action::{Action, run_action},
     cli::Cli,
     config::load_config,
-    messages::{error, init_logger, log_early_error},
+    messages::{init_logger, log_early_error},
 };
 
 fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
@@ -46,7 +46,7 @@ fn run(cli: Cli) -> Result<()> {
     if let Some(action) = action {
         run_action(&cfg, action)?;
     } else {
-        Cli::command().print_help()?;
+        // Cli::command().print_help()?;
         println!();
 
         let msg = "No command or top-level action specified";
