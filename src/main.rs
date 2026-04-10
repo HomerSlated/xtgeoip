@@ -41,21 +41,20 @@ fn run(cli: Cli) -> Result<()> {
         init_logger(log_file)?;
     }
 
-    let action = normalize_cli_to_action(&cli)?;                                                                                
-                                                                                                                                
-    if let Some(action) = action {                                                                                              
-        run_action(&cfg, action)?;                                                                                              
-    } else {                                                                                                                    
-        Cli::command().print_help()?;                                                                                           
-        println!();                                                                                                             
-        return Err(anyhow!("No command or top-level action specified"));                                                        
+    let action = normalize_cli_to_action(&cli)?;
+
+    if let Some(action) = action {
+        run_action(&cfg, action)?;
+    } else {
+        Cli::command().print_help()?;
+        println!();
+        return Err(anyhow!("No command or top-level action specified"));
     }
 
     Ok(())
 }
 
 fn main() -> Result<()> {
-
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(e) => match e.kind() {
