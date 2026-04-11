@@ -166,6 +166,8 @@ fn load_spec(yaml_str: &str, path: &std::path::Path) -> anyhow::Result<DocgenSpe
              \n🧠 Struct target: DocgenSpec\n\
              🧠 Likely causes:\n\
              - YAML structure mismatch (meta/version/top-level split)\n\
+             - Wrong file being loaded\n\
+             - Old compiled binary still running\n\
              - Hidden indentation or tab issue\n\
              \n📦 Debug hints:\n\
              - Check: `rg \"meta:\" -n {}`\n\
