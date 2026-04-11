@@ -136,7 +136,7 @@ fn main() -> anyhow::Result<()> {
 fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
     let mut used_error_cases: BTreeSet<String> = BTreeSet::new();
 
-    let check = |cmd_name: &str, ex: &Example| -> anyhow::Result<()> {
+    let mut check = |cmd_name: &str, ex: &Example| -> anyhow::Result<()> {
         if let Some(reason) = &ex.reason {
             if !spec.reason_templates.contains_key(&reason.code) {
                 anyhow::bail!("Unknown reason code {} in {}", reason.code, cmd_name);
@@ -394,7 +394,7 @@ fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
         for ex in exs {
             let outcome = resolve_outcome(spec, ex);
             out.push_str(&format!(
-                "    CliExample { cmd: \"{}\", valid: {}, outcome: \"{}\" },\n",
+                "    CliExample {{ cmd: \"{}\", valid: {}, outcome: \"{}\" }},\n",
                 ex.cmd, ex.valid, outcome
             ));
         }
