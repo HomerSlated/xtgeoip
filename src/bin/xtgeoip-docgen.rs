@@ -210,7 +210,7 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
     {
         let mut unused = Vec::new();
 
-        if let Some(ec) = &error_cases {
+        if let Some(ec) = error_cases {
             for (key, case) in ec {
                 if !used_error_cases.contains(&case.maps_to) {
                     unused.push(key.clone());
