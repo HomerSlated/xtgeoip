@@ -141,12 +141,11 @@ fn main() -> anyhow::Result<()> {
 
 fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
     let mut used_error_cases: BTreeSet<String> = BTreeSet::new();
-    let error_cases = spec.error_cases.as_ref();
 
-    let mut check = |ex: &Example, scope: &str| -> anyhow::Result<()> {
+    let mut check = |cmd_name: &str, ex: &Example| -> anyhow::Result<()> {
         if let Some(reason) = &ex.reason {
             if !spec.reason_templates.contains_key(&reason.code) {
-                anyhow::bail!("Unknown reason code {} in {}", reason.code, scope);
+                anyhow::bail!("Unknown reason code {} in {}", reason.code, cmd_name);
             }
         }
 
@@ -155,10 +154,8 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
                 anyhow::anyhow!("Missing maps_to in invalid example {}", ex.cmd)
             })?;
 
-            if let Some(ec) = error_cases {
-                if !ec.contains_key(maps_to) {
-                    anyhow::bail!("Unknown error case {}", maps_to);
-                }
+            if !spec.error_cases.contains_key(maps_to) {
+                anyhow::bail!("Unknown error case {}", maps_to);
             }
 
             used_error_cases.insert(maps_to.clone());
@@ -167,41 +164,31 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
         Ok(())
     };
 
-    let mut collect = |cmd: &CommandSpec, scope: &str| {
+    for (cmd_name, cmd) in &spec.commands {
         let exs = match cmd {
             CommandSpec::FlagCommand { examples, .. }
             | CommandSpec::SelectorCommand { examples, .. } => examples,
         };
 
         for ex in exs {
-            let _ = check(ex, scope);
+            check(cmd_name, ex)?;
         }
-    };
-
-    if let Some(cmd) = &spec.top_level {
-        collect(cmd, "top_level");
-    }
-
-    for (name, cmd) in &spec.commands {
-        collect(cmd, name);
     }
 
     if spec.proof.as_ref().map(|p| p.full_branch_coverage).flatten().unwrap_or(false) {
-        if let Some(ec) = error_cases {
-            let mut unused = Vec::new();
+        let mut unused = Vec::new();
 
-            for (key, case) in ec {
-                if !used_error_cases.contains(&case.maps_to) {
-                    unused.push(key.clone());
-                }
+        for (key, _) in &spec.error_cases {
+            if !used_error_cases.contains(key) {
+                unused.push(key.clone());
             }
+        }
 
-            if !unused.is_empty() {
-                anyhow::bail!(
-                    "Unused error cases (no invalid example maps_to reference): {:?}",
-                    unused
-                );
-            }
+        if !unused.is_empty() {
+            anyhow::bail!(
+                "Unused error cases: {:?}",
+                unused
+            );
         }
     }
 
