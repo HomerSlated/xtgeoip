@@ -377,7 +377,7 @@ fn generate_error_text_rs(spec: &DocgenSpec) -> anyhow::Result<String> {
     Ok(out)
 }
 
-fn generate_cli_matrix_rs(spec: &DcogenSpec) -> anyhow::Result<String> {
+fn generate_cli_matrix_rs(spec: &DocgenSpec) -> anyhow::Result<String> {
     let mut out = String::from(
         "pub struct CliExample { pub cmd: &'static str, pub valid: bool, pub outcome: &'static str }\npub const CLI_MATRIX: &[CliExample] = &[\n"
     );
