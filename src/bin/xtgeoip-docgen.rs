@@ -126,7 +126,7 @@ fn main() -> anyhow::Result<()> {
 
 /* ------------------------- STRICT B MODE VALIDATION ------------------------- */
 
-fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
+fn validate_spec(spec: &DocgenSpec) -> anyhow::Result<()> {
     let mut used_error_cases = BTreeSet::new();
     let error_cases = spec.error_cases.as_ref();
 
@@ -234,11 +234,11 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
 
 /* ------------------------- DOCUMENTATION GENERATORS ------------------------- */
 
-fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
+fn generate_usage_md(spec: &DocgenSpec) -> anyhow::Result<String> {
     let mut out =
         format!("# {}\n\n{}\n\n", spec.meta.program, spec.meta.summary);
 
-    fn render(out: &mut String, spec: &Spec, exs: &[Example]) -> anyhow::Result<()> {
+    fn render(out: &mut String, spec: &DocgenSpec, exs: &[Example]) -> anyhow::Result<()> {
         for ex in exs {
             let outcome = if ex.valid {
                 ex.outcome.clone().unwrap_or_default()
@@ -292,7 +292,7 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
     Ok(out)
 }
 
-fn generate_tldr_md(spec: &Spec) -> anyhow::Result<String> {
+fn generate_tldr_md(spec: &DocgenSpec) -> anyhow::Result<String> {
     let mut out =
         format!("# {}\n\n> {}\n\n", spec.meta.program, spec.meta.summary);
 
@@ -323,7 +323,7 @@ fn generate_tldr_md(spec: &Spec) -> anyhow::Result<String> {
     Ok(out)
 }
 
-fn generate_scd(spec: &Spec) -> anyhow::Result<String> {
+fn generate_scd(spec: &DocgenSpec) -> anyhow::Result<String> {
     let mut out = String::new();
 
     if let Some(cmd) = &spec.top_level {
@@ -363,7 +363,7 @@ fn generate_scd(spec: &Spec) -> anyhow::Result<String> {
     Ok(out)
 }
 
-fn generate_error_text_rs(spec: &Spec) -> anyhow::Result<String> {
+fn generate_error_text_rs(spec: &DocgenSpec) -> anyhow::Result<String> {
     let mut out = "// auto-generated\n".to_string();
 
     for (k, v) in &spec.reason_templates {
@@ -377,7 +377,7 @@ fn generate_error_text_rs(spec: &Spec) -> anyhow::Result<String> {
     Ok(out)
 }
 
-fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
+fn generate_cli_matrix_rs(spec: &DcogenSpec) -> anyhow::Result<String> {
     let mut out = String::from(
         "pub struct CliExample { pub cmd: &'static str, pub valid: bool, pub outcome: &'static str }\npub const CLI_MATRIX: &[CliExample] = &[\n"
     );
@@ -409,7 +409,7 @@ fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
     Ok(out)
 }
 
-fn generate_testcases_yaml(spec: &Spec) -> anyhow::Result<String> {
+fn generate_testcases_yaml(spec: &DocgenSpec) -> anyhow::Result<String> {
     let mut testcases = Vec::new();
 
     let mut add = |exs: &[Example]| {
@@ -440,7 +440,7 @@ fn generate_testcases_yaml(spec: &Spec) -> anyhow::Result<String> {
     Ok(serde_yaml::to_string(&testcases)?)
 }
 
-fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
+fn generate_manpage(spec: &DocgenSpec) -> anyhow::Result<String> {
     Ok(format!(
         ".TH {} 1 \"\" \"xtgeoip {}\" \"User Commands\"\n.SH NAME\n{}\n\t{}\n",
         spec.meta.program.to_uppercase(),
@@ -450,7 +450,7 @@ fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
     ))
 }
 
-fn render_reason(spec: &Spec, reason: &Reason) -> anyhow::Result<String> {
+fn render_reason(spec: &DocgenSpec, reason: &Reason) -> anyhow::Result<String> {
     let template = spec
         .reason_templates
         .get(&reason.code)

@@ -36,7 +36,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 /// Generate full Rust module
-fn generate_errors_rs(spec: &Spec) -> anyhow::Result<String> {
+fn generate_errors_rs(spec: &ErrorSpec) -> anyhow::Result<String> {
     let mut out = String::new();
 
     out.push_str("// Auto-generated from cli.yaml — DO NOT EDIT\n\n");
