@@ -46,10 +46,8 @@ fn generate_errors_rs(spec: &ErrorSpec) -> anyhow::Result<String> {
     out.push_str("pub enum CliError {\n");
 
     for (case_name, case) in &spec.error_cases {
-        let template = spec
-            .reason_templates
-            .get(&case.maps_to)
-            .ok_or_else(|| {
+        let template =
+            spec.reason_templates.get(&case.maps_to).ok_or_else(|| {
                 anyhow::anyhow!(
                     "error_case '{}' refers to unknown template '{}'",
                     case_name,
@@ -152,7 +150,9 @@ fn to_camel(s: &str) -> String {
         .map(|part| {
             let mut c = part.chars();
             match c.next() {
-                Some(first) => first.to_uppercase().collect::<String>() + c.as_str(),
+                Some(first) => {
+                    first.to_uppercase().collect::<String>() + c.as_str()
+                }
                 None => String::new(),
             }
         })
