@@ -138,7 +138,10 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
 
     let error_cases = spec.error_cases.as_ref();
 
-    let check = |ex: &Example, scope: &str, used: &mut BTreeSet<String>| -> anyhow::Result<()> {
+    let check = |ex: &Example,
+                 scope: &str,
+                 used: &mut BTreeSet<String>|
+     -> anyhow::Result<()> {
         if let Some(reason) = &ex.reason {
             if !spec.reason_templates.contains_key(&reason.code) {
                 anyhow::bail!("Unknown reason code {} in {}", reason.code, scope);
@@ -184,14 +187,20 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
         }
     }
 
-    // FULL COVERAGE CHECK
-    if spec.proof.as_ref().and_then(|p| p.full_branch_coverage).unwrap_or(false) {
+    // FULL COVERAGE CHECK (OPTION A FIX)
+    if spec
+        .proof
+        .as_ref()
+        .and_then(|p| p.full_branch_coverage)
+        .unwrap_or(false)
+    {
         if let Some(ec) = error_cases {
             let mut unused = Vec::new();
 
-            for key in ec.keys() {
-                if !used_error_cases.contains(key) {
-                    unused.push(key);
+            for (key, case) in ec {
+                // FIX: compare maps_to correctly
+                if !used_error_cases.contains(&case.maps_to) {
+                    unused.push(key.clone());
                 }
             }
 
@@ -229,7 +238,7 @@ fn resolve_outcome(spec: &Spec, ex: &Example) -> String {
     "ERROR".into()
 }
 
-/* ---------------- USAGE ---------------- */
+/* ---------------- ALL OTHER FUNCTIONS (UNCHANGED) ---------------- */
 
 fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
     let mut out = format!("# {}\n\n{}\n\n", spec.meta.program, spec.meta.summary);
@@ -286,6 +295,15 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
 
     Ok(out)
 }
+
+/* remaining functions unchanged from your version:
+   generate_tldr_md
+   generate_scd
+   generate_error_text_rs
+   generate_cli_matrix_rs
+   generate_testcases_yaml
+   generate_manpage
+*/
 
 /* ---------------- TLDR ---------------- */
 
