@@ -164,7 +164,7 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
         Ok(())
     };
 
-    let mut visit = |name: &str,
+    let visit = |name: &str,
                      cmd: &CommandSpec,
                      used: &mut BTreeSet<String>| -> anyhow::Result<()> {
         let exs = match cmd {
