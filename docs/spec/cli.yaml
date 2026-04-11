@@ -8,88 +8,120 @@ proof:
   unique_maps_to: true
   full_branch_coverage: true
 
+# ------------------------------------------------------------
+# FLAGS
+# ------------------------------------------------------------
+
 flags:
   b:
     long: backup
     kind: bool
     summary: Back up current database before replacing it.
+
   c:
     long: clean
     kind: bool
     summary: Clean working files before continuing.
+
   p:
     long: prune
     kind: bool
     summary: Prune retained artifacts for the current operation.
+
   f:
     long: force
     kind: bool
     summary: Force the relevant operation when supported.
+
   l:
     long: legacy
     kind: bool
     summary: Enable legacy mode.
 
+# ------------------------------------------------------------
+# REASON TEMPLATES
+# ------------------------------------------------------------
+
 reason_templates:
   ok:
     text: "{outcome}"
+
   invalid_flag:
-    text: "unsupported option, -{flag} is not valid for {command}"
+    text: "unsupported option -{flag} for {command}"
+
   invalid_combo:
     text: "unsupported option combination"
+
   no_prune_here:
-    text: "unsupported option, {command} has no prune function"
+    text: "{command} does not support prune"
+
   no_force_here:
-    text: "unsupported option, {target} does not support force"
+    text: "{command} does not support force without a target"
+
   ambiguous_force_prune:
-    text: "unsupported option, ambiguous and prune does not support force"
+    text: "ambiguous flags: prune and force cannot be combined in this context"
+
   ambiguous_prune_target:
-    text: "unsupported option, ambiguous (does prune apply to {left} or {right}?)"
+    text: "ambiguous prune target between {left} and {right}"
+
   missing_required_argument:
-    text: "missing required argument, {command} requires {argument}"
+    text: "{command} requires {argument}"
+
   no_command:
-    text: "no command or top-level action specified"
+    text: "no command specified"
+
+# ------------------------------------------------------------
+# ERROR CASES
+# ------------------------------------------------------------
 
 error_cases:
   no_command:
-    maps_to: "no_command"
+    maps_to: no_command
+
   legacy_top_level:
-    maps_to: "legacy_top_level"
+    maps_to: legacy_top_level
+
   top_level_invalid_combo:
-    maps_to: "top_level_invalid_combo"
+    maps_to: top_level_invalid_combo
+
   top_level_force_without_target:
-    maps_to: "top_level_force_without_target"
+    maps_to: top_level_force_without_target
+
   top_level_clean_prune:
-    maps_to: "top_level_clean_prune"
+    maps_to: top_level_clean_prune
+
   top_level_backup_prune_force:
-    maps_to: "top_level_backup_prune_force"
+    maps_to: top_level_backup_prune_force
 
   fetch_invalid_flags:
-    maps_to: "fetch_invalid_flags"
+    maps_to: fetch_invalid_flags
 
   build_prune_without_backup:
-    maps_to: "build_prune_without_backup"
+    maps_to: build_prune_without_backup
+
   build_ambiguous_all_flags:
-    maps_to: "build_ambiguous_all_flags"
+    maps_to: build_ambiguous_all_flags
 
   run_ambiguous_cpf:
-    maps_to: "run_ambiguous_cpf"
+    maps_to: run_ambiguous_cpf
+
   run_ambiguous_bcp:
-    maps_to: "run_ambiguous_bcp"
+    maps_to: run_ambiguous_bcp
 
   conf_missing_flag:
-    maps_to: "conf_missing_flag"
+    maps_to: conf_missing_flag
 
-# ------------------------------------------------------------
+# ============================================================
 # TOP LEVEL
-# ------------------------------------------------------------
+# ============================================================
 
 top_level:
   kind: FlagCommand
-  summary: "Top level xtgeoip command"
+  summary: Top level xtgeoip command
   allowed_flags: [b, c, p, f]
 
   examples:
+
     - case_id: TL-001
       cmd: "xtgeoip"
       valid: false
@@ -105,27 +137,27 @@ top_level:
     - case_id: TL-003
       cmd: "xtgeoip -b"
       valid: true
-      outcome: "back up binary data in /usr/share/xt_geoip/ using the manifest; store backups in /var/lib/xt_geoip/"
+      outcome: "backup database"
 
     - case_id: TL-004
       cmd: "xtgeoip -b -c"
       valid: true
-      outcome: "back up and clean binary data using the manifest"
+      outcome: "backup then clean"
 
     - case_id: TL-005
       cmd: "xtgeoip -b -c -f"
       valid: true
-      outcome: "force backup and clean even without a manifest"
+      outcome: "force backup and clean"
 
     - case_id: TL-006
       cmd: "xtgeoip -b -f"
       valid: true
-      outcome: "force backup of binary data even without a manifest"
+      outcome: "force backup"
 
     - case_id: TL-007
       cmd: "xtgeoip -b -p"
       valid: true
-      outcome: "back up binary data, then prune old backups"
+      outcome: "backup then prune"
 
     - case_id: TL-008
       cmd: "xtgeoip -b -p -f"
@@ -136,12 +168,12 @@ top_level:
     - case_id: TL-009
       cmd: "xtgeoip -c"
       valid: true
-      outcome: "clean (delete) binary data using the manifest"
+      outcome: "clean database"
 
     - case_id: TL-010
       cmd: "xtgeoip -c -f"
       valid: true
-      outcome: "force clean even without a manifest"
+      outcome: "force clean"
 
     - case_id: TL-011
       cmd: "xtgeoip -c -p"
@@ -173,13 +205,13 @@ top_level:
       reason: { code: invalid_flag }
       maps_to: legacy_top_level
 
-# ------------------------------------------------------------
+# ============================================================
 # FETCH
-# ------------------------------------------------------------
+# ============================================================
 
 fetch:
   kind: FlagCommand
-  summary: "Fetch GeoLite2 data files"
+  summary: Fetch GeoLite2 data files
   allowed_flags: [p]
 
   examples:
@@ -191,7 +223,7 @@ fetch:
     - case_id: F-002
       cmd: "xtgeoip fetch -p"
       valid: true
-      outcome: "fetch CSVs, then prune CSV archives"
+      outcome: "fetch then prune archives"
 
     - case_id: F-003
       cmd: "xtgeoip fetch -l"
@@ -217,30 +249,31 @@ fetch:
       reason: { code: invalid_flag }
       maps_to: fetch_invalid_flags
 
-# ------------------------------------------------------------
+# ============================================================
 # BUILD
-# ------------------------------------------------------------
+# ============================================================
 
 build:
   kind: FlagCommand
-  summary: "Build xt_geoip database"
+  summary: Build xt_geoip database
   allowed_flags: [b, c, p, f, l]
 
   examples:
+
     - case_id: B-001
       cmd: "xtgeoip build"
       valid: true
-      outcome: "build using local copy of database"
+      outcome: "build database"
 
     - case_id: B-002
       cmd: "xtgeoip build -l"
       valid: true
-      outcome: "build using local copy of database in legacy mode"
+      outcome: "build (legacy mode)"
 
     - case_id: B-003
       cmd: "xtgeoip build -b -p"
       valid: true
-      outcome: "backup, prune backups, then build"
+      outcome: "backup then prune then build"
 
     - case_id: B-004
       cmd: "xtgeoip build -p"
@@ -251,12 +284,12 @@ build:
     - case_id: B-005
       cmd: "xtgeoip build -c -f"
       valid: true
-      outcome: "clean using manifest, then build using local copy of database"
+      outcome: "clean then build"
 
     - case_id: B-006
       cmd: "xtgeoip build -b -c -p"
       valid: true
-      outcome: "backup, prune backups, clean, then build"
+      outcome: "backup, prune, clean, build"
 
     - case_id: B-007
       cmd: "xtgeoip build -b -c -p -f"
@@ -264,40 +297,41 @@ build:
       reason: { code: ambiguous_force_prune }
       maps_to: build_ambiguous_all_flags
 
-# ------------------------------------------------------------
+# ============================================================
 # RUN
-# ------------------------------------------------------------
+# ============================================================
 
 run:
   kind: FlagCommand
-  summary: "Run full pipeline"
+  summary: Run full pipeline
   allowed_flags: [b, c, p, f, l]
 
   examples:
+
     - case_id: R-001
       cmd: "xtgeoip run"
       valid: true
-      outcome: "fetch, then build"
+      outcome: "fetch then build"
 
     - case_id: R-002
       cmd: "xtgeoip run -l"
       valid: true
-      outcome: "fetch, then build in legacy mode"
+      outcome: "fetch then build (legacy)"
 
     - case_id: R-003
       cmd: "xtgeoip run -p"
       valid: true
-      outcome: "fetch, then prune CSV archives, then build"
+      outcome: "fetch then prune then build"
 
     - case_id: R-004
       cmd: "xtgeoip run -c -p"
       valid: true
-      outcome: "clean using manifest, then fetch, then prune CSV archives, then build"
+      outcome: "clean then fetch then prune then build"
 
     - case_id: R-005
       cmd: "xtgeoip run -c -f"
       valid: true
-      outcome: "force clean without manifest, then fetch, then build"
+      outcome: "force clean then fetch then build"
 
     - case_id: R-006
       cmd: "xtgeoip run -c -p -f"
@@ -311,13 +345,13 @@ run:
       reason: { code: ambiguous_prune_target }
       maps_to: run_ambiguous_bcp
 
-# ------------------------------------------------------------
+# ============================================================
 # CONF
-# ------------------------------------------------------------
+# ============================================================
 
 conf:
   kind: SelectorCommand
-  summary: "Manage configuration"
+  summary: Manage configuration
   usage: "xtgeoip conf <-s|-d|-e>"
 
   positional:
@@ -332,6 +366,7 @@ conf:
     exactly_one_positional: true
 
   examples:
+
     - case_id: C-001
       cmd: "xtgeoip conf"
       valid: false
@@ -341,14 +376,14 @@ conf:
     - case_id: C-002
       cmd: "xtgeoip conf -s"
       valid: true
-      outcome: "show current config"
+      outcome: "show configuration"
 
     - case_id: C-003
       cmd: "xtgeoip conf -d"
       valid: true
-      outcome: "show default config"
+      outcome: "show default configuration"
 
     - case_id: C-004
       cmd: "xtgeoip conf -e"
       valid: true
-      outcome: "edit config"
+      outcome: "edit configuration"
