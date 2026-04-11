@@ -152,7 +152,7 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
                 anyhow::anyhow!("Missing maps_to in invalid example {}", ex.cmd)
             })?;
 
-            if let Some(ec) = &error_cases {
+            if let Some(ec) = error_cases {
                 if !ec.contains_key(maps_to) {
                     anyhow::bail!("Unknown error case {}", maps_to);
                 }
