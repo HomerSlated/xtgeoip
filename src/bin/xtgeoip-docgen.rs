@@ -234,23 +234,6 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
 
 /* ------------------------- DOCUMENTATION GENERATORS ------------------------- */
 
-fn render_reason(spec: &Spec, reason: &Reason) -> anyhow::Result<String> {
-    let template = spec
-        .reason_templates
-        .get(&reason.code)
-        .ok_or_else(|| anyhow::anyhow!("Unknown reason code: {}", reason.code))?;
-
-    let mut text = template.text.clone();
-
-    if let Some(args) = &reason.args {
-        for (k, v) in args {
-            text = text.replace(&format!("{{{}}}", k), v);
-        }
-    }
-
-    Ok(text)
-}
-
 fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
     let mut out =
         format!("# {}\n\n{}\n\n", spec.meta.program, spec.meta.summary);
