@@ -9,7 +9,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
-pub struct Spec {
+pub struct DocgenSpec {
     pub meta: Meta,
     pub version: String,
 
@@ -105,7 +105,7 @@ struct Testcase {
 
 fn main() -> anyhow::Result<()> {
     let yaml_str = fs::read_to_string("docs/spec/cli.yaml")?;
-    let spec: Spec = serde_yaml::from_str(&yaml_str)?;
+    let spec: DocgenSpec = serde_yaml::from_str(&yaml_str)?;
 
     validate_spec(&spec)?;
 

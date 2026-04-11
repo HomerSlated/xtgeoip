@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, fs};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
-struct Spec {
+struct ErrorSpec {
     reason_templates: BTreeMap<String, ReasonTemplate>,
     error_cases: BTreeMap<String, ErrorCase>,
 }
@@ -23,7 +23,7 @@ struct ErrorCase {
 
 fn main() -> anyhow::Result<()> {
     let yaml = fs::read_to_string("docs/spec/cli.yaml")?;
-    let spec: Spec = serde_yaml::from_str(&yaml)?;
+    let spec: ErrorSpec = serde_yaml::from_str(&yaml)?;
 
     let output = generate_errors_rs(&spec)?;
 
