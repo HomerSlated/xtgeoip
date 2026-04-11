@@ -21,7 +21,7 @@ pub struct Spec {
     #[serde(default)]
     pub top_level: Option<CommandSpec>,
 
-    #[serde(default)]
+    #[serde(flatten)]
     pub commands: BTreeMap<String, CommandSpec>,
 
     #[serde(default)]
