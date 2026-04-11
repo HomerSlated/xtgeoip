@@ -136,10 +136,14 @@ fn main() -> anyhow::Result<()> {
 fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
     let mut used_error_cases: BTreeSet<String> = BTreeSet::new();
 
-    let mut check = |cmd_name: &str, ex: &Example| -> anyhow::Result<()> {
+    let error_cases = spec.error_cases.as_ref();
+
+    let check = |scope: &str,
+                 ex: &Example,
+                 used: &mut BTreeSet<String>| -> anyhow::Result<()> {
         if let Some(reason) = &ex.reason {
             if !spec.reason_templates.contains_key(&reason.code) {
-                anyhow::bail!("Unknown reason code {} in {}", reason.code, cmd_name);
+                anyhow::bail!("Unknown reason code {} in {}", reason.code, scope);
             }
         }
 
@@ -148,44 +152,65 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
                 anyhow::anyhow!("Missing maps_to in invalid example {}", ex.cmd)
             })?;
 
-            if let Some(ec) = &spec.error_cases {
+            if let Some(ec) = &error_cases {
                 if !ec.contains_key(maps_to) {
                     anyhow::bail!("Unknown error case {}", maps_to);
                 }
             }
 
-            used_error_cases.insert(maps_to.clone());
+            used.insert(maps_to.clone());
         }
 
         Ok(())
     };
 
+    let mut visit = |name: &str,
+                     cmd: &CommandSpec,
+                     used: &mut BTreeSet<String>| -> anyhow::Result<()> {
+        let exs = match cmd {
+            CommandSpec::FlagCommand { examples, .. }
+            | CommandSpec::SelectorCommand { examples, .. } => examples,
+        };
+
+        for ex in exs {
+            check(name, ex, used)?;
+        }
+
+        Ok(())
+    };
+
+    // IMPORTANT: top_level is a command too
     if let Some(cmd) = &spec.top_level {
-        let exs = match cmd {
-            CommandSpec::FlagCommand { examples, .. }
-            | CommandSpec::SelectorCommand { examples, .. } => examples,
-        };
-
-        for ex in exs {
-            check("top_level", ex)?;
-        }
+        visit("top_level", cmd, &mut used_error_cases)?;
     }
 
-    for (name, cmd) in &spec.commands {
-        let exs = match cmd {
-            CommandSpec::FlagCommand { examples, .. }
-            | CommandSpec::SelectorCommand { examples, .. } => examples,
-        };
-
-        for ex in exs {
-            check(name, ex)?;
-        }
+    // These are ALL real commands in your YAML
+    if let Some(cmd) = spec.commands.get("fetch") {
+        visit("fetch", cmd, &mut used_error_cases)?;
     }
 
-    if spec.proof.as_ref().and_then(|p| p.full_branch_coverage).unwrap_or(false) {
+    if let Some(cmd) = spec.commands.get("build") {
+        visit("build", cmd, &mut used_error_cases)?;
+    }
+
+    if let Some(cmd) = spec.commands.get("run") {
+        visit("run", cmd, &mut used_error_cases)?;
+    }
+
+    if let Some(cmd) = spec.commands.get("conf") {
+        visit("conf", cmd, &mut used_error_cases)?;
+    }
+
+    // FULL COVERAGE CHECK
+    if spec
+        .proof
+        .as_ref()
+        .and_then(|p| p.full_branch_coverage)
+        .unwrap_or(false)
+    {
         let mut unused = Vec::new();
 
-        if let Some(ec) = &spec.error_cases {
+        if let Some(ec) = &error_cases {
             for (key, case) in ec {
                 if !used_error_cases.contains(&case.maps_to) {
                     unused.push(key.clone());
