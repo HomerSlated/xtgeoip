@@ -104,10 +104,25 @@ struct Testcase {
 }
 
 fn main() -> anyhow::Result<()> {
-    let yaml_str = fs::read_to_string("docs/spec/cli.yaml")?;
+    use std::path::PathBuf;
 
-    // 🔥 upgraded loader with explicit diagnostics
-    let spec = load_spec(&yaml_str)?;
+    let yaml_path = PathBuf::from("docs/spec/cli.yaml")
+        .canonicalize()
+        .map_err(|e| anyhow::anyhow!("Failed to resolve cli.yaml path: {e}"))?;
+
+    eprintln!("📄 xtgeoip-docgen loading spec from:");
+    eprintln!("   → {}", yaml_path.display());
+
+    let yaml_str = fs::read_to_string(&yaml_path)
+        .map_err(|e| anyhow::anyhow!("Failed to read {}: {e}", yaml_path.display()))?;
+
+    eprintln!("📦 file size: {} bytes", yaml_str.len());
+
+    eprintln!("📖 file preview (first 200 chars):\n{}\n",
+        &yaml_str.chars().take(200).collect::<String>()
+    );
+
+    let spec = load_spec(&yaml_str, &yaml_path)?;
 
     validate_spec(&spec)?;
 
@@ -128,27 +143,41 @@ fn main() -> anyhow::Result<()> {
 
 /* ------------------------- NEW: EXPLICIT YAML LOADER ------------------------- */
 
-fn load_spec(yaml_str: &str) -> anyhow::Result<DocgenSpec> {
+fn load_spec(yaml_str: &str, path: &std::path::Path) -> anyhow::Result<DocgenSpec> {
     serde_yaml::from_str::<DocgenSpec>(yaml_str).map_err(|e| {
         let location = e
             .location()
             .map(|l| format!("line {}, column {}", l.line(), l.column()))
             .unwrap_or_else(|| "unknown location".to_string());
 
+        let path_display = path.display();
+
+        let kind = match e.to_string().contains("missing field") {
+            true => "Missing field error",
+            false => "Serde deserialization error",
+        };
+
         let msg = format!(
             "\n❌ xtgeoip-docgen YAML deserialization failed\n\
-             \n📍 Location: {}\n\
+             \n📍 File: {}\n\
+             📍 Location: {}\n\
+             🔎 Error type: {}\n\
              🔎 Raw serde error: {}\n\
-             \n🧠 Interpretation:\n\
-             - A required field is missing or mis-structured\n\
-             - Most likely: `meta.summary` is missing OR mis-indented\n\
-             - OR a different Spec shape is being used at runtime\n\
-             \n📄 Expected YAML structure:\n\
-             meta:\n  program: xtgeoip\n  summary: <string>\n\
-             version: <string>\n\
-             ...\n",
+             \n🧠 Struct target: DocgenSpec\n\
+             🧠 Likely causes:\n\
+             - YAML structure mismatch (meta/version/top-level split)\n\
+             - Wrong file being loaded\n\
+             - Old compiled binary still running\n\
+             - Hidden indentation or tab issue\n\
+             \n📦 Debug hints:\n\
+             - Check: `rg \"meta:\" -n {}`\n\
+             - Check: `head -50 {}`\n",
+            path_display,
             location,
-            e
+            kind,
+            e,
+            path_display,
+            path_display
         );
 
         anyhow::anyhow!(msg)
