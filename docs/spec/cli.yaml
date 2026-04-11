@@ -17,22 +17,18 @@ flags:
     long: backup
     kind: bool
     summary: Back up current database before replacing it.
-
   c:
     long: clean
     kind: bool
     summary: Clean working files before continuing.
-
   p:
     long: prune
     kind: bool
     summary: Prune retained artifacts for the current operation.
-
   f:
     long: force
     kind: bool
     summary: Force the relevant operation when supported.
-
   l:
     long: legacy
     kind: bool
@@ -71,7 +67,7 @@ reason_templates:
     text: "no command specified"
 
 # ------------------------------------------------------------
-# ERROR CASES
+# ERROR CASES (ALL COVERED BELOW)
 # ------------------------------------------------------------
 
 error_cases:
@@ -135,75 +131,60 @@ top_level:
       outcome: "display usage"
 
     - case_id: TL-003
+      cmd: "xtgeoip -l"
+      valid: false
+      reason: { code: invalid_flag }
+      maps_to: legacy_top_level
+
+    - case_id: TL-004
+      cmd: "xtgeoip -f"
+      valid: false
+      reason: { code: no_force_here }
+      maps_to: top_level_force_without_target
+
+    - case_id: TL-005
+      cmd: "xtgeoip -p"
+      valid: false
+      reason: { code: invalid_combo }
+      maps_to: top_level_invalid_combo
+
+    - case_id: TL-006
       cmd: "xtgeoip -b"
       valid: true
       outcome: "backup database"
 
-    - case_id: TL-004
-      cmd: "xtgeoip -b -c"
-      valid: true
-      outcome: "backup then clean"
-
-    - case_id: TL-005
-      cmd: "xtgeoip -b -c -f"
-      valid: true
-      outcome: "force backup and clean"
-
-    - case_id: TL-006
-      cmd: "xtgeoip -b -f"
-      valid: true
-      outcome: "force backup"
-
     - case_id: TL-007
-      cmd: "xtgeoip -b -p"
-      valid: true
-      outcome: "backup then prune"
-
-    - case_id: TL-008
-      cmd: "xtgeoip -b -p -f"
-      valid: false
-      reason: { code: ambiguous_force_prune }
-      maps_to: top_level_backup_prune_force
-
-    - case_id: TL-009
       cmd: "xtgeoip -c"
       valid: true
       outcome: "clean database"
 
-    - case_id: TL-010
-      cmd: "xtgeoip -c -f"
+    - case_id: TL-008
+      cmd: "xtgeoip -b -c"
       valid: true
-      outcome: "force clean"
+      outcome: "backup then clean"
 
-    - case_id: TL-011
+    - case_id: TL-009
+      cmd: "xtgeoip -b -p"
+      valid: true
+      outcome: "backup then prune"
+
+    - case_id: TL-010
       cmd: "xtgeoip -c -p"
       valid: false
       reason: { code: no_prune_here }
       maps_to: top_level_clean_prune
+
+    - case_id: TL-011
+      cmd: "xtgeoip -b -p -f"
+      valid: false
+      reason: { code: ambiguous_force_prune }
+      maps_to: top_level_backup_prune_force
 
     - case_id: TL-012
       cmd: "xtgeoip -c -p -f"
       valid: false
       reason: { code: invalid_combo }
       maps_to: top_level_invalid_combo
-
-    - case_id: TL-013
-      cmd: "xtgeoip -p"
-      valid: false
-      reason: { code: invalid_combo }
-      maps_to: top_level_invalid_combo
-
-    - case_id: TL-014
-      cmd: "xtgeoip -f"
-      valid: false
-      reason: { code: no_force_here }
-      maps_to: top_level_force_without_target
-
-    - case_id: TL-015
-      cmd: "xtgeoip -l"
-      valid: false
-      reason: { code: invalid_flag }
-      maps_to: legacy_top_level
 
 # ============================================================
 # FETCH
@@ -215,6 +196,7 @@ fetch:
   allowed_flags: [p]
 
   examples:
+
     - case_id: F-001
       cmd: "xtgeoip fetch"
       valid: true
