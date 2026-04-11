@@ -1,4 +1,8 @@
-pub struct CliExample { pub cmd: &'static str, pub valid: bool, pub outcome: &'static str }
+pub struct CliExample {
+    pub cmd: &'static str,
+    pub valid: bool,
+    pub outcome: &'static str,
+}
 pub const CLI_MATRIX: &[CliExample] = &[
     CliExample { cmd: "xtgeoip", valid: true, outcome: "display usage" },
     CliExample { cmd: "xtgeoip -h", valid: true, outcome: "display usage" },
