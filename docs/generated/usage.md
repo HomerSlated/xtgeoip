@@ -4,7 +4,6 @@ Build and manage xt_geoip data from MaxMind GeoLite2 CSVs.
 
 ## top level
 Top level xtgeoip command
-
 - `xtgeoip` → no command or top-level action specified (exit 1)
 - `xtgeoip -h` → OK
 - `xtgeoip -b` → OK
@@ -23,7 +22,6 @@ Top level xtgeoip command
 
 ## build
 Build xt_geoip database
-
 - `xtgeoip build` → OK
 - `xtgeoip build -l` → OK
 - `xtgeoip build -b -p` → OK
@@ -33,9 +31,7 @@ Build xt_geoip database
 - `xtgeoip build -b -c -p -f` → unsupported option, ambiguous and prune does not support force
 
 ## conf
-Manage configuration
 Usage: xtgeoip conf <-s|-d|-e>
-
 - `xtgeoip conf` → missing required argument, {command} requires {argument}
 - `xtgeoip conf -s` → OK
 - `xtgeoip conf -d` → OK
@@ -43,7 +39,6 @@ Usage: xtgeoip conf <-s|-d|-e>
 
 ## fetch
 Fetch GeoLite2 data files
-
 - `xtgeoip fetch` → OK
 - `xtgeoip fetch -p` → OK
 - `xtgeoip fetch -l` → unsupported option, -{flag} is not valid for {command}
@@ -53,7 +48,6 @@ Fetch GeoLite2 data files
 
 ## run
 Run full pipeline
-
 - `xtgeoip run` → OK
 - `xtgeoip run -l` → OK
 - `xtgeoip run -p` → OK

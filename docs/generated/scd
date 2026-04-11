@@ -1,2 +1,20 @@
-xtgeoip v3
-Build and manage xt_geoip data from MaxMind GeoLite2 CSVs.
+Command: top_level
+Summary: Top level xtgeoip command
+Flags: ["b", "c", "p", "f"]
+
+Command: build
+Summary: Build xt_geoip database
+Flags: ["b", "c", "p", "f", "l"]
+
+Command: conf
+Summary: Manage configuration
+Usage: xtgeoip conf <-s|-d|-e>
+
+Command: fetch
+Summary: Fetch GeoLite2 data files
+Flags: ["p"]
+
+Command: run
+Summary: Run full pipeline
+Flags: ["b", "c", "p", "f", "l"]
+
