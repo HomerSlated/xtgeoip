@@ -1,5 +1,5 @@
-//! xtgeoip-docgen v3 (fixed)
-//! Restores missing outcome data across all generators
+//! xtgeoip-docgen v3
+//! Generates documentation and test matrices from cli.yaml (B-mode strict validation)
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -42,12 +42,12 @@ pub struct Meta {
 #[serde(tag = "kind")]
 pub enum CommandSpec {
     FlagCommand {
-        summary: String,
-        allowed_flags: Vec<String>,
+        summary: Option<String>,
+        allowed_flags: Option<Vec<String>>,
         examples: Vec<Example>,
     },
     SelectorCommand {
-        summary: String,
+        summary: Option<String>,
         usage: Option<String>,
         positional: Option<PositionalArg>,
         constraints: Option<Constraints>,
@@ -100,16 +100,16 @@ struct Testcase {
     case_id: Option<String>,
     key: String,
     cmd: String,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
     maps_to: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
-    let yaml_str = fs::read_to_string("docs/spec/cli.yaml")?;
+    let yaml_path = "docs/spec/cli.yaml";
+    let yaml_str = fs::read_to_string(yaml_path)?;
+
     let spec: Spec = serde_yaml::from_str(&yaml_str)?;
 
-    let validation = validate_spec(&spec);
+    validate_spec(&spec)?;
 
     fs::create_dir_all("docs/generated")?;
     fs::create_dir_all("src/generated")?;
@@ -123,59 +123,68 @@ fn main() -> anyhow::Result<()> {
     fs::write("docs/generated/testcases.yaml", generate_testcases_yaml(&spec)?)?;
 
     println!("Docs generated successfully.");
-
-    if let Err(e) = validation {
-        eprintln!("\n⚠️ Validation failed:\n{}\n", e);
-        std::process::exit(1);
-    }
-
     Ok(())
 }
 
 /* ------------------------- VALIDATION ------------------------- */
 
 fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
-    let mut used = BTreeSet::new();
+    let mut used_error_cases = BTreeSet::new();
     let error_cases = spec.error_cases.as_ref();
 
-    let mut check = |examples: &[Example]| -> anyhow::Result<()> {
+    let mut validate_examples = |examples: &[Example], scope: &str| -> anyhow::Result<()> {
         for ex in examples {
+            if let Some(reason) = &ex.reason {
+                if !spec.reason_templates.contains_key(&reason.code) {
+                    anyhow::bail!("Unknown reason code {} in {}", reason.code, scope);
+                }
+            }
+
             if !ex.valid {
-                let m = ex.maps_to.as_ref().ok_or_else(|| {
-                    anyhow::anyhow!("Missing maps_to in '{}'", ex.cmd)
-                })?;
+                let maps_to = ex
+                    .maps_to
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("Missing maps_to in {}", ex.cmd))?;
 
                 if let Some(ec) = error_cases {
-                    if !ec.contains_key(m) {
-                        anyhow::bail!("Unknown error_case '{}'", m);
+                    if !ec.contains_key(maps_to) {
+                        anyhow::bail!("maps_to '{}' not found", maps_to);
                     }
                 }
 
-                used.insert(m.clone());
+                used_error_cases.insert(maps_to.clone());
             }
         }
         Ok(())
     };
 
-    if let Some(c) = &spec.top_level {
-        match c {
-            CommandSpec::FlagCommand { examples, .. }
-            | CommandSpec::SelectorCommand { examples, .. } => check(examples)?,
+    if let Some(cmd) = &spec.top_level {
+        match cmd {
+            CommandSpec::FlagCommand { examples, .. } => {
+                validate_examples(examples, "top_level")?;
+            }
+            CommandSpec::SelectorCommand { examples, .. } => {
+                validate_examples(examples, "top_level")?;
+            }
         }
     }
 
-    for c in spec.commands.values() {
-        match c {
-            CommandSpec::FlagCommand { examples, .. }
-            | CommandSpec::SelectorCommand { examples, .. } => check(examples)?,
+    for (name, cmd) in &spec.commands {
+        match cmd {
+            CommandSpec::FlagCommand { examples, .. } => {
+                validate_examples(examples, name)?;
+            }
+            CommandSpec::SelectorCommand { examples, .. } => {
+                validate_examples(examples, name)?;
+            }
         }
     }
 
-    if let Some(p) = &spec.proof {
-        if p.full_branch_coverage.unwrap_or(false) {
+    if let Some(proof) = &spec.proof {
+        if proof.full_branch_coverage.unwrap_or(false) {
             if let Some(ec) = error_cases {
                 for k in ec.keys() {
-                    if !used.contains(k) {
+                    if !used_error_cases.contains(k) {
                         anyhow::bail!("Error case '{}' defined but never used", k);
                     }
                 }
@@ -186,23 +195,15 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
     Ok(())
 }
 
-/* ------------------------- CORE FIX ------------------------- */
-
-fn resolve_outcome(spec: &Spec, ex: &Example) -> anyhow::Result<String> {
-    if ex.valid {
-        Ok(ex.outcome.clone().unwrap_or_default())
-    } else if let Some(r) = &ex.reason {
-        render_reason(spec, r)
-    } else {
-        Ok("(invalid)".into())
-    }
-}
+/* ------------------------- REASON ------------------------- */
 
 fn render_reason(spec: &Spec, reason: &Reason) -> anyhow::Result<String> {
-    let t = spec.reason_templates.get(&reason.code)
-        .ok_or_else(|| anyhow::anyhow!("Unknown reason: {}", reason.code))?;
+    let template = spec
+        .reason_templates
+        .get(&reason.code)
+        .ok_or_else(|| anyhow::anyhow!("Unknown reason code: {}", reason.code))?;
 
-    let mut text = t.text.clone();
+    let mut text = template.text.clone();
 
     if let Some(args) = &reason.args {
         for (k, v) in args {
@@ -213,87 +214,160 @@ fn render_reason(spec: &Spec, reason: &Reason) -> anyhow::Result<String> {
     Ok(text)
 }
 
-/* ------------------------- GENERATORS ------------------------- */
+/* ------------------------- USAGE ------------------------- */
 
 fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
     let mut out = format!("# {}\n\n{}\n\n", spec.meta.program, spec.meta.summary);
 
-    let mut render = |examples: &[Example]| -> anyhow::Result<()> {
-        for ex in examples {
-            let o = resolve_outcome(spec, ex)?;
-            out.push_str(&format!("- `{}` → {}", ex.cmd, o));
+    fn render(
+        out: &mut String,
+        spec: &Spec,
+        exs: &[Example],
+    ) -> anyhow::Result<()> {
+        for ex in exs {
+            let outcome = if ex.valid {
+                ex.outcome.clone().unwrap_or_else(|| "OK".into())
+            } else if let Some(r) = &ex.reason {
+                render_reason(spec, r)?
+            } else {
+                "(invalid)".into()
+            };
 
-            if let Some(s) = ex.exit_status {
-                out.push_str(&format!(" (exit {})", s));
+            out.push_str(&format!("- `{}` → {}", ex.cmd, outcome));
+
+            if let Some(code) = ex.exit_status {
+                out.push_str(&format!(" (exit {})", code));
             }
 
             out.push('\n');
         }
         out.push('\n');
         Ok(())
-    };
+    }
 
-    if let Some(c) = &spec.top_level {
-        match c {
+    if let Some(cmd) = &spec.top_level {
+        match cmd {
             CommandSpec::FlagCommand { summary, examples, .. } => {
-                out.push_str(&format!("## top level\n{}\n\n", summary));
-                render(examples)?;
+                out.push_str(&format!(
+                    "## top level\n{}\n\n",
+                    summary.clone().unwrap_or_default()
+                ));
+                render(&mut out, spec, examples)?;
             }
-            CommandSpec::SelectorCommand { summary, examples, .. } => {
-                out.push_str(&format!("## top level\n{}\n\n", summary));
-                render(examples)?;
+            CommandSpec::SelectorCommand { summary, usage, examples, .. } => {
+                out.push_str(&format!(
+                    "## top level\n{}\nUsage: {}\n\n",
+                    summary.clone().unwrap_or_default(),
+                    usage.clone().unwrap_or_default()
+                ));
+                render(&mut out, spec, examples)?;
             }
         }
     }
 
-    for (n, c) in &spec.commands {
-        match c {
-            CommandSpec::FlagCommand { summary, examples, .. }
-            | CommandSpec::SelectorCommand { summary, examples, .. } => {
-                out.push_str(&format!("## {}\n{}\n\n", n, summary));
-                render(examples)?;
+    for (name, cmd) in &spec.commands {
+        match cmd {
+            CommandSpec::FlagCommand { summary, examples, .. } => {
+                out.push_str(&format!(
+                    "## {}\n{}\n\n",
+                    name,
+                    summary.clone().unwrap_or_default()
+                ));
+                render(&mut out, spec, examples)?;
+            }
+            CommandSpec::SelectorCommand { summary, usage, examples, .. } => {
+                out.push_str(&format!(
+                    "## {}\n{}\nUsage: {}\n\n",
+                    name,
+                    summary.clone().unwrap_or_default(),
+                    usage.clone().unwrap_or_default()
+                ));
+                render(&mut out, spec, examples)?;
             }
         }
     }
 
     Ok(out)
 }
+
+/* ------------------------- TLDR ------------------------- */
 
 fn generate_tldr_md(spec: &Spec) -> anyhow::Result<String> {
     let mut out = format!("# {}\n\n> {}\n\n", spec.meta.program, spec.meta.summary);
 
-    let mut add = |examples: &[Example]| -> anyhow::Result<()> {
-        for ex in examples {
+    let mut add = |exs: &[Example]| {
+        for ex in exs {
             if ex.valid {
-                let o = resolve_outcome(spec, ex)?;
-                if !o.is_empty() {
-                    out.push_str(&format!("- {}:\n\n`{}`\n\n", o, ex.cmd));
-                }
+                out.push_str(&format!(
+                    "- {}\n\n`{}`\n\n",
+                    ex.outcome.clone().unwrap_or_else(|| "OK".into()),
+                    ex.cmd
+                ));
             }
         }
-        Ok(())
     };
 
-    if let Some(c) = &spec.top_level {
-        match c {
+    if let Some(cmd) = &spec.top_level {
+        match cmd {
             CommandSpec::FlagCommand { examples, .. }
-            | CommandSpec::SelectorCommand { examples, .. } => add(examples)?,
+            | CommandSpec::SelectorCommand { examples, .. } => add(examples),
         }
     }
 
-    for c in spec.commands.values() {
-        match c {
+    for cmd in spec.commands.values() {
+        match cmd {
             CommandSpec::FlagCommand { examples, .. }
-            | CommandSpec::SelectorCommand { examples, .. } => add(examples)?,
+            | CommandSpec::SelectorCommand { examples, .. } => add(examples),
         }
     }
 
     Ok(out)
 }
 
-fn generate_scd(spec: &Spec) -> anyhow::Result<String> {
-    Ok(format!("{} - {}\n", spec.meta.program, spec.meta.summary))
+/* ------------------------- CLI MATRIX FIX ------------------------- */
+
+fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
+    let mut out = String::from(
+        "pub struct CliExample { pub cmd: &'static str, pub valid: bool, pub outcome: &'static str }\npub const CLI_MATRIX: &[CliExample] = &[\n"
+    );
+
+    let mut add = |exs: &[Example]| {
+        for ex in exs {
+            let outcome = if ex.valid {
+                ex.outcome.clone().unwrap_or_else(|| "OK".into())
+            } else {
+                ex.reason
+                    .as_ref()
+                    .map(|r| r.code.clone())
+                    .unwrap_or_else(|| "ERROR".into())
+            };
+
+            out.push_str(&format!(
+                "    CliExample {{ cmd: \"{}\", valid: {}, outcome: \"{}\" }},\n",
+                ex.cmd, ex.valid, outcome
+            ));
+        }
+    };
+
+    if let Some(cmd) = &spec.top_level {
+        match cmd {
+            CommandSpec::FlagCommand { examples, .. }
+            | CommandSpec::SelectorCommand { examples, .. } => add(examples),
+        }
+    }
+
+    for cmd in spec.commands.values() {
+        match cmd {
+            CommandSpec::FlagCommand { examples, .. }
+            | CommandSpec::SelectorCommand { examples, .. } => add(examples),
+        }
+    }
+
+    out.push_str("];\n");
+    Ok(out)
 }
+
+/* ------------------------- SIMPLE GENERATORS ------------------------- */
 
 fn generate_error_text_rs(spec: &Spec) -> anyhow::Result<String> {
     let mut out = "// auto-generated\n".to_string();
@@ -309,79 +383,43 @@ fn generate_error_text_rs(spec: &Spec) -> anyhow::Result<String> {
     Ok(out)
 }
 
-fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
-    let mut out = "pub struct CliExample { pub cmd: &'static str, pub valid: bool, pub outcome: &'static str }\npub const CLI_MATRIX: &[CliExample] = &[\n".to_string();
-
-    let mut add = |examples: &[Example]| -> anyhow::Result<()> {
-        for ex in examples {
-            let o = resolve_outcome(spec, ex)?;
-            out.push_str(&format!(
-                "    CliExample {{ cmd: \"{}\", valid: {}, outcome: \"{}\" }},\n",
-                ex.cmd, ex.valid, o.replace('"', "\\\"")
-            ));
-        }
-        Ok(())
-    };
-
-    if let Some(c) = &spec.top_level {
-        match c {
-            CommandSpec::FlagCommand { examples, .. }
-            | CommandSpec::SelectorCommand { examples, .. } => add(examples)?,
-        }
-    }
-
-    for c in spec.commands.values() {
-        match c {
-            CommandSpec::FlagCommand { examples, .. }
-            | CommandSpec::SelectorCommand { examples, .. } => add(examples)?,
-        }
-    }
-
-    out.push_str("];\n");
-    Ok(out)
-}
-
 fn generate_testcases_yaml(spec: &Spec) -> anyhow::Result<String> {
-    let mut v = Vec::new();
+    let mut testcases = Vec::new();
 
-    let mut add = |examples: &[Example]| {
-        for ex in examples {
-            v.push(Testcase {
+    for exs in spec
+        .top_level
+        .iter()
+        .chain(spec.commands.values())
+        .flat_map(|c| match c {
+            CommandSpec::FlagCommand { examples, .. } => Some(examples),
+            CommandSpec::SelectorCommand { examples, .. } => Some(examples),
+        })
+    {
+        for ex in exs {
+            testcases.push(Testcase {
                 case_id: ex.case_id.clone(),
                 key: if ex.valid { "p" } else { "f" }.into(),
                 cmd: ex.cmd.clone(),
                 maps_to: ex.maps_to.clone(),
             });
         }
-    };
-
-    if let Some(c) = &spec.top_level {
-        match c {
-            CommandSpec::FlagCommand { examples, .. }
-            | CommandSpec::SelectorCommand { examples, .. } => add(examples),
-        }
     }
 
-    for c in spec.commands.values() {
-        match c {
-            CommandSpec::FlagCommand { examples, .. }
-            | CommandSpec::SelectorCommand { examples, .. } => add(examples),
-        }
-    }
+    Ok(serde_yaml::to_string(&testcases)?)
+}
 
-    Ok(serde_yaml::to_string(&v)?)
+fn generate_scd(spec: &Spec) -> anyhow::Result<String> {
+    Ok(format!(
+        "xtgeoip v{}\n{}\n",
+        spec.version, spec.meta.summary
+    ))
 }
 
 fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
     Ok(format!(
-        ".TH {} 1 \"\" \"xtgeoip {}\" \"User Commands\"\n\
-         .SH NAME\n\
-         {}\n\t{}\n\
-         .SH DESCRIPTION\n{}\n",
+        ".TH {} 1\n.SH NAME\n{} - {}\n",
         spec.meta.program.to_uppercase(),
-        spec.version,
         spec.meta.program,
-        spec.meta.summary,
         spec.meta.summary
     ))
 }
