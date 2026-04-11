@@ -88,9 +88,11 @@ top_level:
   examples:
     - case_id: TL-001
       cmd: "xtgeoip"
-      valid: true
-      exit_status: 1
+      valid: false
+      reason:
+        code: no_command
       maps_to: no_command
+      exit_status: 1
 
     - case_id: TL-002
       cmd: "xtgeoip -h"
