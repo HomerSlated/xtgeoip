@@ -124,20 +124,20 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/* ------------------------- VALIDATION (STRICT B MODE) ------------------------- */
+/* ------------------------- STRICT B MODE VALIDATION ------------------------- */
 
 fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
     let mut used_error_cases = BTreeSet::new();
     let error_cases = spec.error_cases.as_ref();
 
     let mut validate_examples =
-        |examples: &[Example], scope: &str| -> anyhow::Result<()> {
+        |examples: &[Example], scope: &str, cmd_summary_required: bool| -> anyhow::Result<()> {
             for ex in examples {
-                // reason code validity
+                // --- reason validation ---
                 if let Some(reason) = &ex.reason {
                     if !spec.reason_templates.contains_key(&reason.code) {
                         anyhow::bail!(
-                            "Unknown reason code {} in {} example {}",
+                            "Unknown reason code '{}' in {} example '{}'",
                             reason.code,
                             scope,
                             ex.cmd
@@ -145,16 +145,19 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
                     }
                 }
 
-                // invalid examples MUST map_to error_cases
+                // --- strict proof mapping for invalid cases ---
                 if !ex.valid {
                     let maps_to = ex.maps_to.as_ref().ok_or_else(|| {
-                        anyhow::anyhow!("Missing maps_to in invalid example {}", ex.cmd)
+                        anyhow::anyhow!(
+                            "Missing maps_to in invalid example '{}'",
+                            ex.cmd
+                        )
                     })?;
 
                     if let Some(ec) = error_cases {
                         if !ec.contains_key(maps_to) {
                             anyhow::bail!(
-                                "maps_to '{}' not found in error_cases (example: {})",
+                                "maps_to '{}' not found in error_cases (example: '{}')",
                                 maps_to,
                                 ex.cmd
                             );
@@ -167,34 +170,57 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
             Ok(())
         };
 
+    // -------------------------
+    // TOP LEVEL VALIDATION
+    // -------------------------
     if let Some(cmd) = &spec.top_level {
         match cmd {
-            CommandSpec::FlagCommand { examples, .. }
-            | CommandSpec::SelectorCommand { examples, .. } => {
-                validate_examples(examples, "top_level")?;
+            CommandSpec::FlagCommand { summary, examples, .. } => {
+                if summary.trim().is_empty() {
+                    anyhow::bail!("top_level FlagCommand missing summary");
+                }
+                validate_examples(examples, "top_level", true)?;
+            }
+
+            CommandSpec::SelectorCommand { summary, examples, .. } => {
+                if summary.trim().is_empty() {
+                    anyhow::bail!("top_level SelectorCommand missing summary");
+                }
+                validate_examples(examples, "top_level", true)?;
             }
         }
     }
 
+    // -------------------------
+    // COMMAND VALIDATION
+    // -------------------------
     for (name, cmd) in &spec.commands {
         match cmd {
-            CommandSpec::FlagCommand { examples, .. }
-            | CommandSpec::SelectorCommand { examples, .. } => {
-                validate_examples(examples, name)?;
+            CommandSpec::FlagCommand { summary, examples, .. } => {
+                if summary.trim().is_empty() {
+                    anyhow::bail!("command '{}' missing summary", name);
+                }
+                validate_examples(examples, name, true)?;
+            }
+
+            CommandSpec::SelectorCommand { summary, examples, .. } => {
+                if summary.trim().is_empty() {
+                    anyhow::bail!("command '{}' missing summary", name);
+                }
+                validate_examples(examples, name, true)?;
             }
         }
     }
 
-    // Proof-table coverage enforcement
+    // -------------------------
+    // PROOF TABLE COVERAGE
+    // -------------------------
     if let Some(proof) = &spec.proof {
         if proof.full_branch_coverage.unwrap_or(false) {
             if let Some(ec) = error_cases {
                 for key in ec.keys() {
                     if !used_error_cases.contains(key) {
-                        anyhow::bail!(
-                            "Error case '{}' defined but never used",
-                            key
-                        );
+                        anyhow::bail!("Error case '{}' defined but never used", key);
                     }
                 }
             }
@@ -203,6 +229,8 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
 
     Ok(())
 }
+
+/* ------------------------- REMAINING FUNCTIONS UNCHANGED ------------------------- */
 
 /* ------------------------- DOCUMENTATION GENERATORS ------------------------- */
 
@@ -437,4 +465,21 @@ fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
         spec.meta.program,
         spec.meta.summary
     ))
+}
+
+fn render_reason(spec: &Spec, reason: &Reason) -> anyhow::Result<String> {
+    let template = spec
+        .reason_templates
+        .get(&reason.code)
+        .ok_or_else(|| anyhow::anyhow!("Unknown reason code: {}", reason.code))?;
+
+    let mut text = template.text.clone();
+
+    if let Some(args) = &reason.args {
+        for (k, v) in args {
+            text = text.replace(&format!("{{{}}}", k), v);
+        }
+    }
+
+    Ok(text)
 }
