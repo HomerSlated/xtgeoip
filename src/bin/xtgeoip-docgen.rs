@@ -110,10 +110,6 @@ struct Testcase {
     maps_to: Option<String>,
 }
 
-/* ============================================================
-MAIN
-============================================================ */
-
 fn main() -> anyhow::Result<()> {
     let yaml_str = fs::read_to_string("docs/spec/cli.yaml")?;
     let spec: Spec = serde_yaml::from_str(&yaml_str)?;
@@ -127,38 +123,23 @@ fn main() -> anyhow::Result<()> {
     fs::write("docs/generated/tldr.md", generate_tldr_md(&spec)?)?;
     fs::write("docs/generated/scd", generate_scd(&spec)?)?;
     fs::write("docs/generated/xtgeoip.1", generate_manpage(&spec)?)?;
-    fs::write(
-        "src/generated/error_text.rs",
-        generate_error_text_rs(&spec)?,
-    )?;
-    fs::write(
-        "src/generated/cli_matrix.rs",
-        generate_cli_matrix_rs(&spec)?,
-    )?;
-    fs::write(
-        "docs/generated/testcases.yaml",
-        generate_testcases_yaml(&spec)?,
-    )?;
+    fs::write("src/generated/error_text.rs", generate_error_text_rs(&spec)?)?;
+    fs::write("src/generated/cli_matrix.rs", generate_cli_matrix_rs(&spec)?)?;
+    fs::write("docs/generated/testcases.yaml", generate_testcases_yaml(&spec)?)?;
 
     println!("Docs generated successfully.");
     Ok(())
 }
 
-/* ============================================================
-VALIDATION (FIXED OPTION A)
-============================================================ */
+/* ---------------- VALIDATION ---------------- */
 
 fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
     let mut used_error_cases: BTreeSet<String> = BTreeSet::new();
 
-    let mut check = |cmd_name: &str, ex: &Example| -> anyhow::Result<()> {
+    let check = |cmd_name: &str, ex: &Example| -> anyhow::Result<()> {
         if let Some(reason) = &ex.reason {
             if !spec.reason_templates.contains_key(&reason.code) {
-                anyhow::bail!(
-                    "Unknown reason code {} in {}",
-                    reason.code,
-                    cmd_name
-                );
+                anyhow::bail!("Unknown reason code {} in {}", reason.code, cmd_name);
             }
         }
 
@@ -179,45 +160,51 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
         Ok(())
     };
 
-    for (cmd_name, cmd) in &spec.commands {
+    if let Some(cmd) = &spec.top_level {
         let exs = match cmd {
             CommandSpec::FlagCommand { examples, .. }
             | CommandSpec::SelectorCommand { examples, .. } => examples,
         };
 
         for ex in exs {
-            check(cmd_name, ex)?;
+            check("top_level", ex)?;
         }
     }
 
-    if spec
-        .proof
-        .as_ref()
-        .map(|p| p.full_branch_coverage)
-        .flatten()
-        .unwrap_or(false)
-    {
+    for (name, cmd) in &spec.commands {
+        let exs = match cmd {
+            CommandSpec::FlagCommand { examples, .. }
+            | CommandSpec::SelectorCommand { examples, .. } => examples,
+        };
+
+        for ex in exs {
+            check(name, ex)?;
+        }
+    }
+
+    if spec.proof.as_ref().and_then(|p| p.full_branch_coverage).unwrap_or(false) {
         let mut unused = Vec::new();
 
         if let Some(ec) = &spec.error_cases {
-            for (key, _) in ec {
-                if !used_error_cases.contains(key) {
+            for (key, case) in ec {
+                if !used_error_cases.contains(&case.maps_to) {
                     unused.push(key.clone());
                 }
             }
         }
-    }
 
-    if !unused.is_empty() {
-        anyhow::bail!("Unused error cases: {:?}", unused);
+        if !unused.is_empty() {
+            anyhow::bail!(
+                "Unused error cases (no invalid example maps_to reference): {:?}",
+                unused
+            );
+        }
     }
 
     Ok(())
 }
 
-/* ============================================================
-OUTCOME
-============================================================ */
+/* ---------------- OUTCOME ---------------- */
 
 fn resolve_outcome(spec: &Spec, ex: &Example) -> String {
     if ex.valid {
@@ -227,13 +214,11 @@ fn resolve_outcome(spec: &Spec, ex: &Example) -> String {
     if let Some(reason) = &ex.reason {
         if let Some(t) = spec.reason_templates.get(&reason.code) {
             let mut text = t.text.clone();
-
             if let Some(args) = &reason.args {
                 for (k, v) in args {
                     text = text.replace(&format!("{{{}}}", k), v);
                 }
             }
-
             return text;
         }
     }
@@ -241,13 +226,10 @@ fn resolve_outcome(spec: &Spec, ex: &Example) -> String {
     "ERROR".into()
 }
 
-/* ============================================================
-GENERATORS (RESTORED)
-============================================================ */
+/* ---------------- USAGE ---------------- */
 
 fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
-    let mut out =
-        format!("# {}\n\n{}\n\n", spec.meta.program, spec.meta.summary);
+    let mut out = format!("# {}\n\n{}\n\n", spec.meta.program, spec.meta.summary);
 
     let render = |out: &mut String,
                   spec: &Spec,
@@ -255,6 +237,7 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
                   title: &str,
                   extra: Option<&str>| {
         out.push_str(&format!("## {}\n", title));
+
         if let Some(e) = extra {
             out.push_str(e);
             out.push('\n');
@@ -278,14 +261,10 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
 
     if let Some(cmd) = &spec.top_level {
         match cmd {
-            CommandSpec::FlagCommand {
-                summary, examples, ..
-            } => {
+            CommandSpec::FlagCommand { summary, examples, .. } => {
                 render(&mut out, spec, examples, "top level", Some(summary));
             }
-            CommandSpec::SelectorCommand {
-                usage, examples, ..
-            } => {
+            CommandSpec::SelectorCommand { usage, examples, .. } => {
                 render(&mut out, spec, examples, "top level", Some(usage));
             }
         }
@@ -293,14 +272,10 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
 
     for (name, cmd) in &spec.commands {
         match cmd {
-            CommandSpec::FlagCommand {
-                summary, examples, ..
-            } => {
+            CommandSpec::FlagCommand { summary, examples, .. } => {
                 render(&mut out, spec, examples, name, Some(summary));
             }
-            CommandSpec::SelectorCommand {
-                usage, examples, ..
-            } => {
+            CommandSpec::SelectorCommand { usage, examples, .. } => {
                 render(&mut out, spec, examples, name, Some(usage));
             }
         }
@@ -309,9 +284,10 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
     Ok(out)
 }
 
+/* ---------------- TLDR ---------------- */
+
 fn generate_tldr_md(spec: &Spec) -> anyhow::Result<String> {
-    let mut out =
-        format!("# {}\n\n> {}\n\n", spec.meta.program, spec.meta.summary);
+    let mut out = format!("# {}\n\n> {}\n\n", spec.meta.program, spec.meta.summary);
 
     let mut add = |exs: &[Example]| {
         for ex in exs {
@@ -343,6 +319,8 @@ fn generate_tldr_md(spec: &Spec) -> anyhow::Result<String> {
 
     Ok(out)
 }
+
+/* ---------------- SCD ---------------- */
 
 fn generate_scd(spec: &Spec) -> anyhow::Result<String> {
     let mut out = String::new();
@@ -381,16 +359,15 @@ fn generate_scd(spec: &Spec) -> anyhow::Result<String> {
                 ));
             }
             CommandSpec::SelectorCommand { usage, .. } => {
-                out.push_str(&format!(
-                    "Command: {}\nUsage: {}\n\n",
-                    name, usage
-                ));
+                out.push_str(&format!("Command: {}\nUsage: {}\n\n", name, usage));
             }
         }
     }
 
     Ok(out)
 }
+
+/* ---------------- ERROR TEXT ---------------- */
 
 fn generate_error_text_rs(spec: &Spec) -> anyhow::Result<String> {
     let mut out = "// auto-generated\n".to_string();
@@ -406,18 +383,18 @@ fn generate_error_text_rs(spec: &Spec) -> anyhow::Result<String> {
     Ok(out)
 }
 
+/* ---------------- CLI MATRIX ---------------- */
+
 fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
     let mut out = String::from(
-        "pub struct CliExample { pub cmd: &'static str, pub valid: bool, pub \
-         outcome: &'static str }\npub const CLI_MATRIX: &[CliExample] = &[\n",
+        "pub struct CliExample { pub cmd: &'static str, pub valid: bool, pub outcome: &'static str }\npub const CLI_MATRIX: &[CliExample] = &[\n",
     );
 
     let mut add = |exs: &[Example]| {
         for ex in exs {
             let outcome = resolve_outcome(spec, ex);
             out.push_str(&format!(
-                "    CliExample {{ cmd: \"{}\", valid: {}, outcome: \"{}\" \
-                 }},\n",
+                "    CliExample { cmd: \"{}\", valid: {}, outcome: \"{}\" },\n",
                 ex.cmd, ex.valid, outcome
             ));
         }
@@ -442,6 +419,8 @@ fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
     out.push_str("];\n");
     Ok(out)
 }
+
+/* ---------------- TESTCASES ---------------- */
 
 fn generate_testcases_yaml(spec: &Spec) -> anyhow::Result<String> {
     let mut testcases = Vec::new();
@@ -475,6 +454,8 @@ fn generate_testcases_yaml(spec: &Spec) -> anyhow::Result<String> {
 
     Ok(serde_yaml::to_string(&testcases)?)
 }
+
+/* ---------------- MANPAGE ---------------- */
 
 fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
     Ok(format!(
