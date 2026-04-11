@@ -50,7 +50,6 @@ reason_templates:
   no_command:
     text: "no command or top-level action specified"
 
-# Canonical Rust error branches
 error_cases:
   no_command:
     maps_to: "normalize_cli_to_action -> Ok(None)"
@@ -170,6 +169,7 @@ top_level:
 commands:
   fetch:
     kind: FlagCommand
+    summary: "Fetch GeoLite2 data files"
     allowed_flags: [p]
 
     examples:
@@ -211,6 +211,7 @@ commands:
 
   build:
     kind: FlagCommand
+    summary: "Build xt_geoip database from downloaded data"
 
     examples:
       - case_id: B-001
@@ -249,6 +250,7 @@ commands:
 
   run:
     kind: FlagCommand
+    summary: "Execute full xtgeoip pipeline"
 
     examples:
       - case_id: R-001
@@ -287,6 +289,22 @@ commands:
 
   conf:
     kind: SelectorCommand
+    summary: "Manage xtgeoip configuration"
+    usage: "xtgeoip conf (-s | -d | -e)"
+
+    positional:
+      name: action
+      required: true
+      choices:
+        s:
+          summary: "Show configuration"
+        d:
+          summary: "Set default configuration"
+        e:
+          summary: "Edit configuration"
+
+    constraints:
+      exactly_one_positional: true
 
     examples:
       - case_id: C-001
