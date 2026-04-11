@@ -176,106 +176,132 @@ commands:
       - case_id: F-001
         cmd: "xtgeoip fetch"
         valid: true
+
       - case_id: F-002
         cmd: "xtgeoip fetch -p"
         valid: true
+
       - case_id: F-003
         cmd: "xtgeoip fetch -l"
         valid: false
-        reason: { code: invalid_flag }
+        reason:
+          code: invalid_flag
         maps_to: fetch_invalid_flags
+
       - case_id: F-004
         cmd: "xtgeoip fetch -b"
         valid: false
-        reason: { code: invalid_flag }
+        reason:
+          code: invalid_flag
         maps_to: fetch_invalid_flags
+
       - case_id: F-005
         cmd: "xtgeoip fetch -c"
         valid: false
-        reason: { code: invalid_flag }
+        reason:
+          code: invalid_flag
         maps_to: fetch_invalid_flags
+
       - case_id: F-006
         cmd: "xtgeoip fetch -f"
         valid: false
-        reason: { code: invalid_flag }
+        reason:
+          code: invalid_flag
         maps_to: fetch_invalid_flags
 
   build:
     kind: FlagCommand
-    summary: "Build xt_geoip database"
-    allowed_flags: [b, c, p, f, l]
+    summary: "Build xt_geoip database from downloaded data"
 
     examples:
       - case_id: B-001
         cmd: "xtgeoip build"
         valid: true
+
       - case_id: B-002
         cmd: "xtgeoip build -l"
         valid: true
+
       - case_id: B-003
         cmd: "xtgeoip build -b -p"
         valid: true
+
       - case_id: B-004
         cmd: "xtgeoip build -p"
         valid: false
-        reason: { code: no_prune_here }
+        reason:
+          code: no_prune_here
         maps_to: build_prune_without_backup
+
       - case_id: B-005
         cmd: "xtgeoip build -c -f"
         valid: true
+
       - case_id: B-006
         cmd: "xtgeoip build -b -c -p"
         valid: true
+
       - case_id: B-007
         cmd: "xtgeoip build -b -c -p -f"
         valid: false
-        reason: { code: ambiguous_force_prune }
+        reason:
+          code: ambiguous_force_prune
         maps_to: build_ambiguous_all_flags
 
   run:
     kind: FlagCommand
-    summary: "Run full pipeline"
-    allowed_flags: [b, c, p, f, l]
+    summary: "Execute full xtgeoip pipeline"
 
     examples:
       - case_id: R-001
         cmd: "xtgeoip run"
         valid: true
+
       - case_id: R-002
         cmd: "xtgeoip run -l"
         valid: true
+
       - case_id: R-003
         cmd: "xtgeoip run -p"
         valid: true
+
       - case_id: R-004
         cmd: "xtgeoip run -c -p"
         valid: true
+
       - case_id: R-005
         cmd: "xtgeoip run -c -f"
         valid: true
+
       - case_id: R-006
         cmd: "xtgeoip run -c -p -f"
         valid: false
-        reason: { code: ambiguous_force_prune }
+        reason:
+          code: ambiguous_force_prune
         maps_to: run_ambiguous_cpf
+
       - case_id: R-007
         cmd: "xtgeoip run -b -c -p"
         valid: false
-        reason: { code: ambiguous_prune_target }
+        reason:
+          code: ambiguous_prune_target
         maps_to: run_ambiguous_bcp
 
   conf:
     kind: SelectorCommand
-    summary: "Manage configuration"
-    usage: "xtgeoip conf <-s|-d|-e>"
+    summary: "Manage xtgeoip configuration"
+    usage: "xtgeoip conf (-s | -d | -e)"
 
     positional:
-      name: mode
+      name: action
       required: true
       choices:
-        s: { summary: "Show configuration" }
-        d: { summary: "Delete configuration" }
-        e: { summary: "Edit configuration" }
+        s:
+          summary: "Show configuration"
+        d:
+          summary: "Set default configuration"
+        e:
+          summary: "Edit configuration"
 
     constraints:
       exactly_one_positional: true
@@ -284,14 +310,18 @@ commands:
       - case_id: C-001
         cmd: "xtgeoip conf"
         valid: false
-        reason: { code: missing_required_argument }
+        reason:
+          code: missing_required_argument
         maps_to: conf_missing_flag
+
       - case_id: C-002
         cmd: "xtgeoip conf -s"
         valid: true
+
       - case_id: C-003
         cmd: "xtgeoip conf -d"
         valid: true
+
       - case_id: C-004
         cmd: "xtgeoip conf -e"
         valid: true
