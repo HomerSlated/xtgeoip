@@ -1,0 +1,144 @@
+- case_id: TL-001
+  key: f
+  cmd: xtgeoip
+  maps_to: no_command
+- case_id: TL-002
+  key: p
+  cmd: xtgeoip -h
+  maps_to: null
+- case_id: TL-003
+  key: f
+  cmd: xtgeoip -l
+  maps_to: legacy_top_level
+- case_id: TL-004
+  key: f
+  cmd: xtgeoip -f
+  maps_to: top_level_force_without_target
+- case_id: TL-005
+  key: f
+  cmd: xtgeoip -p
+  maps_to: top_level_invalid_combo
+- case_id: TL-006
+  key: p
+  cmd: xtgeoip -b
+  maps_to: null
+- case_id: TL-007
+  key: p
+  cmd: xtgeoip -c
+  maps_to: null
+- case_id: TL-008
+  key: p
+  cmd: xtgeoip -b -c
+  maps_to: null
+- case_id: TL-009
+  key: p
+  cmd: xtgeoip -b -p
+  maps_to: null
+- case_id: TL-010
+  key: f
+  cmd: xtgeoip -c -p
+  maps_to: top_level_clean_prune
+- case_id: TL-011
+  key: f
+  cmd: xtgeoip -b -p -f
+  maps_to: top_level_backup_prune_force
+- case_id: TL-012
+  key: f
+  cmd: xtgeoip -c -p -f
+  maps_to: top_level_invalid_combo
+- case_id: B-001
+  key: p
+  cmd: xtgeoip build
+  maps_to: null
+- case_id: B-002
+  key: p
+  cmd: xtgeoip build -l
+  maps_to: null
+- case_id: B-003
+  key: p
+  cmd: xtgeoip build -b -p
+  maps_to: null
+- case_id: B-004
+  key: f
+  cmd: xtgeoip build -p
+  maps_to: build_prune_without_backup
+- case_id: B-005
+  key: p
+  cmd: xtgeoip build -c -f
+  maps_to: null
+- case_id: B-006
+  key: p
+  cmd: xtgeoip build -b -c -p
+  maps_to: null
+- case_id: B-007
+  key: f
+  cmd: xtgeoip build -b -c -p -f
+  maps_to: build_ambiguous_all_flags
+- case_id: C-001
+  key: f
+  cmd: xtgeoip conf
+  maps_to: conf_missing_flag
+- case_id: C-002
+  key: p
+  cmd: xtgeoip conf -s
+  maps_to: null
+- case_id: C-003
+  key: p
+  cmd: xtgeoip conf -d
+  maps_to: null
+- case_id: C-004
+  key: p
+  cmd: xtgeoip conf -e
+  maps_to: null
+- case_id: F-001
+  key: p
+  cmd: xtgeoip fetch
+  maps_to: null
+- case_id: F-002
+  key: p
+  cmd: xtgeoip fetch -p
+  maps_to: null
+- case_id: F-003
+  key: f
+  cmd: xtgeoip fetch -l
+  maps_to: fetch_invalid_flags
+- case_id: F-004
+  key: f
+  cmd: xtgeoip fetch -b
+  maps_to: fetch_invalid_flags
+- case_id: F-005
+  key: f
+  cmd: xtgeoip fetch -c
+  maps_to: fetch_invalid_flags
+- case_id: F-006
+  key: f
+  cmd: xtgeoip fetch -f
+  maps_to: fetch_invalid_flags
+- case_id: R-001
+  key: p
+  cmd: xtgeoip run
+  maps_to: null
+- case_id: R-002
+  key: p
+  cmd: xtgeoip run -l
+  maps_to: null
+- case_id: R-003
+  key: p
+  cmd: xtgeoip run -p
+  maps_to: null
+- case_id: R-004
+  key: p
+  cmd: xtgeoip run -c -p
+  maps_to: null
+- case_id: R-005
+  key: p
+  cmd: xtgeoip run -c -f
+  maps_to: null
+- case_id: R-006
+  key: f
+  cmd: xtgeoip run -c -p -f
+  maps_to: run_ambiguous_cpf
+- case_id: R-007
+  key: f
+  cmd: xtgeoip run -b -c -p
+  maps_to: run_ambiguous_bcp
