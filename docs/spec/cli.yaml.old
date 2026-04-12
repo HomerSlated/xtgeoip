@@ -1,0 +1,254 @@
+version: 2
+
+meta:
+  program: xtgeoip
+  summary: Build and manage xt_geoip data from MaxMind GeoLite2 CSVs.
+
+flags:
+  b:
+    long: backup
+    kind: bool
+    summary: Back up current database before replacing it.
+  c:
+    long: clean
+    kind: bool
+    summary: Clean working files before continuing.
+  p:
+    long: prune
+    kind: bool
+    summary: Prune retained artifacts for the current operation.
+  f:
+    long: force
+    kind: bool
+    summary: Force the relevant operation when supported.
+  l:
+    long: legacy
+    kind: bool
+    summary: Enable legacy mode.
+
+reason_templates:
+  ok:
+    text: "{outcome}"
+  invalid_flag:
+    text: "unsupported option, -{flag} is not valid for {command}"
+  invalid_combo:
+    text: "unsupported option combination"
+  no_prune_here:
+    text: "unsupported option, {command} has no prune function"
+  no_force_here:
+    text: "unsupported option, {target} does not support force"
+  ambiguous_force_prune:
+    text: "unsupported option, ambiguous and prune does not support force"
+  ambiguous_prune_target:
+    text: "unsupported option, ambiguous (does prune apply to {left} or {right}?)"
+  missing_required_argument:
+    text: "missing required argument, {command} requires {argument}"
+  no_command:
+    text: "no command or top-level action specified"
+
+top_level:
+  kind: FlagCommand
+  summary: Legacy top-level flag mode without a subcommand.
+  allowed_flags: [b, c, p, f]
+  examples:
+    - cmd: "xtgeoip"
+      outcome: "display usage"
+      valid: true
+      exit_status: 1
+      note: "No arguments prints usage and exits non-zero."
+    - cmd: "xtgeoip -h"
+      outcome: "display usage"
+      valid: true
+      exit_status: 0
+      note: "Explicit help prints usage and exits zero."
+
+    - cmd: "xtgeoip -b"
+      outcome: "back up binary data in /usr/share/xt_geoip/ using the manifest; store backups in /var/lib/xt_geoip/"
+      valid: true
+    - cmd: "xtgeoip -b -c"
+      outcome: "back up and clean binary data using the manifest"
+      valid: true
+    - cmd: "xtgeoip -b -c -f"
+      outcome: "force backup and clean even without a manifest"
+      valid: true
+    - cmd: "xtgeoip -b -f"
+      outcome: "force backup of binary data in /usr/share/xt_geoip/ even without a manifest"
+      valid: true
+    - cmd: "xtgeoip -b -p"
+      outcome: "back up binary data in /usr/share/xt_geoip/, then prune old backups in /var/lib/xt_geoip/"
+      valid: true
+    - cmd: "xtgeoip -b -p -f"
+      valid: false
+      reason:
+        code: ambiguous_force_prune
+
+    - cmd: "xtgeoip -c"
+      outcome: "clean (delete) binary data in /usr/share/xt_geoip/ using the manifest"
+      valid: true
+    - cmd: "xtgeoip -c -f"
+      outcome: "force clean (delete) binary data in /usr/share/xt_geoip/ even without a manifest"
+      valid: true
+    - cmd: "xtgeoip -c -p"
+      valid: false
+      reason:
+        code: no_prune_here
+        args: { command: "clean" }
+    - cmd: "xtgeoip -c -p -f"
+      valid: false
+      reason:
+        code: invalid_combo
+        args:
+          detail: "clean has no prune function; prune does not support force"
+
+    - cmd: "xtgeoip -p"
+      valid: false
+      reason:
+        code: invalid_combo
+        args:
+          detail: "prune alone is ambiguous"
+
+    - cmd: "xtgeoip -f"
+      valid: false
+      reason:
+        code: no_force_here
+        args: { target: "top-level mode without backup or clean" }
+
+    - cmd: "xtgeoip -l"
+      valid: false
+      reason:
+        code: invalid_flag
+        args: { flag: "l", command: "top-level mode" }
+
+commands:
+  fetch:
+    kind: FlagCommand
+    summary: Download or refresh the local MaxMind CSV archive set.
+    allowed_flags: [p]
+    examples:
+      - cmd: "xtgeoip fetch"
+        outcome: "fetch CSVs"
+        valid: true
+      - cmd: "xtgeoip fetch -p"
+        outcome: "fetch CSVs, then prune CSV archives"
+        valid: true
+      - cmd: "xtgeoip fetch -l"
+        valid: false
+        reason:
+          code: invalid_flag
+          args: { flag: "l", command: "fetch" }
+      - cmd: "xtgeoip fetch -b"
+        valid: false
+        reason:
+          code: invalid_flag
+          args: { flag: "b", command: "fetch" }
+      - cmd: "xtgeoip fetch -c"
+        valid: false
+        reason:
+          code: invalid_flag
+          args: { flag: "c", command: "fetch" }
+      - cmd: "xtgeoip fetch -f"
+        valid: false
+        reason:
+          code: invalid_flag
+          args: { flag: "f", command: "fetch" }
+
+  build:
+    kind: FlagCommand
+    summary: Build xt_geoip data from the local CSV copy.
+    allowed_flags: [b, c, p, f, l]
+    examples:
+      - cmd: "xtgeoip build"
+        outcome: "build using local copy of database"
+        valid: true
+      - cmd: "xtgeoip build -l"
+        outcome: "build using local copy of database in legacy mode"
+        valid: true
+      - cmd: "xtgeoip build -b -p"
+        outcome: "backup, prune backups, then build"
+        valid: true
+      - cmd: "xtgeoip build -p"
+        valid: false
+        reason:
+          code: no_prune_here
+          args: { command: "build" }
+      - cmd: "xtgeoip build -c -f"
+        outcome: "clean using manifest, then build using local copy of database"
+        valid: true
+      - cmd: "xtgeoip build -b -c -p"
+        outcome: "backup, prune backups, clean, then build"
+        valid: true
+      - cmd: "xtgeoip build -b -c -p -f"
+        valid: false
+        reason:
+          code: ambiguous_force_prune
+
+  run:
+    kind: FlagCommand
+    summary: Fetch, then build, optionally wrapping with backup/clean/prune.
+    allowed_flags: [b, c, p, f, l]
+    examples:
+      - cmd: "xtgeoip run"
+        outcome: "fetch, then build"
+        valid: true
+      - cmd: "xtgeoip run -l"
+        outcome: "fetch, then build in legacy mode"
+        valid: true
+      - cmd: "xtgeoip run -p"
+        outcome: "fetch, then prune CSV archives, then build"
+        valid: true
+      - cmd: "xtgeoip run -c -p"
+        outcome: "clean using manifest, then fetch, then prune CSV archives, then build"
+        valid: true
+      - cmd: "xtgeoip run -c -f"
+        outcome: "force clean without manifest, then fetch, then build"
+        valid: true
+      - cmd: "xtgeoip run -c -p -f"
+        valid: false
+        reason:
+          code: ambiguous_force_prune
+      - cmd: "xtgeoip run -b -c -p"
+        valid: false
+        reason:
+          code: ambiguous_prune_target
+          args: { left: "fetch", right: "backup" }
+
+  version:
+    kind: FlagCommand
+    summary: Show the program version.
+    allowed_flags: []
+    examples:
+      - cmd: "xtgeoip -V"
+        outcome: "display version"
+        valid: true
+
+  conf:
+    kind: SelectorCommand
+    summary: Configuration operations.
+    usage: "xtgeoip conf <FLAG>"
+    positional:
+      name: FLAG
+      required: true
+      choices:
+        d:
+          summary: Show default configuration.
+        s:
+          summary: Show current configuration.
+        e:
+          summary: Edit configuration.
+    constraints:
+      exactly_one_positional: true
+    examples:
+      - cmd: "xtgeoip conf"
+        valid: false
+        reason:
+          code: missing_required_argument
+          args: { argument: "FLAG", command: "conf" }
+      - cmd: "xtgeoip conf -s"
+        outcome: "show current config"
+        valid: true
+      - cmd: "xtgeoip conf -d"
+        outcome: "show default config"
+        valid: true
+      - cmd: "xtgeoip conf -e"
+        outcome: "edit config"
+        valid: true

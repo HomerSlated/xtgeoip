@@ -1,19 +1,26 @@
 Command: top_level
-Summary: Top level xtgeoip command
+Summary: Legacy top-level flag mode without a subcommand.
 Flags: ["b", "c", "p", "f"]
 
 Command: build
-Summary: Build xt_geoip database
+Summary: Build xt_geoip data from the local CSV copy.
 Flags: ["b", "c", "p", "f", "l"]
 
 Command: conf
-Usage: xtgeoip conf <-s|-d|-e>
+Summary: Configuration operations.
+Usage: xtgeoip conf <FLAG>
+Positional: "FLAG"
+Constraints: Some(Constraints { exactly_one_positional: true })
 
 Command: fetch
-Summary: Fetch GeoLite2 data files
+Summary: Download or refresh the local MaxMind CSV archive set.
 Flags: ["p"]
 
 Command: run
-Summary: Run full pipeline
+Summary: Fetch, then build, optionally wrapping with backup/clean/prune.
 Flags: ["b", "c", "p", "f", "l"]
+
+Command: version
+Summary: Show the program version.
+Flags: []
 
