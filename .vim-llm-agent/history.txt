@@ -1,0 +1,48 @@
+
+
+>>>User:
+
+"What is the structure of this project?" 
+
+
+>>>Assistant:
+
+
+>>>User:
+
+"What is the structure of this project?" 
+
+
+>>>Assistant:
+
+
+>>>User:
+
+"What section should I add next?" 
+
+
+>>>Assistant:
+
+
+>>>User:
+
+"What section should I add next?" 
+
+
+>>>Assistant:
+
+
+>>>User:
+
+"What section should I add next?" 
+
+
+>>>Assistant:
+
+
+>>>User:
+
+"What section should I add next?" 
+
+
+>>>Assistant:

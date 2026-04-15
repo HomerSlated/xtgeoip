@@ -4,69 +4,53 @@
 
 - display usage:
 
-`xtgeoip`
-
-- display usage:
-
 `xtgeoip -h`
 
-- back up binary data in /usr/share/xt_geoip/ using the manifest; store backups in /var/lib/xt_geoip/:
+- backup database:
 
 `xtgeoip -b`
 
-- back up and clean binary data using the manifest:
-
-`xtgeoip -b -c`
-
-- force backup and clean even without a manifest:
-
-`xtgeoip -b -c -f`
-
-- force backup of binary data in /usr/share/xt_geoip/ even without a manifest:
-
-`xtgeoip -b -f`
-
-- back up binary data in /usr/share/xt_geoip/, then prune old backups in /var/lib/xt_geoip/:
-
-`xtgeoip -b -p`
-
-- clean (delete) binary data in /usr/share/xt_geoip/ using the manifest:
+- clean database:
 
 `xtgeoip -c`
 
-- force clean (delete) binary data in /usr/share/xt_geoip/ even without a manifest:
+- backup then clean:
 
-`xtgeoip -c -f`
+`xtgeoip -b -c`
 
-- build using local copy of database:
+- backup then prune:
+
+`xtgeoip -b -p`
+
+- build database:
 
 `xtgeoip build`
 
-- build using local copy of database in legacy mode:
+- build (legacy mode):
 
 `xtgeoip build -l`
 
-- backup, prune backups, then build:
+- backup then prune then build:
 
 `xtgeoip build -b -p`
 
-- clean using manifest, then build using local copy of database:
+- clean then build:
 
 `xtgeoip build -c -f`
 
-- backup, prune backups, clean, then build:
+- backup, prune, clean, build:
 
 `xtgeoip build -b -c -p`
 
-- show current config:
+- show configuration:
 
 `xtgeoip conf -s`
 
-- show default config:
+- show default configuration:
 
 `xtgeoip conf -d`
 
-- edit config:
+- edit configuration:
 
 `xtgeoip conf -e`
 
@@ -74,31 +58,27 @@
 
 `xtgeoip fetch`
 
-- fetch CSVs, then prune CSV archives:
+- fetch then prune archives:
 
 `xtgeoip fetch -p`
 
-- fetch, then build:
+- fetch then build:
 
 `xtgeoip run`
 
-- fetch, then build in legacy mode:
+- fetch then build (legacy):
 
 `xtgeoip run -l`
 
-- fetch, then prune CSV archives, then build:
+- fetch then prune then build:
 
 `xtgeoip run -p`
 
-- clean using manifest, then fetch, then prune CSV archives, then build:
+- clean then fetch then prune then build:
 
 `xtgeoip run -c -p`
 
-- force clean without manifest, then fetch, then build:
+- force clean then fetch then build:
 
 `xtgeoip run -c -f`
-
-- display version:
-
-`xtgeoip -V`
 

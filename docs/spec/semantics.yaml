@@ -1,0 +1,97 @@
+semantics:
+
+  # -----------------------------
+  # CORE FLAGS
+  # -----------------------------
+
+  backup:
+    kind: pseudo_command
+    summary: "Back up existing binary data to local cache"
+    allowed_in: [top_level, build, run]
+    requires: []
+    conflicts_with: []
+
+  prune:
+    kind: pseudo_command
+    summary: "Remove old CSV or binary archives from local cache"
+    allowed_in: [top_level, fetch, run]
+    requires: [backup or fetch or run]
+    conflicts_with: [force]
+
+  clean:
+    kind: pseudo_command
+    summary: "Remove existing binary data from target directory"
+    allowed_in: [top_level, build, run]
+    requires: []
+    conflicts_with: []
+
+  force:
+    kind: modifier
+    summary: "Force operation when supported"
+    allowed_in: [top_level, build, run]
+    requires: []
+    conflicts_with: [prune]
+
+  legacy:
+    kind: mode
+    summary: "Enable legacy processing mode"
+    allowed_in: [build, run]
+    requires: []
+    conflicts_with: []
+
+  # -----------------------------
+  # SUBCOMMANDS
+  # -----------------------------
+
+  fetch:
+    kind: pseudo_command
+    summary: "Fetch GeoLite2 CSV data files"
+    allowed_in: [top_level]
+    requires: []
+    conflicts_with: []
+
+  build:
+    kind: pseudo_command
+    summary: "Build xt_geoip database from CSV data"
+    allowed_in: [top_level]
+    requires: []
+    conflicts_with: []
+
+  run:
+    kind: pseudo_command
+    summary: "Run full pipeline (fetch then build)"
+    allowed_in: [top_level]
+    requires: []
+    conflicts_with: []
+
+  conf:
+    kind: pseudo_command
+    summary: "Manage configuration"
+    allowed_in: [top_level]
+    requires: []
+    conflicts_with: []
+
+  # -----------------------------
+  # CONF MODES (POSITIONAL)
+  # -----------------------------
+
+  conf_show:
+    kind: mode
+    summary: "Show current configuration"
+    allowed_in: [conf]
+    requires: []
+    conflicts_with: [conf_delete, conf_edit]
+
+  conf_delete:
+    kind: mode
+    summary: "Delete configuration and revert to defaults"
+    allowed_in: [conf]
+    requires: []
+    conflicts_with: [conf_show, conf_edit]
+
+  conf_edit:
+    kind: mode
+    summary: "Edit configuration interactively"
+    allowed_in: [conf]
+    requires: []
+    conflicts_with: [conf_show, conf_delete]
