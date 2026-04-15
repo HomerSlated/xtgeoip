@@ -17,16 +17,11 @@ NOTE:
 The country is inputed by its ISO 3166 code.
 .PP
 The extra files you will need is the binary database files. They are generated
-from a country-subnet database with the xtgeoip tool that is shipped with the
-source package, and which should be available in compiled packages in
-/usr/lib(exec)/xtables-addons/. The first command retrieves CSV files from
-MaxMind, while the other two build packed bisectable range files:
+from a country-subnet database with the xtgeoip tool shipped with this module.
 .PP
 sudo mkdir \-p /usr/share/xt_geoip;
 .PP
-xtgeoip run;
-.PP
-The shared library is hardcoded to look in these paths, so use them.
+sudo xtgeoip run;
 .SH "See also"
 \fBiptables\fP(8), \fBip6tables\fP(8), \fBiptables-extensions\fP(8),
 \fBiptaccount\fP(8)
