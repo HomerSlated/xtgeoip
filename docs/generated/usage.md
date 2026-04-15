@@ -3,67 +3,53 @@
 Build and manage xt_geoip data from MaxMind GeoLite2 CSVs.
 
 ## top level
-Legacy top-level flag mode without a subcommand.
-
-- `xtgeoip` → display usage (exit 1) — No arguments prints usage and exits non-zero.
-- `xtgeoip -h` → display usage (exit 0) — Explicit help prints usage and exits zero.
-- `xtgeoip -b` → back up binary data in /usr/share/xt_geoip/ using the manifest; store backups in /var/lib/xt_geoip/
-- `xtgeoip -b -c` → back up and clean binary data using the manifest
-- `xtgeoip -b -c -f` → force backup and clean even without a manifest
-- `xtgeoip -b -f` → force backup of binary data in /usr/share/xt_geoip/ even without a manifest
-- `xtgeoip -b -p` → back up binary data in /usr/share/xt_geoip/, then prune old backups in /var/lib/xt_geoip/
-- `xtgeoip -b -p -f` → unsupported option, ambiguous and prune does not support force
-- `xtgeoip -c` → clean (delete) binary data in /usr/share/xt_geoip/ using the manifest
-- `xtgeoip -c -f` → force clean (delete) binary data in /usr/share/xt_geoip/ even without a manifest
-- `xtgeoip -c -p` → unsupported option, clean has no prune function
-- `xtgeoip -c -p -f` → unsupported option combination
+Top level xtgeoip command
+- `xtgeoip` → no command specified (exit 1)
+- `xtgeoip -h` → display usage
+- `xtgeoip -l` → unsupported option -{flag} for {command}
+- `xtgeoip -f` → {command} does not support force without a target
 - `xtgeoip -p` → unsupported option combination
-- `xtgeoip -f` → unsupported option, top-level mode without backup or clean does not support force
-- `xtgeoip -l` → unsupported option, -l is not valid for top-level mode
+- `xtgeoip -b` → backup database
+- `xtgeoip -c` → clean database
+- `xtgeoip -b -c` → backup then clean
+- `xtgeoip -b -p` → backup then prune
+- `xtgeoip -c -p` → {command} does not support prune
+- `xtgeoip -b -p -f` → ambiguous flags: prune and force cannot be combined in this context
+- `xtgeoip -c -p -f` → unsupported option combination
 
 ## build
-Build xt_geoip data from the local CSV copy.
-
-- `xtgeoip build` → build using local copy of database
-- `xtgeoip build -l` → build using local copy of database in legacy mode
-- `xtgeoip build -b -p` → backup, prune backups, then build
-- `xtgeoip build -p` → unsupported option, build has no prune function
-- `xtgeoip build -c -f` → clean using manifest, then build using local copy of database
-- `xtgeoip build -b -c -p` → backup, prune backups, clean, then build
-- `xtgeoip build -b -c -p -f` → unsupported option, ambiguous and prune does not support force
+Build xt_geoip database
+- `xtgeoip build` → build database
+- `xtgeoip build -l` → build (legacy mode)
+- `xtgeoip build -b -p` → backup then prune then build
+- `xtgeoip build -p` → {command} does not support prune
+- `xtgeoip build -c -f` → clean then build
+- `xtgeoip build -b -c -p` → backup, prune, clean, build
+- `xtgeoip build -b -c -p -f` → ambiguous flags: prune and force cannot be combined in this context
 
 ## conf
-Configuration operations.
-Usage: xtgeoip conf <FLAG>
-
-- `xtgeoip conf` → missing required argument, conf requires FLAG
-- `xtgeoip conf -s` → show current config
-- `xtgeoip conf -d` → show default config
-- `xtgeoip conf -e` → edit config
+xtgeoip conf <-s|-d|-e>
+- `xtgeoip conf` → {command} requires {argument}
+- `xtgeoip conf -s` → show configuration
+- `xtgeoip conf -d` → show default configuration
+- `xtgeoip conf -e` → edit configuration
 
 ## fetch
-Download or refresh the local MaxMind CSV archive set.
-
+Fetch GeoLite2 data files
 - `xtgeoip fetch` → fetch CSVs
-- `xtgeoip fetch -p` → fetch CSVs, then prune CSV archives
-- `xtgeoip fetch -l` → unsupported option, -l is not valid for fetch
-- `xtgeoip fetch -b` → unsupported option, -b is not valid for fetch
-- `xtgeoip fetch -c` → unsupported option, -c is not valid for fetch
-- `xtgeoip fetch -f` → unsupported option, -f is not valid for fetch
+- `xtgeoip fetch -p` → fetch then prune archives
+- `xtgeoip fetch -l` → unsupported option -{flag} for {command}
+- `xtgeoip fetch -b` → unsupported option -{flag} for {command}
+- `xtgeoip fetch -c` → unsupported option -{flag} for {command}
+- `xtgeoip fetch -f` → unsupported option -{flag} for {command}
 
 ## run
-Fetch, then build, optionally wrapping with backup/clean/prune.
-
-- `xtgeoip run` → fetch, then build
-- `xtgeoip run -l` → fetch, then build in legacy mode
-- `xtgeoip run -p` → fetch, then prune CSV archives, then build
-- `xtgeoip run -c -p` → clean using manifest, then fetch, then prune CSV archives, then build
-- `xtgeoip run -c -f` → force clean without manifest, then fetch, then build
-- `xtgeoip run -c -p -f` → unsupported option, ambiguous and prune does not support force
-- `xtgeoip run -b -c -p` → unsupported option, ambiguous (does prune apply to fetch or backup?)
-
-## version
-Show the program version.
-
-- `xtgeoip -V` → display version
+Run full pipeline
+- `xtgeoip run` → fetch then build
+- `xtgeoip run -l` → fetch then build (legacy)
+- `xtgeoip run -p` → fetch then prune then build
+- `xtgeoip run -c -p` → clean then fetch then prune then build
+- `xtgeoip run -c -f` → force clean then fetch then build
+- `xtgeoip run -c -p -f` → ambiguous flags: prune and force cannot be combined in this context
+- `xtgeoip run -b -c -p` → ambiguous prune target between {left} and {right}
 

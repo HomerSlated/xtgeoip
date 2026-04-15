@@ -1,0 +1,9 @@
+
+# Add this block before the COMMIT line
+# --- GeoIP CN block start ---
+# Log new IPv6 connections from CN (limit to 5/min)
+-A ufw6-before-input -m geoip --src-cc CN,IR -m conntrack --ctstate NEW -j LOG --log-prefix "XTGEOIP6: " -m limit --limit 5/min --limit-burst 10
+# Drop new IPv6 connections from CN
+-A ufw6-before-input -m geoip --src-cc CN,IR -j DROP
+# --- GeoIP CN block end ---
+
