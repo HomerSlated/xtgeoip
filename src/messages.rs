@@ -11,12 +11,12 @@ pub fn init_logger(log_file: &str) -> Result<()> {
     // stdout/stderr logging with custom formatting
     let stdout_dispatch = fern::Dispatch::new()
         .level(log::LevelFilter::Info) // keep Info/Warn
-        .filter(|metadata| metadata.level() < Level::Error) // exclude Error
+        // .filter(|metadata| metadata.level() < Level::Error) // exclude Error
         .format(|out, message, record| {
             let msg = match record.level() {
                 Level::Info => format!("{}", message),
                 Level::Warn => format!("Warning: {}", message),
-                // Level::Error => format!("Error: {}", message),
+                Level::Error => format!("Error: {}", message),
                 _ => format!("{}", message),
             };
             out.finish(format_args!("{}", msg));
