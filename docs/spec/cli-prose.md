@@ -64,6 +64,57 @@ Note that there are both free and paid tiers of MaxMind accounts, and the free t
 
 ## Running xtgeoip
 
+```
+Commands (only one of): build
+                        Optional flags: -b, -c, -f, -p
+                        Create ip4/ip6 data files from a stored copy of the database
+
+                        fetch
+                        Optional flags: -p
+                        Download the latest database
+
+                        run
+                        Optional flags: -b, -c, -f
+                        Fetch then build
+
+                        conf
+                        Mandatory flags (only one of): -d, -e, -s, -h
+                        
+flags:                  -b|--backup
+                        Backup ip4/ip6 data files listed in manifest
+                        Optional commands: build, run
+
+                        -c|--clean
+                        Delete ip4/ip6 data files listed in manifest
+
+                        -d|--default
+                        Show the default config
+                        Requires the conf command
+
+                        -e|--edit
+                        Edit the current config
+                        Requires the conf command
+
+                        -f|--force
+                        Force backup or clean
+                        Requires the -b or -c flag, but not both in a single invocation (ambiguous)
+
+                        -h|--help
+                        Show help
+
+                        -l|--legacy
+                        Produce legacy (incorrect) data files, for comparison
+
+                        -p|--prune
+                        Delete older binary backups or CSV databases, but not both in a single invocation (ambiguous)
+                        Requires the -b flag or fetch command, but not both in a single invocation (ambiguous)
+
+                        -s|--show
+                        Show the current config
+                        Requires the conf command
+
+                        -V|--version
+```
 
 
 ## The xt_geoip Kernel Module
