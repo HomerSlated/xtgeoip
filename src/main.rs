@@ -23,7 +23,7 @@ mod messages;
 use crate::{
     action::{Action, run_action},
     cli::Cli,
-    config::{load_config, run_conf},
+    config::load_config,
     messages::{error, init_logger, log_early_error},
 };
 
@@ -50,7 +50,9 @@ fn run(cli: Cli) -> Result<()> {
                 e
             })?;
 
-            if let Some(log_file) = cfg.logging.as_ref().map(|l| l.log_file.as_str()) {
+            if let Some(log_file) =
+                cfg.logging.as_ref().map(|l| l.log_file.as_str())
+            {
                 init_logger(log_file)?;
             }
 
