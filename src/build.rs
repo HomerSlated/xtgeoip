@@ -220,6 +220,13 @@ fn load_countries(
             country_id.insert(geoname.clone(), iso.clone());
             country_name.entry(iso.clone()).or_insert(name);
         } else if geoname == "6255148" || geoname == "6255147" {
+            // Geoname 6255148 = Asia (continent), 6255147 = Europe (continent).
+            // These are MaxMind CSV entries where country_iso_code is blank but
+            // continent_code is set (AS or EU). Legacy mode blindly maps the
+            // continent code to the country code, which creates a collision
+            // between Asia (AS) and American Samoa (AS), and a
+            // non-existent EU country code. Correct behaviour maps
+            // these to O1 (Other Country, ISO 3166 reserved).
             if legacy {
                 country_id.insert(geoname.clone(), continent.clone());
                 country_name.entry(continent.clone()).or_insert(name);
