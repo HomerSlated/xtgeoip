@@ -91,17 +91,17 @@ pub fn run_conf(action: ConfAction) -> Result<()> {
                 println!("No system config exists to show.");
             }
         }
+
         ConfAction::Edit => {
             ensure_system_config_exists()?;
-            let editor =
-                std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
-            if !Path::new(SYSTEM_CONFIG).exists() {
-                fs::File::create(SYSTEM_CONFIG)?;
+            if Path::new(SYSTEM_CONFIG).exists() {
+                let editor = std::env::var("EDITOR")
+                    .unwrap_or_else(|_| "vi".to_string());
+                Command::new(editor)
+                    .arg(SYSTEM_CONFIG)
+                    .status()
+                    .context("Failed to launch editor")?;
             }
-            Command::new(editor)
-                .arg(SYSTEM_CONFIG)
-                .status()
-                .context("Failed to launch editor")?;
         }
     }
     Ok(())
