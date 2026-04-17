@@ -8,11 +8,13 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 use flate2::{Compression, write::GzEncoder};
 use glob::glob;
-use log::info;
 use sha2::{Digest, Sha256};
 use tar::Builder;
 
-use crate::config::Config;
+use crate::{
+    config::Config,
+    messages::{error, info},
+};
 
 const VERSION_FILE: &str = "version";
 
@@ -65,27 +67,35 @@ fn verify_manifest_files(
             .ok_or_else(|| anyhow!("Malformed manifest at line {}", idx + 1))?;
 
         let file_name = file_name.trim();
+
         if file_name.is_empty() {
-            bail!("Malformed manifest at line {}", idx + 1);
+            let msg = format!("Malformed manifest at line {}", idx + 1);
+            error(&msg);
+            bail!(msg);
         }
 
         let file_path = data_dir.join(file_name);
         if !file_path.exists() {
-            bail!(
+            let msg = format!(
                 "Manifest mismatch\n{}: file not found\nOperation aborted, no \
                  files have been modified",
                 file_name
             );
+            error(&msg);
+            bail!(msg);
         }
 
         let data = fs::read(&file_path)?;
         let actual_hash = format!("{:x}", Sha256::digest(&data));
+
         if actual_hash != expected_hash {
-            bail!(
+            let msg = format!(
                 "Manifest mismatch\n{}: checksum failed\nOperation aborted, \
                  no files have been modified",
                 file_name
             );
+            error(&msg);
+            bail!(msg);
         }
 
         verified_files.push(file_path);
@@ -113,142 +123,129 @@ fn create_tarball(output_path: &Path, files: &[PathBuf]) -> Result<()> {
     Ok(())
 }
 
-/// Helper: collect files for backup or delete.
-/// Returns (files_to_process, version, optional_manifest_path)
-fn gather_files(
-    data_dir: &Path,
-    force: bool,
-) -> Result<(Vec<PathBuf>, String, Option<PathBuf>)> {
-    // Try reading the version file
-    let version_result = fs::read_to_string(version_path(data_dir));
-    let version = version_result
-        .as_ref()
+/// Collect files for a force backup/delete — no verification, just grab
+/// everything
+fn gather_files_force(data_dir: &Path) -> Result<(Vec<PathBuf>, String)> {
+    let version = fs::read_to_string(version_path(data_dir))
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| "unknown_version".to_string());
 
+    let mut files = iv_files(data_dir)?;
+    let version_file = version_path(data_dir);
+    if version_file.exists() {
+        files.push(version_file);
+    }
+    files.extend(all_sha256_files(data_dir)?);
+
+    Ok((files, version))
+}
+
+/// Collect files for a normal backup/delete — requires valid version + manifest
+/// + verified checksums
+fn gather_files_verified(
+    data_dir: &Path,
+) -> Result<(Vec<PathBuf>, String, PathBuf)> {
+    let version = fs::read_to_string(version_path(data_dir))
+        .map(|s| s.trim().to_string())
+        .map_err(|_| {
+            let msg = format!(
+                "Version file missing: {}. Use -f to force operation",
+                version_path(data_dir).display()
+            );
+            error(&msg);
+            anyhow!(msg)
+        })?;
+
     let manifest_path = manifest_path_for_version(data_dir, &version);
 
-    if force {
-        // Include all files without verifying version/manifest
-        let mut files = iv_files(data_dir)?;
-        let version_file = version_path(data_dir);
-        if version_file.exists() {
-            files.push(version_file);
-        }
-        files.extend(all_sha256_files(data_dir)?);
-        return Ok((files, version, Some(manifest_path)));
+    if !manifest_path.exists() {
+        let msg = format!(
+            "Manifest missing: {}\nExpected manifest not found. Use -f to \
+             force",
+            manifest_path.display()
+        );
+        error(&msg);
+        bail!(msg);
     }
 
-    // Non-force: optional manifest if it exists
-    let manifest_opt = if manifest_path.exists() {
-        Some(manifest_path.clone())
-    } else {
-        None
-    };
+    let files = verify_manifest_files(data_dir, &manifest_path)?;
 
-    // If version file is missing, propagate error to caller
-    if version_result.is_err() {
-        return Err(anyhow!(
-            "Version file missing: {}. Use -f to force operation",
-            version_path(data_dir).display()
-        ));
-    }
-
-    // At this point, we have a valid version and possibly a manifest
-    Ok((Vec::new(), version, manifest_opt))
+    Ok((files, version, manifest_path))
 }
 
 /// Backup IV files, version file, and manifest. Force option allows backup even
 /// if version/manifest missing.
 pub fn backup(data_dir: &Path, backup_dir: &Path, force: bool) -> Result<()> {
-    // Ensure backup directory exists
     fs::create_dir_all(backup_dir).with_context(|| {
         format!("Failed to create backup directory {}", backup_dir.display())
     })?;
 
-    // Gather files (force or normal)
-    let (mut files, version, manifest_opt) = gather_files(data_dir, force)?;
-
     if force {
+        let (files, version) = gather_files_force(data_dir)?;
         if files.is_empty() {
-            bail!("Nothing to back up");
+            let msg = "Nothing to back up";
+            error(msg);
+            bail!(msg);
         }
         let output_path = backup_dir.join(format!(
             "GeoLite2-Country-bin_unverified_{}.tar.gz",
             version
         ));
         create_tarball(&output_path, &files)?;
-        info!(
+        info(&format!(
             "Backed up unverified binary data to {}",
             output_path.display()
-        );
+        ));
         return Ok(());
     }
 
-    // Non-force: manifest must exist
-    let manifest_path = manifest_opt.ok_or_else(|| {
-        anyhow!(
-            "Manifest missing: {}\nExpected manifest not found. Use -f to \
-             force backup",
-            manifest_path_for_version(data_dir, &version).display()
-        )
-    })?;
-
-    // Verify manifest files
-    files = verify_manifest_files(data_dir, &manifest_path)?;
+    let (mut files, version, manifest_path) = gather_files_verified(data_dir)?;
     files.push(version_path(data_dir));
-    files.push(manifest_path.clone());
+    files.push(manifest_path);
 
     let output_path =
         backup_dir.join(format!("GeoLite2-Country-bin_{}.tar.gz", version));
     create_tarball(&output_path, &files)?;
-    info!("Backed up binary data to {}", output_path.display());
-
+    info(&format!(
+        "Backed up binary data to {}",
+        output_path.display()
+    ));
     Ok(())
 }
 
-/// Delete IV files, version file, and manifest. Force option allows deletion
-/// even if version/manifest missing.
 pub fn delete(data_dir: &Path, force: bool) -> Result<()> {
-    let (mut files, version, manifest_opt) = gather_files(data_dir, force)?;
-
     if force {
+        let (files, _version) = gather_files_force(data_dir)?;
         if files.is_empty() {
-            bail!("Nothing to delete");
+            let msg = "Nothing to delete";
+            error(msg);
+            bail!(msg);
         }
         for file in files {
-            fs::remove_file(file)?;
+            fs::remove_file(&file)?;
         }
-
-        // Remove orphaned file if it exists
         let orphan_path = data_dir.join("orphaned");
         if orphan_path.exists() {
             fs::remove_file(orphan_path)?;
         }
-
-        info!(
+        info(&format!(
             "Force deleted binary data files from {}",
             data_dir.display()
-        );
+        ));
         return Ok(());
     }
 
-    // Non-force delete only deletes verified manifest files + version
-    let manifest_path = manifest_opt.ok_or_else(|| {
-        anyhow!(
-            "Manifest missing: {}\nUse -f to force delete",
-            manifest_path_for_version(data_dir, &version).display()
-        )
-    })?;
-
-    files = verify_manifest_files(data_dir, &manifest_path)?;
-    for file in files {
+    let (files, _version, manifest_path) = gather_files_verified(data_dir)?;
+    for file in &files {
         fs::remove_file(file)?;
     }
     fs::remove_file(version_path(data_dir))?;
     fs::remove_file(manifest_path)?;
 
-    info!("Deleted old binary data files from {}", data_dir.display());
+    info(&format!(
+        "Deleted old binary data files from {}",
+        data_dir.display()
+    ));
     Ok(())
 }
 
@@ -278,14 +275,18 @@ pub fn prune_archives(
     let keep = cfg.paths.archive_prune;
 
     if keep < 1 {
-        bail!("Invalid configuration: paths.archive_prune must be >= 1");
+        let msg = "Invalid configuration: paths.archive_prune must be >= 1";
+        error(msg);
+        bail!(msg);
     }
 
     if !archive_dir.exists() || !archive_dir.is_dir() {
-        bail!(
+        let msg = format!(
             "Archive directory {} is missing or invalid",
             archive_dir.display()
         );
+        error(&msg);
+        bail!(msg);
     }
 
     let mut summary = PruneSummary {
@@ -319,12 +320,12 @@ pub fn prune_archives(
 
 fn print_prune_summary(summary: &PruneSummary) {
     match (summary.csv_removed, summary.bin_removed) {
-        (0, 0) => info!("No archives needed pruning."),
-        (c, 0) => info!("Pruned {c} old CSV archives."),
-        (0, b) => info!("Pruned {b} old bin archives."),
-        (c, b) => {
-            info!("Pruned {c} old CSV archives and {b} old bin archives.")
-        }
+        (0, 0) => info("No archives needed pruning."),
+        (c, 0) => info(&format!("Pruned {c} old CSV archives.")),
+        (0, b) => info(&format!("Pruned {b} old bin archives.")),
+        (c, b) => info(&format!(
+            "Pruned {c} old CSV archives and {b} old bin archives."
+        )),
     }
 }
 
