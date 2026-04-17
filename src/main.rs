@@ -23,7 +23,7 @@ mod messages;
 use crate::{
     action::{Action, run_action},
     cli::Cli,
-    config::load_config,
+    config::{load_config, run_conf},
     messages::{error, init_logger, log_early_error},
 };
 
@@ -37,19 +37,23 @@ fn fail(msg: &str) -> anyhow::Error {
 }
 
 fn run(cli: Cli) -> Result<()> {
-    let cfg = load_config().map_err(|e| {
-        log_early_error(&format!("Failed to load config: {}", e));
-        e
-    })?;
-
-    if let Some(log_file) = cfg.logging.as_ref().map(|l| l.log_file.as_str()) {
-        init_logger(log_file)?;
-    }
-
     let action = normalize_cli_to_action(&cli)?;
 
     match action {
+        Some(Action::Conf(conf_action)) => {
+            config::run_conf(conf_action)?;
+        }
+
         Some(action) => {
+            let cfg = load_config().map_err(|e| {
+                log_early_error(&format!("Failed to load config: {}", e));
+                e
+            })?;
+
+            if let Some(log_file) = cfg.logging.as_ref().map(|l| l.log_file.as_str()) {
+                init_logger(log_file)?;
+            }
+
             run_action(&cfg, action)?;
         }
 
