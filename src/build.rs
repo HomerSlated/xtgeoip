@@ -7,6 +7,7 @@ use std::{
     path::Path,
 };
 
+use anyhow::{Result, bail};
 use csv::ReaderBuilder;
 use ipnetwork::IpNetwork;
 use rayon::prelude::*;
@@ -19,13 +20,12 @@ struct CountryRanges {
     pool_v4: Vec<(u32, u32)>,
     pool_v6: Vec<(u128, u128)>,
 }
-
 pub fn build(
     source_dir: &Path,
     target_dir: &Path,
     version: &str,
     legacy: bool,
-) -> std::io::Result<()> {
+) -> anyhow::Result<()> {
     if legacy {
         messages::warn(
             "Legacy Mode activated. See documentation for collisions.",
@@ -84,11 +84,24 @@ pub fn build(
     // -------------------------
     // Write country files
     // -------------------------
-    country_ranges.par_iter().for_each(|(iso, cr)| {
-        let base = target_dir.join(iso.to_uppercase());
-        let _ = write_country_v4(&base, &cr.pool_v4);
-        let _ = write_country_v6(&base, &cr.pool_v6);
-    });
+    let write_errors: Vec<_> = country_ranges
+        .par_iter()
+        .flat_map(|(iso, cr)| {
+            let base = target_dir.join(iso.to_uppercase());
+            vec![
+                write_country_v4(&base, &cr.pool_v4),
+                write_country_v6(&base, &cr.pool_v6),
+            ]
+        })
+        .filter_map(|r| r.err())
+        .collect();
+
+    if !write_errors.is_empty() {
+        let msg =
+            format!("{} file write(s) failed during build", write_errors.len());
+        messages::error(&msg);
+        bail!(msg);
+    }
 
     // -------------------------
     // Version file
@@ -183,7 +196,7 @@ pub fn build(
 fn load_countries(
     source_dir: &Path,
     legacy: bool,
-) -> std::io::Result<(BTreeMap<String, String>, BTreeMap<String, String>)> {
+) -> anyhow::Result<(BTreeMap<String, String>, BTreeMap<String, String>)> {
     let file_path = source_dir.join("GeoLite2-Country-Locations-en.csv");
     let file = File::open(file_path)?;
     let mut rdr = ReaderBuilder::new().has_headers(true).from_reader(file);
@@ -251,7 +264,7 @@ fn load_blocks_parallel(
     country_id: &BTreeMap<String, String>,
     country_ranges: &mut BTreeMap<String, CountryRanges>,
     ipv6: bool,
-) -> std::io::Result<()> {
+) -> anyhow::Result<()> {
     let file_name = if ipv6 {
         "GeoLite2-Country-Blocks-IPv6.csv"
     } else {
@@ -433,7 +446,7 @@ fn merge_ranges_v6(ranges: &[(u128, u128)]) -> Vec<(u128, u128)> {
 fn write_country_v4(
     file_base: &Path,
     ranges: &[(u32, u32)],
-) -> std::io::Result<()> {
+) -> anyhow::Result<()> {
     let file_name = file_base.with_extension("iv4");
     let file = File::create(file_name)?;
     let mut writer = BufWriter::new(file);
@@ -447,7 +460,7 @@ fn write_country_v4(
 fn write_country_v6(
     file_base: &Path,
     ranges: &[(u128, u128)],
-) -> std::io::Result<()> {
+) -> anyhow::Result<()> {
     let file_name = file_base.with_extension("iv6");
     let file = File::create(file_name)?;
     let mut writer = BufWriter::new(file);
