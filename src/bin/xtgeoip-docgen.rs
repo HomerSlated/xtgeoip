@@ -123,9 +123,18 @@ fn main() -> anyhow::Result<()> {
     fs::write("docs/generated/tldr.md", generate_tldr_md(&spec)?)?;
     fs::write("docs/generated/scd", generate_scd(&spec)?)?;
     fs::write("docs/generated/xtgeoip.1", generate_manpage(&spec)?)?;
-    fs::write("src/generated/error_text.rs", generate_error_text_rs(&spec)?)?;
-    fs::write("src/generated/cli_matrix.rs", generate_cli_matrix_rs(&spec)?)?;
-    fs::write("docs/generated/testcases.yaml", generate_testcases_yaml(&spec)?)?;
+    fs::write(
+        "src/generated/error_text.rs",
+        generate_error_text_rs(&spec)?,
+    )?;
+    fs::write(
+        "src/generated/cli_matrix.rs",
+        generate_cli_matrix_rs(&spec)?,
+    )?;
+    fs::write(
+        "docs/generated/testcases.yaml",
+        generate_testcases_yaml(&spec)?,
+    )?;
 
     println!("Docs generated successfully.");
     Ok(())
@@ -140,10 +149,15 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
 
     let check = |scope: &str,
                  ex: &Example,
-                 used: &mut BTreeSet<String>| -> anyhow::Result<()> {
+                 used: &mut BTreeSet<String>|
+     -> anyhow::Result<()> {
         if let Some(reason) = &ex.reason {
             if !spec.reason_templates.contains_key(&reason.code) {
-                anyhow::bail!("Unknown reason code {} in {}", reason.code, scope);
+                anyhow::bail!(
+                    "Unknown reason code {} in {}",
+                    reason.code,
+                    scope
+                );
             }
         }
 
@@ -165,8 +179,9 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
     };
 
     let visit = |name: &str,
-                     cmd: &CommandSpec,
-                     used: &mut BTreeSet<String>| -> anyhow::Result<()> {
+                 cmd: &CommandSpec,
+                 used: &mut BTreeSet<String>|
+     -> anyhow::Result<()> {
         let exs = match cmd {
             CommandSpec::FlagCommand { examples, .. }
             | CommandSpec::SelectorCommand { examples, .. } => examples,
@@ -220,7 +235,8 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
 
         if !unused.is_empty() {
             anyhow::bail!(
-                "Unused error cases (no invalid example maps_to reference): {:?}",
+                "Unused error cases (no invalid example maps_to reference): \
+                 {:?}",
                 unused
             );
         }
@@ -254,7 +270,8 @@ fn resolve_outcome(spec: &Spec, ex: &Example) -> String {
 /* ---------------- USAGE ---------------- */
 
 fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
-    let mut out = format!("# {}\n\n{}\n\n", spec.meta.program, spec.meta.summary);
+    let mut out =
+        format!("# {}\n\n{}\n\n", spec.meta.program, spec.meta.summary);
 
     let render = |out: &mut String,
                   spec: &Spec,
@@ -286,10 +303,14 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
 
     if let Some(cmd) = &spec.top_level {
         match cmd {
-            CommandSpec::FlagCommand { summary, examples, .. } => {
+            CommandSpec::FlagCommand {
+                summary, examples, ..
+            } => {
                 render(&mut out, spec, examples, "top level", Some(summary));
             }
-            CommandSpec::SelectorCommand { usage, examples, .. } => {
+            CommandSpec::SelectorCommand {
+                usage, examples, ..
+            } => {
                 render(&mut out, spec, examples, "top level", Some(usage));
             }
         }
@@ -297,10 +318,14 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
 
     for (name, cmd) in &spec.commands {
         match cmd {
-            CommandSpec::FlagCommand { summary, examples, .. } => {
+            CommandSpec::FlagCommand {
+                summary, examples, ..
+            } => {
                 render(&mut out, spec, examples, name, Some(summary));
             }
-            CommandSpec::SelectorCommand { usage, examples, .. } => {
+            CommandSpec::SelectorCommand {
+                usage, examples, ..
+            } => {
                 render(&mut out, spec, examples, name, Some(usage));
             }
         }
@@ -312,7 +337,8 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
 /* ---------------- TLDR ---------------- */
 
 fn generate_tldr_md(spec: &Spec) -> anyhow::Result<String> {
-    let mut out = format!("# {}\n\n> {}\n\n", spec.meta.program, spec.meta.summary);
+    let mut out =
+        format!("# {}\n\n> {}\n\n", spec.meta.program, spec.meta.summary);
 
     let mut add = |exs: &[Example]| {
         for ex in exs {
@@ -384,7 +410,10 @@ fn generate_scd(spec: &Spec) -> anyhow::Result<String> {
                 ));
             }
             CommandSpec::SelectorCommand { usage, .. } => {
-                out.push_str(&format!("Command: {}\nUsage: {}\n\n", name, usage));
+                out.push_str(&format!(
+                    "Command: {}\nUsage: {}\n\n",
+                    name, usage
+                ));
             }
         }
     }
@@ -412,14 +441,16 @@ fn generate_error_text_rs(spec: &Spec) -> anyhow::Result<String> {
 
 fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
     let mut out = String::from(
-        "pub struct CliExample { pub cmd: &'static str, pub valid: bool, pub outcome: &'static str }\npub const CLI_MATRIX: &[CliExample] = &[\n",
+        "pub struct CliExample { pub cmd: &'static str, pub valid: bool, pub \
+         outcome: &'static str }\npub const CLI_MATRIX: &[CliExample] = &[\n",
     );
 
     let mut add = |exs: &[Example]| {
         for ex in exs {
             let outcome = resolve_outcome(spec, ex);
             out.push_str(&format!(
-                "    CliExample {{ cmd: \"{}\", valid: {}, outcome: \"{}\" }},\n",
+                "    CliExample {{ cmd: \"{}\", valid: {}, outcome: \"{}\" \
+                 }},\n",
                 ex.cmd, ex.valid, outcome
             ));
         }
