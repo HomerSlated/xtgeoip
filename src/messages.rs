@@ -9,14 +9,20 @@ pub fn init_logger(log_file: &str) -> Result<()> {
     let base_dispatch = fern::Dispatch::new().level(log::LevelFilter::Info);
 
     // stdout/stderr logging with custom formatting
+    let stderr_dispatch = fern::Dispatch::new()
+        .level(log::LevelFilter::Error)
+        .format(|out, message, _record| {
+            out.finish(format_args!("Error: {}", message));
+        })
+        .chain(std::io::stderr());
+
     let stdout_dispatch = fern::Dispatch::new()
         .level(log::LevelFilter::Info) // keep Info/Warn
-        // .filter(|metadata| metadata.level() < Level::Error) // exclude Error
+        .filter(|metadata| metadata.level() != log::LevelFilter::Error)
         .format(|out, message, record| {
             let msg = match record.level() {
                 Level::Info => format!("{}", message),
                 Level::Warn => format!("Warning: {}", message),
-                Level::Error => format!("Error: {}", message),
                 _ => format!("{}", message),
             };
             out.finish(format_args!("{}", msg));
@@ -35,9 +41,10 @@ pub fn init_logger(log_file: &str) -> Result<()> {
         })
         .chain(fern::log_file(log_file)?);
 
-    // combine stdout + file
+    // combine stdout, stderr, file
     base_dispatch
         .chain(stdout_dispatch)
+        .chain(stderr_dispatch)
         .chain(file_dispatch)
         .apply()?;
 
