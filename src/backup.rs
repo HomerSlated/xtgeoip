@@ -234,7 +234,7 @@ pub fn delete(data_dir: &Path, force: bool) -> Result<()> {
     }
 
     // Non-force delete only deletes verified manifest files + version
-    let manifest_path = _manifest_opt.ok_or_else(|| {
+    let manifest_path = manifest_opt.ok_or_else(|| {
         anyhow!(
             "Manifest missing: {}\nUse -f to force delete",
             manifest_path_for_version(data_dir, &version).display()
