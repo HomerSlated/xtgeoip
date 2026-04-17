@@ -47,6 +47,7 @@ pub enum ConfAction {
 
 /// Prompt user to create system config if missing (used for `-s` or `-e`)
 fn ensure_system_config_exists() -> io::Result<()> {
+    eprintln!("DEBUG: ensure_system_config_exists called");
     let path = Path::new(SYSTEM_CONFIG);
     if path.exists() {
         return Ok(());
