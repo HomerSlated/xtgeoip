@@ -210,7 +210,7 @@ pub fn backup(data_dir: &Path, backup_dir: &Path, force: bool) -> Result<()> {
 /// Delete IV files, version file, and manifest. Force option allows deletion
 /// even if version/manifest missing.
 pub fn delete(data_dir: &Path, force: bool) -> Result<()> {
-    let (mut files, version, _manifest_opt) = gather_files(data_dir, force)?;
+    let (mut files, version, manifest_opt) = gather_files(data_dir, force)?;
 
     if force {
         if files.is_empty() {
