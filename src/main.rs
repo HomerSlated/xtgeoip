@@ -6,7 +6,6 @@
 ///
 /// Inspired by xt_geoip_build_maxmind (Jan Engelhardt, Philip
 /// Prindeville), now part of Debian's xtables-addons package.
-/// xtgeoip © Haze N Sparkle 2026 (MIT)
 use std::process;
 
 use anyhow::Result;

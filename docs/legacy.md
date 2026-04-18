@@ -24,20 +24,9 @@ In other words:
 - Some of them happen to look like country codes
 - Reusing them as country codes can silently misassign IP ranges
 
-Current Behaviour
-Default Mode (recommended)
-In default mode, any MaxMind row with:
+Current Behaviour: Default Mode (recommended)
 
-an empty country_iso_code, and
-
-no valid country mapping
-
-is treated as undefined / non-country data and assigned to:
-
-O1
-This includes continent-only rows.
-
-This avoids incorrectly assigning undefined or continent-level data to unrelated real countries.
+In default mode, any MaxMind row with an empty country_iso_code, and no valid country mapping is treated as undefined / non-country data and assigned to O1. This includes continent-only rows. This avoids incorrectly assigning undefined or continent-level data to unrelated real countries.
 
 Legacy Mode (-l, --legacy)
 
@@ -74,15 +63,7 @@ Legacy output: AS
 
 AS is the real ISO 3166-1 alpha-2 country code for American Samoa.
 
-This creates a direct collision:
-
-continent-level Asia data
-
-is merged into
-
-the real country bucket for American Samoa
-
-This is a known data integrity issue in legacy mode.
+This creates a direct collision: continent-level Asia data is merged into the real country bucket for American Samoa. This is a known data integrity issue in legacy mode.
 
 Why Default Mode Uses O1
 O1 is the correct destination for undefined or non-country rows because:
@@ -111,7 +92,6 @@ This mode is expected to reproduce the same country files as older Perl-based to
 
 If you want semantically correct handling of undefined / continent-only data, use default mode:
 
-xt_geoip_build_maxmind
 In default mode:
 
 - no fake EU country files are created

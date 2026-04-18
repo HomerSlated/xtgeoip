@@ -11,7 +11,3 @@ the minimum requirements of Xtables-addons.
 
 See also https://inai.de/projects/xtables-addons/
 
-
-Included in this package
-========================
-* xt_ACCOUNT 1.16, libxt_ACCOUNT 1.3
