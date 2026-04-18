@@ -375,7 +375,7 @@ fn resolve_country_code(
         .get(key)
         .filter(|s| !s.is_empty())
         .cloned()
-        .unwrap_or_else(|| key.to_string())
+        .unwrap_or_else(|| "O1".to_string())
 }
 
 // -------------------------
