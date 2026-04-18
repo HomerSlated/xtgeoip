@@ -16,6 +16,9 @@ pub struct Spec {
     pub proof: Option<Proof>,
 
     #[serde(default)]
+    pub flags: BTreeMap<String, FlagDef>,
+
+    #[serde(default)]
     pub error_cases: Option<BTreeMap<String, ErrorCase>>,
 
     #[serde(default)]
@@ -26,6 +29,13 @@ pub struct Spec {
 
     #[serde(default)]
     pub reason_templates: BTreeMap<String, ReasonTemplate>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FlagDef {
+    pub long: String,
+    pub kind: String,
+    pub summary: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -374,49 +384,120 @@ fn generate_tldr_md(spec: &Spec) -> anyhow::Result<String> {
 /* ---------------- SCD ---------------- */
 
 fn generate_scd(spec: &Spec) -> anyhow::Result<String> {
+    let prog = &spec.meta.program;
     let mut out = String::new();
 
+    // Title line
+    out.push_str(&format!(
+        "{}(1)\n\n",
+        prog.to_uppercase()
+    ));
+
+    // NAME
+    out.push_str("# NAME\n\n");
+    out.push_str(&format!("{} - {}\n\n", prog, spec.meta.summary));
+
+    // SYNOPSIS
+    out.push_str("# SYNOPSIS\n\n");
     if let Some(cmd) = &spec.top_level {
+        if let CommandSpec::FlagCommand { allowed_flags, .. } = cmd {
+            let flag_str: String = allowed_flags
+                .iter()
+                .map(|f| format!("[*-{}*]", f))
+                .collect::<Vec<_>>()
+                .join(" ");
+            out.push_str(&format!("*{}* {}++\n", prog, flag_str));
+        }
+    }
+    out.push_str(&format!("*{}* _command_ [_options_]\n\n", prog));
+
+    // DESCRIPTION
+    out.push_str("# DESCRIPTION\n\n");
+    out.push_str(&format!(
+        "*{}* downloads MaxMind GeoLite2 CSV databases and converts them into\n\
+         binary IP range files for the Linux _xt\\_geoip_ kernel module.\n\n",
+        prog
+    ));
+
+    // COMMANDS
+    out.push_str("# COMMANDS\n\n");
+    for (name, cmd) in &spec.commands {
         match cmd {
-            CommandSpec::FlagCommand {
-                summary,
-                allowed_flags,
-                ..
-            } => {
-                out.push_str(&format!(
-                    "Command: top_level\nSummary: {}\nFlags: {:?}\n\n",
-                    summary, allowed_flags
-                ));
+            CommandSpec::FlagCommand { summary, allowed_flags, .. } => {
+                let flag_str: String = allowed_flags
+                    .iter()
+                    .map(|f| format!("[*-{}*]", f))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                out.push_str(&format!("*{}* {}\n\t{}\n\n", name, flag_str, summary));
             }
-            CommandSpec::SelectorCommand { usage, .. } => {
+            CommandSpec::SelectorCommand {
+                summary, positional, ..
+            } => {
+                let choices: String = positional
+                    .choices
+                    .keys()
+                    .map(|k| format!("*-{}*", k))
+                    .collect::<Vec<_>>()
+                    .join("|");
                 out.push_str(&format!(
-                    "Command: top_level\nUsage: {}\n\n",
-                    usage
+                    "*{}* {}\n\t{}\n\n",
+                    name, choices, summary
                 ));
+                for (choice, ch) in &positional.choices {
+                    out.push_str(&format!(
+                        "\t*-{}*\n\t\t{}\n\n",
+                        choice, ch.summary
+                    ));
+                }
             }
         }
     }
 
-    for (name, cmd) in &spec.commands {
-        match cmd {
-            CommandSpec::FlagCommand {
-                summary,
-                allowed_flags,
-                ..
-            } => {
-                out.push_str(&format!(
-                    "Command: {}\nSummary: {}\nFlags: {:?}\n\n",
-                    name, summary, allowed_flags
-                ));
+    // OPTIONS
+    out.push_str("# OPTIONS\n\n");
+    for (short, fd) in &spec.flags {
+        out.push_str(&format!(
+            "*-{}*, *--{}*\n\t{}\n\n",
+            short, fd.long, fd.summary
+        ));
+    }
+
+    // EXAMPLES
+    out.push_str("# EXAMPLES\n\n");
+    out.push_str("```\n");
+
+    {
+        let mut add_valid = |exs: &[Example]| {
+            for ex in exs {
+                if ex.valid {
+                    out.push_str(&format!("{}\n", ex.cmd));
+                }
             }
-            CommandSpec::SelectorCommand { usage, .. } => {
-                out.push_str(&format!(
-                    "Command: {}\nUsage: {}\n\n",
-                    name, usage
-                ));
-            }
+        };
+
+        if let Some(cmd) = &spec.top_level {
+            let exs = match cmd {
+                CommandSpec::FlagCommand { examples, .. }
+                | CommandSpec::SelectorCommand { examples, .. } => examples,
+            };
+            add_valid(exs);
+        }
+
+        for cmd in spec.commands.values() {
+            let exs = match cmd {
+                CommandSpec::FlagCommand { examples, .. }
+                | CommandSpec::SelectorCommand { examples, .. } => examples,
+            };
+            add_valid(exs);
         }
     }
+
+    out.push_str("```\n\n");
+
+    // SEE ALSO
+    out.push_str("# SEE ALSO\n\n");
+    out.push_str("*xt\\_geoip*(8), *iptables*(8)\n");
 
     Ok(out)
 }
@@ -514,11 +595,126 @@ fn generate_testcases_yaml(spec: &Spec) -> anyhow::Result<String> {
 /* ---------------- MANPAGE ---------------- */
 
 fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
-    Ok(format!(
-        ".TH {} 1 \"\" \"xtgeoip {}\" \"User Commands\"\n.SH NAME\n{} {}\n",
-        spec.meta.program.to_uppercase(),
-        spec.version,
-        spec.meta.program,
-        spec.meta.summary
-    ))
+    let prog = &spec.meta.program;
+    let mut out = String::new();
+
+    // Header
+    out.push_str(&format!(
+        ".TH {} 1 \"\" \"{} {}\" \"User Commands\"\n",
+        prog.to_uppercase(),
+        prog,
+        spec.version
+    ));
+
+    // NAME
+    out.push_str(".SH NAME\n");
+    out.push_str(&format!("{} \\- {}\n", prog, spec.meta.summary));
+
+    // SYNOPSIS
+    out.push_str(".SH SYNOPSIS\n");
+    if let Some(cmd) = &spec.top_level {
+        if let CommandSpec::FlagCommand { allowed_flags, .. } = cmd {
+            let flags: String = allowed_flags
+                .iter()
+                .map(|f| format!("[\\fB\\-{}\\fR]", f))
+                .collect::<Vec<_>>()
+                .join(" ");
+            out.push_str(&format!(".B {}\n{}\n.br\n", prog, flags));
+        }
+    }
+    out.push_str(&format!(
+        ".B {}\n\\fIcommand\\fR [\\fIoptions\\fR]\n",
+        prog
+    ));
+
+    // DESCRIPTION
+    out.push_str(".SH DESCRIPTION\n");
+    out.push_str(&format!(
+        "\\fB{}\\fR downloads MaxMind GeoLite2 CSV databases and converts \
+         them into binary IP range files for the Linux xt_geoip kernel module.\n",
+        prog
+    ));
+
+    // COMMANDS
+    out.push_str(".SH COMMANDS\n");
+    for (name, cmd) in &spec.commands {
+        match cmd {
+            CommandSpec::FlagCommand { summary, allowed_flags, .. } => {
+                let flags: String = allowed_flags
+                    .iter()
+                    .map(|f| format!("[\\fB\\-{}\\fR]", f))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                out.push_str(&format!(
+                    ".TP\n.BI \"{} \" \"{}\"\n{}\n",
+                    name, flags, summary
+                ));
+            }
+            CommandSpec::SelectorCommand { summary, positional, .. } => {
+                let choices: String = positional
+                    .choices
+                    .keys()
+                    .map(|k| format!("\\fB\\-{}\\fR", k))
+                    .collect::<Vec<_>>()
+                    .join("|");
+                out.push_str(&format!(
+                    ".TP\n.BI \"{}\" \" {}\"\n{}\n",
+                    name, choices, summary
+                ));
+                out.push_str(".RS\n");
+                for (choice, ch) in &positional.choices {
+                    out.push_str(&format!(
+                        ".TP\n.B \\-{}\n{}\n",
+                        choice, ch.summary
+                    ));
+                }
+                out.push_str(".RE\n");
+            }
+        }
+    }
+
+    // OPTIONS
+    out.push_str(".SH OPTIONS\n");
+    for (short, fd) in &spec.flags {
+        out.push_str(&format!(
+            ".TP\n.BR \\-{} \", \" \\-\\-{}\n{}\n",
+            short, fd.long, fd.summary
+        ));
+    }
+
+    // EXAMPLES
+    out.push_str(".SH EXAMPLES\n");
+
+    {
+        let mut emit_valid = |exs: &[Example]| {
+            for ex in exs {
+                if ex.valid {
+                    let desc = ex.outcome.as_deref().unwrap_or("");
+                    out.push_str(&format!(".TP\n.B {}\n{}\n", ex.cmd, desc));
+                }
+            }
+        };
+
+        if let Some(cmd) = &spec.top_level {
+            let exs = match cmd {
+                CommandSpec::FlagCommand { examples, .. }
+                | CommandSpec::SelectorCommand { examples, .. } => examples,
+            };
+            emit_valid(exs);
+        }
+
+        for cmd in spec.commands.values() {
+            let exs = match cmd {
+                CommandSpec::FlagCommand { examples, .. }
+                | CommandSpec::SelectorCommand { examples, .. } => examples,
+            };
+            emit_valid(exs);
+        }
+    }
+
+    // SEE ALSO
+    out.push_str(".SH SEE ALSO\n");
+    out.push_str(".BR xt_geoip (8),\n.BR iptables (8)\n");
+
+    Ok(out)
 }

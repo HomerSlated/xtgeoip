@@ -1,3 +1,115 @@
 .TH XTGEOIP 1 "" "xtgeoip 3.1" "User Commands"
 .SH NAME
-xtgeoip Build and manage xt_geoip data from MaxMind GeoLite2 CSVs.
+xtgeoip \- Build and manage xt_geoip data from MaxMind GeoLite2 CSVs.
+.SH SYNOPSIS
+.B xtgeoip
+[\fB\-b\fR] [\fB\-c\fR] [\fB\-p\fR] [\fB\-f\fR]
+.br
+.B xtgeoip
+\fIcommand\fR [\fIoptions\fR]
+.SH DESCRIPTION
+\fBxtgeoip\fR downloads MaxMind GeoLite2 CSV databases and converts them into binary IP range files for the Linux xt_geoip kernel module.
+.SH COMMANDS
+.TP
+.BI "build " "[\fB\-b\fR] [\fB\-c\fR] [\fB\-p\fR] [\fB\-f\fR] [\fB\-l\fR]"
+Build xt_geoip database
+.TP
+.BI "conf" " \fB\-d\fR|\fB\-e\fR|\fB\-s\fR"
+Manage configuration
+.RS
+.TP
+.B \-d
+Delete configuration
+.TP
+.B \-e
+Edit configuration
+.TP
+.B \-s
+Show configuration
+.RE
+.TP
+.BI "fetch " "[\fB\-p\fR]"
+Fetch GeoLite2 data files
+.TP
+.BI "run " "[\fB\-b\fR] [\fB\-c\fR] [\fB\-p\fR] [\fB\-f\fR] [\fB\-l\fR]"
+Run full pipeline
+.SH OPTIONS
+.TP
+.BR \-b ", " \-\-backup
+Back up current database before replacing it.
+.TP
+.BR \-c ", " \-\-clean
+Clean working files before continuing.
+.TP
+.BR \-f ", " \-\-force
+Force the relevant operation when supported.
+.TP
+.BR \-l ", " \-\-legacy
+Enable legacy mode.
+.TP
+.BR \-p ", " \-\-prune
+Prune retained artifacts for the current operation.
+.SH EXAMPLES
+.TP
+.B xtgeoip -h
+display usage
+.TP
+.B xtgeoip -b
+backup database
+.TP
+.B xtgeoip -c
+clean database
+.TP
+.B xtgeoip -b -c
+backup then clean
+.TP
+.B xtgeoip -b -p
+backup then prune
+.TP
+.B xtgeoip build
+build database
+.TP
+.B xtgeoip build -l
+build (legacy mode)
+.TP
+.B xtgeoip build -b -p
+backup then prune then build
+.TP
+.B xtgeoip build -c -f
+clean then build
+.TP
+.B xtgeoip build -b -c -p
+backup, prune, clean, build
+.TP
+.B xtgeoip conf -s
+show configuration
+.TP
+.B xtgeoip conf -d
+show default configuration
+.TP
+.B xtgeoip conf -e
+edit configuration
+.TP
+.B xtgeoip fetch
+fetch CSVs
+.TP
+.B xtgeoip fetch -p
+fetch then prune archives
+.TP
+.B xtgeoip run
+fetch then build
+.TP
+.B xtgeoip run -l
+fetch then build (legacy)
+.TP
+.B xtgeoip run -p
+fetch then prune then build
+.TP
+.B xtgeoip run -c -p
+clean then fetch then prune then build
+.TP
+.B xtgeoip run -c -f
+force clean then fetch then build
+.SH SEE ALSO
+.BR xt_geoip (8),
+.BR iptables (8)
