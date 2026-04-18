@@ -1,89 +1,125 @@
 //! xtgeoip-tests
-//! Run xtgeoip commands from docs/generated/testcases.yaml
+//! Run xtgeoip commands from docs/generated/testcases.yaml and assert
+//! that each exits with the status expected by its spec key:
+//!   key: p  → must exit 0
+//!   key: f  → must exit non-zero
 
-use std::{env, fs, process::Command};
+use std::{
+    env,
+    fs,
+    process::{self, Command},
+};
 
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 struct Testcase {
+    case_id: Option<String>,
     key: String,
     cmd: String,
+    maps_to: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
-    let args: Vec<String> = env::args().collect();
+    let argv: Vec<String> = env::args().collect();
 
-    // Flags
-    let filter_failed_only = args.iter().any(|a| a == "--failed");
-    let rebuild_after_clean = args.iter().any(|a| a == "--rebuild");
+    let filter_failed_only = argv.iter().any(|a| a == "--failed");
+    let rebuild_after_clean = argv.iter().any(|a| a == "--rebuild");
+    let filter_case = argv
+        .iter()
+        .position(|a| a == "--case")
+        .and_then(|i| argv.get(i + 1))
+        .map(String::as_str);
 
-    // Read testcases YAML
     let yaml_str = fs::read_to_string("docs/generated/testcases.yaml")?;
     let testcases: Vec<Testcase> = serde_yaml::from_str(&yaml_str)?;
 
     if testcases.is_empty() {
-        println!("No testcases found!");
+        println!("No testcases found.");
         return Ok(());
     }
 
-    // Iterate and run
-    for tc in testcases.iter() {
-        // Skip if --failed and key != "f"
+    let mut passed = 0usize;
+    let mut failed = 0usize;
+    let mut skipped = 0usize;
+
+    for tc in &testcases {
+        let id = tc.case_id.as_deref().unwrap_or("?");
+
+        if let Some(want) = filter_case {
+            if tc.case_id.as_deref() != Some(want) {
+                skipped += 1;
+                continue;
+            }
+        }
+
         if filter_failed_only && tc.key != "f" {
+            skipped += 1;
             continue;
         }
 
-        // Skip interactive editor
+        // Skip interactive editor — no way to drive it non-interactively
         if tc.cmd.contains("conf -e") {
-            println!(
-                "[{}] [{}] -> Skipped interactive testcase",
-                tc.key, tc.cmd
-            );
+            println!("[SKIP] [{id}] {}", tc.cmd);
+            skipped += 1;
             continue;
         }
 
-        println!("[{}] [{}]", tc.key, tc.cmd);
+        let expected_pass = tc.key == "p";
+        let expect_label = if expected_pass { "exit 0" } else { "exit non-0" };
 
-        // Split command into program + args
+        print!("[{id}] {} (expect {}) ... ", tc.cmd, expect_label);
+
         let mut parts = tc.cmd.split_whitespace();
         let program = parts.next().unwrap();
-        let args: Vec<&str> = parts.collect();
-        let xtgeoip_path = format!("target/release/{}", program);
+        let cmd_args: Vec<&str> = parts.collect();
+        let bin = format!("target/release/{}", program);
 
-        let status = Command::new("sudo")
-            .arg(&xtgeoip_path)
-            .args(&args)
-            .status()?;
+        let status = Command::new("sudo").arg(&bin).args(&cmd_args).status()?;
+        let did_succeed = status.success();
 
-        if status.success() {
-            println!("Success");
+        if did_succeed == expected_pass {
+            println!("PASS");
+            passed += 1;
 
-            // Rebuild logic
+            // After a successful top-level clean, optionally rebuild so the
+            // database is left in a usable state for subsequent tests.
             if rebuild_after_clean
-                && args.contains(&"-c")
-                && !args.contains(&"build")
-                && !args.contains(&"run")
+                && did_succeed
+                && cmd_args.iter().any(|a| *a == "-c")
+                && cmd_args
+                    .first()
+                    .map(|a| a.starts_with('-'))
+                    .unwrap_or(true)
             {
-                println!("--rebuild active: running `build`");
-
-                let rebuild_ok = Command::new("sudo")
-                    .arg(&xtgeoip_path)
+                print!("  [rebuild] xtgeoip build ... ");
+                let ok = Command::new("sudo")
+                    .arg(&bin)
                     .arg("build")
                     .status()?
                     .success();
-
-                if rebuild_ok {
-                    println!("Success");
-                } else {
-                    println!("FAILED");
-                }
+                println!("{}", if ok { "PASS" } else { "FAIL" });
             }
         } else {
-            println!("FAILED");
+            let got = if did_succeed { "exit 0" } else { "exit non-0" };
+            let maps = tc
+                .maps_to
+                .as_deref()
+                .map(|m| format!(" (maps_to: {})", m))
+                .unwrap_or_default();
+            println!("FAIL — expected {}, got {}{}", expect_label, got, maps);
+            failed += 1;
         }
+    }
 
-        println!();
+    println!();
+    println!(
+        "Results: {} passed, {} failed, {} skipped",
+        passed, failed, skipped
+    );
+
+    if failed > 0 {
+        process::exit(1);
     }
 
     Ok(())
