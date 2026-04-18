@@ -8,6 +8,8 @@ license = "MIT"
 include = ["src/**", "Cargo.toml", "README.md", "LICENSE", "docs/**", "conf/**"]
 
 [dependencies]
+blake3 = "1.5.5"
+memmap2 = "0.9.5"
 sha2 = "0.10.9"
 zip = "8.1.0"
 anyhow = "1.0.102"

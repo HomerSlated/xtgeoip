@@ -8,7 +8,7 @@ use std::{
 use anyhow::{Context, Result, anyhow, bail};
 use flate2::{Compression, write::GzEncoder};
 use glob::glob;
-use sha2::{Digest, Sha256};
+use blake3;
 use tar::Builder;
 
 use crate::{
@@ -23,7 +23,7 @@ fn version_path(data_dir: &Path) -> PathBuf {
 }
 
 fn manifest_path_for_version(data_dir: &Path, version: &str) -> PathBuf {
-    data_dir.join(format!("GeoLite2-Country-bin_{}.sha256", version))
+    data_dir.join(format!("GeoLite2-Country-bin_{}.blake3", version))
 }
 
 /// Collect IV files: 2-char country codes, with .iv4 or .iv6, including digits
@@ -37,10 +37,10 @@ fn iv_files(data_dir: &Path) -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-/// Collect all .sha256 files in the data directory.
-fn all_sha256_files(data_dir: &Path) -> Result<Vec<PathBuf>> {
+/// Collect all .blake3 manifest files in the data directory.
+fn all_blake3_files(data_dir: &Path) -> Result<Vec<PathBuf>> {
     let mut files: Vec<PathBuf> =
-        glob(&format!("{}/*.sha256", data_dir.display()))?
+        glob(&format!("{}/*.blake3", data_dir.display()))?
             .filter_map(Result::ok)
             .collect();
     files.sort();
@@ -86,7 +86,7 @@ fn verify_manifest_files(
         }
 
         let data = fs::read(&file_path)?;
-        let actual_hash = format!("{:x}", Sha256::digest(&data));
+        let actual_hash = blake3::hash(&data).to_string();
 
         if actual_hash != expected_hash {
             let msg = format!(
@@ -135,7 +135,7 @@ fn gather_files_force(data_dir: &Path) -> Result<(Vec<PathBuf>, String)> {
     if version_file.exists() {
         files.push(version_file);
     }
-    files.extend(all_sha256_files(data_dir)?);
+    files.extend(all_blake3_files(data_dir)?);
 
     Ok((files, version))
 }
