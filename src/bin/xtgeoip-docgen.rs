@@ -500,16 +500,14 @@ fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
             out.push_str(&format!(".B {}\n{}\n.br\n", prog, flags));
         }
     }
-    out.push_str(&format!(
-        ".B {}\n\\fIcommand\\fR [\\fIoptions\\fR]\n",
-        prog
-    ));
+    out.push_str(&format!(".B {}\n\\fIcommand\\fR [\\fIoptions\\fR]\n", prog));
 
     // DESCRIPTION
     out.push_str(".SH DESCRIPTION\n");
     out.push_str(&format!(
         "\\fB{}\\fR downloads MaxMind GeoLite2 CSV databases and converts \
-         them into binary IP range files for the Linux xt_geoip kernel module.\n",
+         them into binary IP range files for the Linux xt_geoip kernel \
+         module.\n",
         prog
     ));
 
@@ -517,7 +515,11 @@ fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
     out.push_str(".SH COMMANDS\n");
     for (name, cmd) in &spec.commands {
         match cmd {
-            CommandSpec::FlagCommand { summary, allowed_flags, .. } => {
+            CommandSpec::FlagCommand {
+                summary,
+                allowed_flags,
+                ..
+            } => {
                 let flags: String = allowed_flags
                     .iter()
                     .map(|f| format!("[\\fB\\-{}\\fR]", f))
@@ -528,7 +530,11 @@ fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
                     name, flags, summary
                 ));
             }
-            CommandSpec::SelectorCommand { summary, positional, .. } => {
+            CommandSpec::SelectorCommand {
+                summary,
+                positional,
+                ..
+            } => {
                 let choices: String = positional
                     .choices
                     .keys()

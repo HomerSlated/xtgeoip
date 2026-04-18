@@ -27,7 +27,10 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
         fs::create_dir_all(archive_dir)?;
         let (archive_path, version) =
             find_latest_local_csv_archive(archive_dir)?;
-        messages::info(&format!("Using latest local archive: {}", archive_path.display()));
+        messages::info(&format!(
+            "Using latest local archive: {}",
+            archive_path.display()
+        ));
         let temp_dir = extract_archive_to_temp(&archive_path)?;
         return Ok((temp_dir, version));
     }
@@ -42,9 +45,7 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
         || license_key.is_empty()
         || license_key == "CHANGE ME"
     {
-        messages::error(
-            "MaxMind account ID or license key not set in config.",
-        );
+        messages::error("MaxMind account ID or license key not set in config.");
         bail!("MaxMind credentials not configured");
     }
 
@@ -89,7 +90,10 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
         archive_dir.join(format!("GeoLite2-Country-CSV_{version}.zip.sha256"));
 
     if archive_path.exists() && checksum_path.exists() {
-        messages::info(&format!("Reusing local copy: {}", archive_path.display()));
+        messages::info(&format!(
+            "Reusing local copy: {}",
+            archive_path.display()
+        ));
         let temp_dir = extract_archive_to_temp(&archive_path)?;
         return Ok((temp_dir, version));
     }
@@ -314,5 +318,9 @@ fn extract_version(content_disposition: &str) -> Option<String> {
         .take_while(|c| c.is_ascii_digit())
         .collect();
 
-    if digits.len() == 8 { Some(digits) } else { None }
+    if digits.len() == 8 {
+        Some(digits)
+    } else {
+        None
+    }
 }
