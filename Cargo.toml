@@ -35,3 +35,5 @@ fern = { version = "0.7.1", features = ["chrono"] }
 [[bin]]
 name = "xtgeoip-docgen"
 path = "src/bin/xtgeoip-docgen.rs"
+name = "xtgeoip-tests"
+path = "src/bin/xtgeoip-tests.rs"
