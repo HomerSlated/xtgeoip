@@ -6,7 +6,6 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use log::{error, info};
 use reqwest::{blocking::Client, header::CONTENT_DISPOSITION};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
@@ -28,7 +27,7 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
         fs::create_dir_all(archive_dir)?;
         let (archive_path, version) =
             find_latest_local_csv_archive(archive_dir)?;
-        info!("Using latest local archive: {}", archive_path.display());
+        messages::info(&format!("Using latest local archive: {}", archive_path.display()));
         let temp_dir = extract_archive_to_temp(&archive_path)?;
         return Ok((temp_dir, version));
     }
@@ -43,9 +42,8 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
         || license_key.is_empty()
         || license_key == "CHANGE ME"
     {
-        error!(
-            "Error: MaxMind account ID or license key not set in config. \
-             Skipping fetch."
+        messages::error(
+            "MaxMind account ID or license key not set in config.",
         );
         bail!("MaxMind credentials not configured");
     }
@@ -60,7 +58,7 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
         ))
         .build()?;
 
-    info!("Checking remote archive version...");
+    messages::info("Checking remote archive version...");
 
     let resp = client
         .get(format!("{maxmind_url}?suffix=zip"))
@@ -83,7 +81,7 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
         anyhow::anyhow!("Failed to parse version from filename")
     })?;
 
-    info!("Remote archive version: {version}");
+    messages::info(&format!("Remote archive version: {version}"));
 
     let archive_path =
         archive_dir.join(format!("GeoLite2-Country-CSV_{version}.zip"));
@@ -91,12 +89,12 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
         archive_dir.join(format!("GeoLite2-Country-CSV_{version}.zip.sha256"));
 
     if archive_path.exists() && checksum_path.exists() {
-        info!("Reusing local copy: {}", archive_path.display());
+        messages::info(&format!("Reusing local copy: {}", archive_path.display()));
         let temp_dir = extract_archive_to_temp(&archive_path)?;
         return Ok((temp_dir, version));
     }
 
-    info!("No local copy of this version. Downloading...");
+    messages::info("No local copy of this version. Downloading...");
 
     // Stream archive directly to file + hash while copying
     let mut archive_file =
@@ -156,13 +154,13 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
         );
     }
 
-    info!("Checksum verification successful.");
+    messages::info("Checksum verification successful.");
 
     // Save checksum
     fs::write(&checksum_path, checksum_text)
         .context("Failed to save checksum")?;
 
-    info!("Saved archive as {}", archive_path.display());
+    messages::info(&format!("Saved archive as {}", archive_path.display()));
 
     let temp_dir = extract_archive_to_temp(&archive_path)?;
     Ok((temp_dir, version))
@@ -296,12 +294,25 @@ impl<'a, W: Write> Write for HashingWriter<'a, W> {
     }
 }
 
-/// Extracts version/date from filename like:
-/// `GeoLite2-Country-CSV_20260227.zip`
-fn extract_version(filename: &str) -> Option<String> {
-    filename
-        .split('_')
-        .nth(1)
-        .and_then(|s| s.strip_suffix(".zip"))
-        .map(|s| s.to_string())
+/// Extracts the 8-digit date version from a Content-Disposition header.
+///
+/// Handles: `attachment; filename=GeoLite2-Country-CSV_20260227.zip`
+/// and:     `attachment; filename="GeoLite2-Country-CSV_20260227.zip"`
+fn extract_version(content_disposition: &str) -> Option<String> {
+    let filename = content_disposition
+        .split(';')
+        .map(str::trim)
+        .find(|part| part.to_ascii_lowercase().starts_with("filename="))?
+        .splitn(2, '=')
+        .nth(1)?
+        .trim_matches('"');
+
+    // Filename is now e.g. "GeoLite2-Country-CSV_20260227.zip"
+    let version_part = filename.split('_').nth(1)?;
+    let digits: String = version_part
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+
+    if digits.len() == 8 { Some(digits) } else { None }
 }
