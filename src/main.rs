@@ -24,20 +24,18 @@ use crate::{
     action::{Action, run_action},
     cli::Cli,
     config::load_config,
-    messages::{error, init_logger, log_early_error},
+    messages::{init_logger, log_early_error},
 };
 
 fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
     crate::cli::normalize_cli_to_action(cli)
 }
 
-fn fail(msg: &str) -> anyhow::Error {
-    error(msg);
-    anyhow::anyhow!(msg.to_string())
-}
-
 fn run(cli: Cli) -> Result<()> {
-    let action = normalize_cli_to_action(&cli)?;
+    let action = normalize_cli_to_action(&cli).map_err(|e| {
+        eprintln!("Error: {e}");
+        e
+    })?;
 
     match action {
         Some(Action::Conf(conf_action)) => {
@@ -62,7 +60,9 @@ fn run(cli: Cli) -> Result<()> {
         None => {
             Cli::command().print_help()?;
             println!();
-            return Err(fail("No command or top-level action specified"));
+            let e = anyhow::anyhow!("No command or top-level action specified");
+            eprintln!("Error: {e}");
+            return Err(e);
         }
     }
 
