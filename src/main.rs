@@ -48,6 +48,18 @@ fn run(cli: Cli) -> Result<()> {
                 e
             })?;
 
+            if let Some(threads) = cfg
+                .processing
+                .as_ref()
+                .and_then(|p| p.threads)
+                .filter(|&t| t > 0)
+            {
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(threads)
+                    .build_global()
+                    .ok();
+            }
+
             if let Some(log_file) =
                 cfg.logging.as_ref().map(|l| l.log_file.as_str())
             {

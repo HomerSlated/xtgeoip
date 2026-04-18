@@ -32,10 +32,17 @@ pub struct Logging {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct Processing {
+    /// Number of Rayon worker threads. 0 or absent = use all available cores.
+    pub threads: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct Config {
     pub paths: Paths,
     pub maxmind: MaxMind,
     pub logging: Option<Logging>,
+    pub processing: Option<Processing>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
