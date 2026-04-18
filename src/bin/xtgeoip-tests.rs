@@ -5,8 +5,7 @@
 //!   key: f  → must exit non-zero
 
 use std::{
-    env,
-    fs,
+    env, fs,
     process::{self, Command},
 };
 
@@ -66,7 +65,11 @@ fn main() -> anyhow::Result<()> {
         }
 
         let expected_pass = tc.key == "p";
-        let expect_label = if expected_pass { "exit 0" } else { "exit non-0" };
+        let expect_label = if expected_pass {
+            "exit 0"
+        } else {
+            "exit non-0"
+        };
 
         print!("[{id}] {} (expect {}) ... ", tc.cmd, expect_label);
 
@@ -87,10 +90,7 @@ fn main() -> anyhow::Result<()> {
             if rebuild_after_clean
                 && did_succeed
                 && cmd_args.iter().any(|a| *a == "-c")
-                && cmd_args
-                    .first()
-                    .map(|a| a.starts_with('-'))
-                    .unwrap_or(true)
+                && cmd_args.first().map(|a| a.starts_with('-')).unwrap_or(true)
             {
                 print!("  [rebuild] xtgeoip build ... ");
                 let ok = Command::new("sudo")

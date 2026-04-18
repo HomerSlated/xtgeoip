@@ -93,8 +93,7 @@ pub fn build(
     // -------------------------
     // Detect overwrites
     // -------------------------
-    let overwrite_count =
-        files_to_write.iter().filter(|f| f.exists()).count();
+    let overwrite_count = files_to_write.iter().filter(|f| f.exists()).count();
     if overwrite_count > 0 {
         messages::warn(&format!(
             "{} country files (iv4/iv6) will be overwritten.",
@@ -126,8 +125,7 @@ pub fn build(
         }
     }
     if write_errors > 0 {
-        let msg =
-            format!("{} file write(s) failed during build", write_errors);
+        let msg = format!("{} file write(s) failed during build", write_errors);
         messages::error(&msg);
         bail!(msg);
     }
@@ -141,8 +139,7 @@ pub fn build(
     // -------------------------
     // Blake3 manifest (single write, no re-read of files)
     // -------------------------
-    let manifest_name =
-        format!("GeoLite2-Country-bin_{version}.blake3");
+    let manifest_name = format!("GeoLite2-Country-bin_{version}.blake3");
     let manifest_path = target_dir.join(&manifest_name);
     let manifest_content: String = checksums
         .iter()
@@ -157,14 +154,10 @@ pub fn build(
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| {
-            let ext =
-                p.extension().and_then(OsStr::to_str).unwrap_or("");
-            let fname =
-                p.file_name().and_then(OsStr::to_str).unwrap_or("");
+            let ext = p.extension().and_then(OsStr::to_str).unwrap_or("");
+            let fname = p.file_name().and_then(OsStr::to_str).unwrap_or("");
             fname != "version"
-                && (ext == "iv4"
-                    || ext == "iv6"
-                    || ext == "blake3")
+                && (ext == "iv4" || ext == "iv6" || ext == "blake3")
         })
         .collect();
 
@@ -194,8 +187,8 @@ pub fn build(
             target_dir.display()
         ));
         messages::warn(&format!(
-            "Please run `xtgeoip build -c -f` or manually delete files \
-             listed in \"{}\" for a clean install.",
+            "Please run `xtgeoip build -c -f` or manually delete files listed \
+             in \"{}\" for a clean install.",
             orphaned_path.display()
         ));
     }
@@ -203,10 +196,7 @@ pub fn build(
     // -------------------------
     // Summary
     // -------------------------
-    messages::info(&format!(
-        "Countries processed: {}",
-        country_name.len()
-    ));
+    messages::info(&format!("Countries processed: {}", country_name.len()));
     let ipv4_count: usize =
         country_ranges.values().map(|cr| cr.pool_v4.len()).sum();
     let ipv6_count: usize =
@@ -223,10 +213,8 @@ pub fn build(
 fn load_countries(
     source_dir: &Path,
     legacy: bool,
-) -> anyhow::Result<(HashMap<String, String>, BTreeMap<String, String>)>
-{
-    let file_path =
-        source_dir.join("GeoLite2-Country-Locations-en.csv");
+) -> anyhow::Result<(HashMap<String, String>, BTreeMap<String, String>)> {
+    let file_path = source_dir.join("GeoLite2-Country-Locations-en.csv");
     let file = File::open(&file_path)?;
     // Safety: the CSV file is not modified while we hold this mapping
     let mmap = unsafe { Mmap::map(&file)? };
@@ -277,12 +265,10 @@ fn load_countries(
 
     for record in rdr.records() {
         let rec = record?;
-        let geoname =
-            rec.get(idx_geoname).unwrap_or("").to_string();
+        let geoname = rec.get(idx_geoname).unwrap_or("").to_string();
         let iso = rec.get(idx_iso).unwrap_or("").to_string();
         let name = rec.get(idx_name).unwrap_or("").to_string();
-        let continent =
-            rec.get(idx_continent).unwrap_or("").to_string();
+        let continent = rec.get(idx_continent).unwrap_or("").to_string();
 
         if !iso.is_empty() {
             country_id.insert(geoname.clone(), iso.clone());
@@ -296,17 +282,11 @@ fn load_countries(
             // non-existent EU country code. Correct behaviour maps
             // these to O1 (Other Country, ISO 3166 reserved).
             if legacy {
-                country_id
-                    .insert(geoname.clone(), continent.clone());
-                country_name
-                    .entry(continent.clone())
-                    .or_insert(name);
+                country_id.insert(geoname.clone(), continent.clone());
+                country_name.entry(continent.clone()).or_insert(name);
             } else {
-                country_id
-                    .insert(geoname.clone(), "O1".to_string());
-                country_name
-                    .entry("O1".to_string())
-                    .or_insert(name);
+                country_id.insert(geoname.clone(), "O1".to_string());
+                country_name.entry("O1".to_string()).or_insert(name);
             }
         } else {
             country_id.insert(geoname.clone(), "".to_string());
@@ -325,31 +305,18 @@ fn parse_block_indices(
     file_name: &str,
 ) -> anyhow::Result<BlockIndices> {
     Ok(BlockIndices {
-        net: headers
-            .iter()
-            .position(|h| h == "network")
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "network column missing in {}",
-                    file_name
-                )
-            })?,
-        id: headers
-            .iter()
-            .position(|h| h == "geoname_id")
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "geoname_id column missing in {}",
-                    file_name
-                )
-            })?,
+        net: headers.iter().position(|h| h == "network").ok_or_else(|| {
+            anyhow::anyhow!("network column missing in {}", file_name)
+        })?,
+        id: headers.iter().position(|h| h == "geoname_id").ok_or_else(
+            || anyhow::anyhow!("geoname_id column missing in {}", file_name),
+        )?,
         rid: headers
             .iter()
             .position(|h| h == "registered_country_geoname_id")
             .ok_or_else(|| {
                 anyhow::anyhow!(
-                    "registered_country_geoname_id column missing \
-                     in {}",
+                    "registered_country_geoname_id column missing in {}",
                     file_name
                 )
             })?,
@@ -407,8 +374,7 @@ fn load_blocks_v4(
             let proxy = rec.get(idx.proxy).unwrap_or("") == "1";
             let sat = rec.get(idx.sat).unwrap_or("") == "1";
             let network = rec.get(idx.net).unwrap_or("");
-            let cc =
-                resolve_country_code(proxy, sat, id, rid, country_id);
+            let cc = resolve_country_code(proxy, sat, id, rid, country_id);
             let range = if network.is_empty() {
                 None
             } else {
@@ -420,9 +386,7 @@ fn load_blocks_v4(
 
     let n = skipped.load(Ordering::Relaxed);
     if n > 0 {
-        messages::warn(&format!(
-            "{n} malformed rows skipped in {FILE_NAME}"
-        ));
+        messages::warn(&format!("{n} malformed rows skipped in {FILE_NAME}"));
     }
 
     let mut pools: HashMap<String, Vec<(u32, u32)>> = HashMap::new();
@@ -470,8 +434,7 @@ fn load_blocks_v6(
             let proxy = rec.get(idx.proxy).unwrap_or("") == "1";
             let sat = rec.get(idx.sat).unwrap_or("") == "1";
             let network = rec.get(idx.net).unwrap_or("");
-            let cc =
-                resolve_country_code(proxy, sat, id, rid, country_id);
+            let cc = resolve_country_code(proxy, sat, id, rid, country_id);
             let range = if network.is_empty() {
                 None
             } else {
@@ -483,13 +446,10 @@ fn load_blocks_v6(
 
     let n = skipped.load(Ordering::Relaxed);
     if n > 0 {
-        messages::warn(&format!(
-            "{n} malformed rows skipped in {FILE_NAME}"
-        ));
+        messages::warn(&format!("{n} malformed rows skipped in {FILE_NAME}"));
     }
 
-    let mut pools: HashMap<String, Vec<(u128, u128)>> =
-        HashMap::new();
+    let mut pools: HashMap<String, Vec<(u128, u128)>> = HashMap::new();
     for (cc, range_opt) in parsed {
         if let Some(range) = range_opt {
             pools.entry(cc).or_default().push(range);
@@ -541,10 +501,9 @@ fn cidr_to_range_ipv4(cidr: &str) -> Option<(u32, u32)> {
 fn cidr_to_range_ipv6(cidr: &str) -> Option<(u128, u128)> {
     let net: IpNetwork = cidr.parse().ok()?;
     match net {
-        IpNetwork::V6(v6) => Some((
-            u128::from(v6.network()),
-            u128::from(v6.broadcast()),
-        )),
+        IpNetwork::V6(v6) => {
+            Some((u128::from(v6.network()), u128::from(v6.broadcast())))
+        }
         _ => None,
     }
 }
@@ -558,8 +517,7 @@ fn merge_ranges_v4(ranges: &[(u32, u32)]) -> Vec<(u32, u32)> {
     }
     let mut sorted = ranges.to_vec();
     sorted.sort_unstable_by_key(|r| r.0);
-    let mut merged: Vec<(u32, u32)> =
-        Vec::with_capacity(sorted.len());
+    let mut merged: Vec<(u32, u32)> = Vec::with_capacity(sorted.len());
     for &(start, end) in &sorted {
         if let Some(last) = merged.last_mut()
             && start <= last.1.saturating_add(1)
@@ -578,8 +536,7 @@ fn merge_ranges_v6(ranges: &[(u128, u128)]) -> Vec<(u128, u128)> {
     }
     let mut sorted = ranges.to_vec();
     sorted.sort_unstable_by_key(|r| r.0);
-    let mut merged: Vec<(u128, u128)> =
-        Vec::with_capacity(sorted.len());
+    let mut merged: Vec<(u128, u128)> = Vec::with_capacity(sorted.len());
     for &(start, end) in &sorted {
         if let Some(last) = merged.last_mut()
             && start <= last.1.saturating_add(1)

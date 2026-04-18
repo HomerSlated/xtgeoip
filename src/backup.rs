@@ -6,9 +6,9 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail};
+use blake3;
 use flate2::{Compression, write::GzEncoder};
 use glob::glob;
-use blake3;
 use tar::Builder;
 
 use crate::{
@@ -219,10 +219,7 @@ fn delete_all(data_dir: &Path, files: &[PathBuf]) -> Result<()> {
         .filter(|f| fs::remove_file(f).is_err())
         .collect();
     if !failed.is_empty() {
-        let msg = format!(
-            "{} file(s) could not be deleted",
-            failed.len()
-        );
+        let msg = format!("{} file(s) could not be deleted", failed.len());
         error(&msg);
         // TODO: handle write failure to orphaned file
         let orphaned_path = data_dir.join("orphaned");
