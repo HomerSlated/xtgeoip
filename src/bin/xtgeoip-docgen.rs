@@ -131,7 +131,6 @@ fn main() -> anyhow::Result<()> {
 
     fs::write("docs/generated/usage.md", generate_usage_md(&spec)?)?;
     fs::write("docs/generated/tldr.md", generate_tldr_md(&spec)?)?;
-    fs::write("docs/generated/scd", generate_scd(&spec)?)?;
     fs::write("docs/generated/xtgeoip.1", generate_manpage(&spec)?)?;
     fs::write(
         "src/generated/error_text.rs",
@@ -377,127 +376,6 @@ fn generate_tldr_md(spec: &Spec) -> anyhow::Result<String> {
         };
         add(exs);
     }
-
-    Ok(out)
-}
-
-/* ---------------- SCD ---------------- */
-
-fn generate_scd(spec: &Spec) -> anyhow::Result<String> {
-    let prog = &spec.meta.program;
-    let mut out = String::new();
-
-    // Title line
-    out.push_str(&format!(
-        "{}(1)\n\n",
-        prog.to_uppercase()
-    ));
-
-    // NAME
-    out.push_str("# NAME\n\n");
-    out.push_str(&format!("{} - {}\n\n", prog, spec.meta.summary));
-
-    // SYNOPSIS
-    out.push_str("# SYNOPSIS\n\n");
-    if let Some(cmd) = &spec.top_level {
-        if let CommandSpec::FlagCommand { allowed_flags, .. } = cmd {
-            let flag_str: String = allowed_flags
-                .iter()
-                .map(|f| format!("[*-{}*]", f))
-                .collect::<Vec<_>>()
-                .join(" ");
-            out.push_str(&format!("*{}* {}++\n", prog, flag_str));
-        }
-    }
-    out.push_str(&format!("*{}* _command_ [_options_]\n\n", prog));
-
-    // DESCRIPTION
-    out.push_str("# DESCRIPTION\n\n");
-    out.push_str(&format!(
-        "*{}* downloads MaxMind GeoLite2 CSV databases and converts them into\n\
-         binary IP range files for the Linux _xt\\_geoip_ kernel module.\n\n",
-        prog
-    ));
-
-    // COMMANDS
-    out.push_str("# COMMANDS\n\n");
-    for (name, cmd) in &spec.commands {
-        match cmd {
-            CommandSpec::FlagCommand { summary, allowed_flags, .. } => {
-                let flag_str: String = allowed_flags
-                    .iter()
-                    .map(|f| format!("[*-{}*]", f))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                out.push_str(&format!("*{}* {}\n\t{}\n\n", name, flag_str, summary));
-            }
-            CommandSpec::SelectorCommand {
-                summary, positional, ..
-            } => {
-                let choices: String = positional
-                    .choices
-                    .keys()
-                    .map(|k| format!("*-{}*", k))
-                    .collect::<Vec<_>>()
-                    .join("|");
-                out.push_str(&format!(
-                    "*{}* {}\n\t{}\n\n",
-                    name, choices, summary
-                ));
-                for (choice, ch) in &positional.choices {
-                    out.push_str(&format!(
-                        "\t*-{}*\n\t\t{}\n\n",
-                        choice, ch.summary
-                    ));
-                }
-            }
-        }
-    }
-
-    // OPTIONS
-    out.push_str("# OPTIONS\n\n");
-    for (short, fd) in &spec.flags {
-        out.push_str(&format!(
-            "*-{}*, *--{}*\n\t{}\n\n",
-            short, fd.long, fd.summary
-        ));
-    }
-
-    // EXAMPLES
-    out.push_str("# EXAMPLES\n\n");
-    out.push_str("```\n");
-
-    {
-        let mut add_valid = |exs: &[Example]| {
-            for ex in exs {
-                if ex.valid {
-                    out.push_str(&format!("{}\n", ex.cmd));
-                }
-            }
-        };
-
-        if let Some(cmd) = &spec.top_level {
-            let exs = match cmd {
-                CommandSpec::FlagCommand { examples, .. }
-                | CommandSpec::SelectorCommand { examples, .. } => examples,
-            };
-            add_valid(exs);
-        }
-
-        for cmd in spec.commands.values() {
-            let exs = match cmd {
-                CommandSpec::FlagCommand { examples, .. }
-                | CommandSpec::SelectorCommand { examples, .. } => examples,
-            };
-            add_valid(exs);
-        }
-    }
-
-    out.push_str("```\n\n");
-
-    // SEE ALSO
-    out.push_str("# SEE ALSO\n\n");
-    out.push_str("*xt\\_geoip*(8), *iptables*(8)\n");
 
     Ok(out)
 }

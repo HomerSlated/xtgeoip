@@ -9,24 +9,29 @@ use crate::{action::Action, config::ConfAction};
 #[command(
     name = "xtgeoip",
     version,
-    about = "Downloads and builds GeoIP databases",
+    about = "Build and manage xt_geoip data from MaxMind GeoLite2 CSVs",
     propagate_version = false,
     disable_help_subcommand = true,
     args_conflicts_with_subcommands = true
 )]
 pub struct Cli {
+    /// Back up current database before replacing it
     #[arg(short, long)]
     pub backup: bool,
 
+    /// Delete current binary database files
     #[arg(short, long)]
     pub clean: bool,
 
+    /// Force the operation (overrides safety checks)
     #[arg(short, long)]
     pub force: bool,
 
+    /// Prune old bin archives (requires --backup)
     #[arg(short, long)]
     pub prune: bool,
 
+    /// Enable legacy mode (historical compatibility only)
     #[arg(short = 'l', long)]
     pub legacy: bool,
 
@@ -36,60 +41,75 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    /// Fetch then build the full pipeline
     #[command(disable_version_flag = true)]
     Run {
+        /// Back up current database before replacing it
         #[arg(short, long)]
         backup: bool,
 
+        /// Delete current binary database files before building
         #[arg(short, long)]
         clean: bool,
 
+        /// Force the operation (overrides safety checks)
         #[arg(short, long)]
         force: bool,
 
+        /// Prune old CSV archives after fetching
         #[arg(short, long)]
         prune: bool,
 
+        /// Enable legacy mode (historical compatibility only)
         #[arg(short, long)]
         legacy: bool,
     },
 
+    /// Build binary database from local CSV archive
     #[command(disable_version_flag = true)]
     Build {
+        /// Back up current database before replacing it
         #[arg(short, long)]
         backup: bool,
 
+        /// Delete current binary database files before building
         #[arg(short, long)]
         clean: bool,
 
+        /// Force the operation (overrides safety checks)
         #[arg(short, long)]
         force: bool,
 
+        /// Prune old bin archives after backup (requires --backup)
         #[arg(short, long)]
         prune: bool,
 
+        /// Enable legacy mode (historical compatibility only)
         #[arg(short, long)]
         legacy: bool,
     },
 
+    /// Download GeoLite2 CSV archive from MaxMind
     #[command(disable_version_flag = true)]
     Fetch {
+        /// Prune old CSV archives after fetching
         #[arg(short, long)]
         prune: bool,
 
-        #[arg(short, long)]
+        #[arg(short, long, hide = true)]
         backup: bool,
 
-        #[arg(short, long)]
+        #[arg(short, long, hide = true)]
         clean: bool,
 
-        #[arg(short, long)]
+        #[arg(short, long, hide = true)]
         force: bool,
 
-        #[arg(short, long)]
+        #[arg(short, long, hide = true)]
         legacy: bool,
     },
 
+    /// Manage system configuration
     #[command(group(
         clap::ArgGroup::new("conf_action")
             .required(true)
@@ -97,12 +117,15 @@ pub enum Commands {
     ))]
     #[command(disable_version_flag = true)]
     Conf {
+        /// Show default (example) configuration
         #[arg(short = 'd', long = "default", group = "conf_action")]
         default: bool,
 
+        /// Show system configuration
         #[arg(short = 's', long = "show", group = "conf_action")]
         show: bool,
 
+        /// Open system configuration in $EDITOR
         #[arg(short = 'e', long = "edit", group = "conf_action")]
         edit: bool,
     },
