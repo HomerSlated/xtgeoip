@@ -247,7 +247,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
         let p = cli.prune;
         let f = cli.force;
 
-        if !b && !c && !p {
+        if !b && !c && !p && !f {
             return Ok(None);
         }
 

@@ -205,19 +205,39 @@ fn load_countries(
     let idx_geoname = headers
         .iter()
         .position(|h| h == "geoname_id")
-        .expect("geoname_id column missing");
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "geoname_id column missing in \
+                 GeoLite2-Country-Locations-en.csv"
+            )
+        })?;
     let idx_iso = headers
         .iter()
         .position(|h| h == "country_iso_code")
-        .expect("country_iso_code column missing");
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "country_iso_code column missing in \
+                 GeoLite2-Country-Locations-en.csv"
+            )
+        })?;
     let idx_name = headers
         .iter()
         .position(|h| h == "country_name")
-        .expect("country_name column missing");
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "country_name column missing in \
+                 GeoLite2-Country-Locations-en.csv"
+            )
+        })?;
     let idx_continent = headers
         .iter()
         .position(|h| h == "continent_code")
-        .expect("continent_code column missing");
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "continent_code column missing in \
+                 GeoLite2-Country-Locations-en.csv"
+            )
+        })?;
 
     let mut country_id = BTreeMap::new();
     let mut country_name = BTreeMap::new();
@@ -278,23 +298,42 @@ fn load_blocks_parallel(
     let idx_net = headers
         .iter()
         .position(|h| h == "network")
-        .expect("network column missing");
+        .ok_or_else(|| {
+            anyhow::anyhow!("network column missing in {}", file_name)
+        })?;
     let idx_id = headers
         .iter()
         .position(|h| h == "geoname_id")
-        .expect("geoname_id column missing");
+        .ok_or_else(|| {
+            anyhow::anyhow!("geoname_id column missing in {}", file_name)
+        })?;
     let idx_rid = headers
         .iter()
         .position(|h| h == "registered_country_geoname_id")
-        .expect("registered_country_geoname_id column missing");
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "registered_country_geoname_id column missing in {}",
+                file_name
+            )
+        })?;
     let idx_proxy = headers
         .iter()
         .position(|h| h == "is_anonymous_proxy")
-        .expect("is_anonymous_proxy column missing");
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "is_anonymous_proxy column missing in {}",
+                file_name
+            )
+        })?;
     let idx_sat = headers
         .iter()
         .position(|h| h == "is_satellite_provider")
-        .expect("is_satellite_provider column missing");
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "is_satellite_provider column missing in {}",
+                file_name
+            )
+        })?;
 
     let records: Vec<_> = rdr.records().collect::<Result<_, _>>()?;
 
@@ -410,10 +449,11 @@ fn merge_ranges_v4(ranges: &[(u32, u32)]) -> Vec<(u32, u32)> {
     }
     let mut sorted = ranges.to_vec();
     sorted.sort_unstable_by_key(|r| r.0);
-    let mut merged = vec![sorted[0]];
-    for &(start, end) in &sorted[1..] {
-        let last = merged.last_mut().unwrap();
-        if start <= last.1.saturating_add(1) {
+    let mut merged: Vec<(u32, u32)> = Vec::with_capacity(sorted.len());
+    for &(start, end) in &sorted {
+        if let Some(last) = merged.last_mut()
+            && start <= last.1.saturating_add(1)
+        {
             last.1 = last.1.max(end);
         } else {
             merged.push((start, end));
@@ -428,10 +468,11 @@ fn merge_ranges_v6(ranges: &[(u128, u128)]) -> Vec<(u128, u128)> {
     }
     let mut sorted = ranges.to_vec();
     sorted.sort_unstable_by_key(|r| r.0);
-    let mut merged = vec![sorted[0]];
-    for &(start, end) in &sorted[1..] {
-        let last = merged.last_mut().unwrap();
-        if start <= last.1.saturating_add(1) {
+    let mut merged: Vec<(u128, u128)> = Vec::with_capacity(sorted.len());
+    for &(start, end) in &sorted {
+        if let Some(last) = merged.last_mut()
+            && start <= last.1.saturating_add(1)
+        {
             last.1 = last.1.max(end);
         } else {
             merged.push((start, end));

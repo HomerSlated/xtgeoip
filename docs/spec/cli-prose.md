@@ -40,7 +40,7 @@ Certain flags can be combined, such as -b (backup) and -c (clean). In this case,
 
 Some flags are only relevant in certain contexts. For example, the -f (force) flag is only relevant in the context of backup and clean, and will raise an error if used in the context of fetch (downloading cannot be forced, as it either succeeds or fails). If force is used in combination with both backup and clean, it will raise an error and exit, as the request is ambiguous (do you want to force backup, or force clean, or both?). In order to avoid surprising the user with unexpected results, the intent must be explicit. Note that if you need to force both, you will therefore need to run the program twice, once with "-b -f", then again with "-c -f".
 
-Similarly, the -p (prune) flag is only relevant in the contexts of fetch and backup. In the case of backup, it will prune older tarballs from /var/lib/xt_geoip/, while in the case of fetch, it will prune older zip files from /var/lib/xt_geoip/. Using the -p flag in any other context will raise an error and exit, e.g. in combination with build (as build neither downloads zip files nor creates tarballs). As with the force flag, if prune is used in combination with both fetch and backup, it will raise an error and exit, for the same reason of ambiguity.
+Similarly, the -p (prune) flag is only relevant in the contexts of fetch and backup. In the case of backup, it will prune older bin tarballs from /var/lib/xt_geoip/, while in the case of fetch, it will prune older CSV zip files from /var/lib/xt_geoip/. The prune target is therefore determined by context: backup implies bin archives; fetch implies CSV archives. This extends to compound operations: `run -p` prunes CSV archives (after the implicit fetch, before build); `build -b -p` prunes bin archives (after backup, before build). Using -p without a fetch or backup context will raise an error and exit (e.g. `build -p` without -b). As with the force flag, if prune is used in a context where both fetch and backup are active, it will raise an error and exit for the same reason of ambiguity (ambiguous prune target).
 
 ## Legacy Mode
 
@@ -74,7 +74,7 @@ Commands (only one of): build
                         Download the latest database
 
                         run
-                        Optional flags: -b, -c, -f
+                        Optional flags: -b, -c, -f, -l, -p
                         Fetch then build
 
                         conf

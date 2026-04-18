@@ -213,6 +213,32 @@ pub fn backup(data_dir: &Path, backup_dir: &Path, force: bool) -> Result<()> {
     Ok(())
 }
 
+fn delete_all(data_dir: &Path, files: &[PathBuf]) -> Result<()> {
+    let failed: Vec<&PathBuf> = files
+        .iter()
+        .filter(|f| fs::remove_file(f).is_err())
+        .collect();
+    if !failed.is_empty() {
+        let msg = format!(
+            "{} file(s) could not be deleted",
+            failed.len()
+        );
+        error(&msg);
+        // TODO: handle write failure to orphaned file
+        let orphaned_path = data_dir.join("orphaned");
+        let _ = fs::write(
+            &orphaned_path,
+            failed
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
+        bail!(msg);
+    }
+    Ok(())
+}
+
 pub fn delete(data_dir: &Path, force: bool) -> Result<()> {
     if force {
         let (files, _version) = gather_files_force(data_dir)?;
@@ -221,13 +247,12 @@ pub fn delete(data_dir: &Path, force: bool) -> Result<()> {
             error(msg);
             bail!(msg);
         }
-        for file in files {
-            fs::remove_file(&file)?;
-        }
         let orphan_path = data_dir.join("orphaned");
-        if orphan_path.exists() {
-            fs::remove_file(orphan_path)?;
-        }
+        let all_files: Vec<PathBuf> = files
+            .into_iter()
+            .chain(orphan_path.exists().then_some(orphan_path))
+            .collect();
+        delete_all(data_dir, &all_files)?;
         info(&format!(
             "Force deleted binary data files from {}",
             data_dir.display()
@@ -236,11 +261,11 @@ pub fn delete(data_dir: &Path, force: bool) -> Result<()> {
     }
 
     let (files, _version, manifest_path) = gather_files_verified(data_dir)?;
-    for file in &files {
-        fs::remove_file(file)?;
-    }
-    fs::remove_file(version_path(data_dir))?;
-    fs::remove_file(manifest_path)?;
+    let all_files: Vec<PathBuf> = files
+        .into_iter()
+        .chain([version_path(data_dir), manifest_path])
+        .collect();
+    delete_all(data_dir, &all_files)?;
 
     info(&format!(
         "Deleted old binary data files from {}",

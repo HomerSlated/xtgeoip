@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 use zip::ZipArchive;
 
-use crate::config::Config;
+use crate::{config::Config, messages};
 
 #[derive(Clone, Copy, Debug)]
 pub enum FetchMode {
@@ -141,7 +141,13 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
 
     // Verify checksum
     if actual_hash != expected_hash {
-        fs::remove_file(&archive_path).ok(); // remove partial file
+        if let Err(e) = fs::remove_file(&archive_path) {
+            messages::warn(&format!(
+                "Failed to remove corrupt archive {}: {}",
+                archive_path.display(),
+                e
+            ));
+        }
         bail!(
             "Checksum verification failed for {}: expected {}, got {}",
             archive_path.display(),

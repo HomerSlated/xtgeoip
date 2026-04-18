@@ -96,7 +96,6 @@ fn main() -> Result<()> {
             process::exit(1);
         }
 
-        // eprintln!("Error: {}", e);
         process::exit(1);
     }
 
