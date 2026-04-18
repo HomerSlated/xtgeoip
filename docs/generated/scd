@@ -1,19 +1,84 @@
-Command: top_level
-Summary: Top level xtgeoip command
-Flags: ["b", "c", "p", "f"]
+XTGEOIP(1)
 
-Command: build
-Summary: Build xt_geoip database
-Flags: ["b", "c", "p", "f", "l"]
+# NAME
 
-Command: conf
-Usage: xtgeoip conf <-s|-d|-e>
+xtgeoip - Build and manage xt_geoip data from MaxMind GeoLite2 CSVs.
 
-Command: fetch
-Summary: Fetch GeoLite2 data files
-Flags: ["p"]
+# SYNOPSIS
 
-Command: run
-Summary: Run full pipeline
-Flags: ["b", "c", "p", "f", "l"]
+*xtgeoip* [*-b*] [*-c*] [*-p*] [*-f*]++
+*xtgeoip* _command_ [_options_]
 
+# DESCRIPTION
+
+*xtgeoip* downloads MaxMind GeoLite2 CSV databases and converts them into
+binary IP range files for the Linux _xt\_geoip_ kernel module.
+
+# COMMANDS
+
+*build* [*-b*] [*-c*] [*-p*] [*-f*] [*-l*]
+	Build xt_geoip database
+
+*conf* *-d*|*-e*|*-s*
+	Manage configuration
+
+	*-d*
+		Delete configuration
+
+	*-e*
+		Edit configuration
+
+	*-s*
+		Show configuration
+
+*fetch* [*-p*]
+	Fetch GeoLite2 data files
+
+*run* [*-b*] [*-c*] [*-p*] [*-f*] [*-l*]
+	Run full pipeline
+
+# OPTIONS
+
+*-b*, *--backup*
+	Back up current database before replacing it.
+
+*-c*, *--clean*
+	Clean working files before continuing.
+
+*-f*, *--force*
+	Force the relevant operation when supported.
+
+*-l*, *--legacy*
+	Enable legacy mode.
+
+*-p*, *--prune*
+	Prune retained artifacts for the current operation.
+
+# EXAMPLES
+
+```
+xtgeoip -h
+xtgeoip -b
+xtgeoip -c
+xtgeoip -b -c
+xtgeoip -b -p
+xtgeoip build
+xtgeoip build -l
+xtgeoip build -b -p
+xtgeoip build -c -f
+xtgeoip build -b -c -p
+xtgeoip conf -s
+xtgeoip conf -d
+xtgeoip conf -e
+xtgeoip fetch
+xtgeoip fetch -p
+xtgeoip run
+xtgeoip run -l
+xtgeoip run -p
+xtgeoip run -c -p
+xtgeoip run -c -f
+```
+
+# SEE ALSO
+
+*xt\_geoip*(8), *iptables*(8)
