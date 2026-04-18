@@ -3,7 +3,7 @@ use std::{
     collections::BTreeMap,
     ffi::OsStr,
     fs::{self, File},
-    io::{BufWriter, Write, copy},
+    io::{BufWriter, Write},
     path::Path,
 };
 
@@ -84,7 +84,7 @@ pub fn build(
     // -------------------------
     // Write country files
     // -------------------------
-    let write_errors: Vec<_> = country_ranges
+    let write_results: Vec<anyhow::Result<(String, String)>> = country_ranges
         .par_iter()
         .flat_map(|(iso, cr)| {
             let base = target_dir.join(iso.to_uppercase());
@@ -93,15 +93,24 @@ pub fn build(
                 write_country_v6(&base, &cr.pool_v6),
             ]
         })
-        .filter_map(|r| r.err())
         .collect();
 
-    if !write_errors.is_empty() {
+    let mut checksums: Vec<(String, String)> =
+        Vec::with_capacity(write_results.len());
+    let mut write_errors = 0usize;
+    for result in write_results {
+        match result {
+            Ok(entry) => checksums.push(entry),
+            Err(_) => write_errors += 1,
+        }
+    }
+    if write_errors > 0 {
         let msg =
-            format!("{} file write(s) failed during build", write_errors.len());
+            format!("{} file write(s) failed during build", write_errors);
         messages::error(&msg);
         bail!(msg);
     }
+    checksums.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
     // -------------------------
     // Version file
@@ -116,18 +125,8 @@ pub fn build(
     let checksum_file = File::create(&checksum_path)?;
     let mut checksum_writer = BufWriter::new(checksum_file);
 
-    for iso in country_ranges.keys() {
-        for ext in ["iv4", "iv6"] {
-            let file_name = format!("{}.{}", iso.to_uppercase(), ext);
-            let file_path = target_dir.join(&file_name);
-
-            let mut file = File::open(&file_path)?;
-            let mut hasher = Sha256::new();
-            copy(&mut file, &mut hasher)?;
-            let digest = hasher.finalize();
-
-            writeln!(checksum_writer, "{:x}  {}", digest, file_name)?;
-        }
+    for (file_name, digest) in &checksums {
+        writeln!(checksum_writer, "{digest}  {file_name}")?;
     }
 
     // -------------------------
@@ -487,27 +486,49 @@ fn merge_ranges_v6(ranges: &[(u128, u128)]) -> Vec<(u128, u128)> {
 fn write_country_v4(
     file_base: &Path,
     ranges: &[(u32, u32)],
-) -> anyhow::Result<()> {
-    let file_name = file_base.with_extension("iv4");
-    let file = File::create(file_name)?;
+) -> anyhow::Result<(String, String)> {
+    let file_path = file_base.with_extension("iv4");
+    let file = File::create(&file_path)?;
+    let mut hasher = Sha256::new();
     let mut writer = BufWriter::new(file);
     for &(start, end) in ranges {
-        writer.write_all(&start.to_be_bytes())?;
-        writer.write_all(&end.to_be_bytes())?;
+        let sb = start.to_be_bytes();
+        let eb = end.to_be_bytes();
+        writer.write_all(&sb)?;
+        writer.write_all(&eb)?;
+        hasher.update(sb);
+        hasher.update(eb);
     }
-    Ok(())
+    writer.flush()?;
+    let fname = file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+    Ok((fname, format!("{:x}", hasher.finalize())))
 }
 
 fn write_country_v6(
     file_base: &Path,
     ranges: &[(u128, u128)],
-) -> anyhow::Result<()> {
-    let file_name = file_base.with_extension("iv6");
-    let file = File::create(file_name)?;
+) -> anyhow::Result<(String, String)> {
+    let file_path = file_base.with_extension("iv6");
+    let file = File::create(&file_path)?;
+    let mut hasher = Sha256::new();
     let mut writer = BufWriter::new(file);
     for &(start, end) in ranges {
-        writer.write_all(&start.to_be_bytes())?;
-        writer.write_all(&end.to_be_bytes())?;
+        let sb = start.to_be_bytes();
+        let eb = end.to_be_bytes();
+        writer.write_all(&sb)?;
+        writer.write_all(&eb)?;
+        hasher.update(sb);
+        hasher.update(eb);
     }
-    Ok(())
+    writer.flush()?;
+    let fname = file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+    Ok((fname, format!("{:x}", hasher.finalize())))
 }
