@@ -45,12 +45,11 @@ fn main() -> anyhow::Result<()> {
     for tc in &testcases {
         let id = tc.case_id.as_deref().unwrap_or("?");
 
-        if let Some(want) = filter_case {
-            if tc.case_id.as_deref() != Some(want) {
+        if let Some(want) = filter_case
+            && tc.case_id.as_deref() != Some(want) {
                 skipped += 1;
                 continue;
             }
-        }
 
         if filter_failed_only && tc.key != "f" {
             skipped += 1;
@@ -89,7 +88,7 @@ fn main() -> anyhow::Result<()> {
             // database is left in a usable state for subsequent tests.
             if rebuild_after_clean
                 && did_succeed
-                && cmd_args.iter().any(|a| *a == "-c")
+                && cmd_args.contains(&"-c")
                 && cmd_args.first().map(|a| a.starts_with('-')).unwrap_or(true)
             {
                 print!("  [rebuild] xtgeoip build ... ");

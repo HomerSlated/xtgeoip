@@ -160,26 +160,24 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
                  ex: &Example,
                  used: &mut BTreeSet<String>|
      -> anyhow::Result<()> {
-        if let Some(reason) = &ex.reason {
-            if !spec.reason_templates.contains_key(&reason.code) {
+        if let Some(reason) = &ex.reason
+            && !spec.reason_templates.contains_key(&reason.code) {
                 anyhow::bail!(
                     "Unknown reason code {} in {}",
                     reason.code,
                     scope
                 );
             }
-        }
 
         if !ex.valid {
             let maps_to = ex.maps_to.as_ref().ok_or_else(|| {
                 anyhow::anyhow!("Missing maps_to in invalid example {}", ex.cmd)
             })?;
 
-            if let Some(ec) = error_cases {
-                if !ec.contains_key(maps_to) {
+            if let Some(ec) = error_cases
+                && !ec.contains_key(maps_to) {
                     anyhow::bail!("Unknown error case {}", maps_to);
                 }
-            }
 
             used.insert(maps_to.clone());
         }
@@ -261,8 +259,8 @@ fn resolve_outcome(spec: &Spec, ex: &Example) -> String {
         return ex.outcome.clone().unwrap_or_else(|| "OK".into());
     }
 
-    if let Some(reason) = &ex.reason {
-        if let Some(t) = spec.reason_templates.get(&reason.code) {
+    if let Some(reason) = &ex.reason
+        && let Some(t) = spec.reason_templates.get(&reason.code) {
             let mut text = t.text.clone();
             if let Some(args) = &reason.args {
                 for (k, v) in args {
@@ -271,7 +269,6 @@ fn resolve_outcome(spec: &Spec, ex: &Example) -> String {
             }
             return text;
         }
-    }
 
     "ERROR".into()
 }
@@ -490,8 +487,8 @@ fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
 
     // SYNOPSIS
     out.push_str(".SH SYNOPSIS\n");
-    if let Some(cmd) = &spec.top_level {
-        if let CommandSpec::FlagCommand { allowed_flags, .. } = cmd {
+    if let Some(cmd) = &spec.top_level
+        && let CommandSpec::FlagCommand { allowed_flags, .. } = cmd {
             let flags: String = allowed_flags
                 .iter()
                 .map(|f| format!("[\\fB\\-{}\\fR]", f))
@@ -499,7 +496,6 @@ fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
                 .join(" ");
             out.push_str(&format!(".B {}\n{}\n.br\n", prog, flags));
         }
-    }
     out.push_str(&format!(".B {}\n\\fIcommand\\fR [\\fIoptions\\fR]\n", prog));
 
     // DESCRIPTION

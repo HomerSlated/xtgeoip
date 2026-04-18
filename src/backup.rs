@@ -6,7 +6,6 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail};
-use blake3;
 use flate2::{Compression, write::GzEncoder};
 use glob::glob;
 use tar::Builder;

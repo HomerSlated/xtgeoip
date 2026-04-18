@@ -306,9 +306,7 @@ fn extract_version(content_disposition: &str) -> Option<String> {
     let filename = content_disposition
         .split(';')
         .map(str::trim)
-        .find(|part| part.to_ascii_lowercase().starts_with("filename="))?
-        .splitn(2, '=')
-        .nth(1)?
+        .find(|part| part.to_ascii_lowercase().starts_with("filename="))?.split_once('=')?.1
         .trim_matches('"');
 
     // Filename is now e.g. "GeoLite2-Country-CSV_20260227.zip"
