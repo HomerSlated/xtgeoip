@@ -58,12 +58,12 @@ pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
                 force,
             )?;
 
-            if clean {
-                delete(Path::new(&cfg.paths.output_dir), force)?;
+            if prune {
+                prune_archives(cfg, false, true)?;
             }
 
-            if prune {
-                prune_archives(cfg, true, false)?;
+            if clean {
+                delete(Path::new(&cfg.paths.output_dir), force)?;
             }
         }
 
@@ -98,16 +98,17 @@ pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
             }
 
             let (temp_dir, version) = fetch(cfg, FetchMode::Remote)?;
+
+            if prune {
+                prune_archives(cfg, true, false)?;
+            }
+
             build(
                 temp_dir.path(),
                 Path::new(&cfg.paths.output_dir),
                 &version,
                 legacy,
             )?;
-
-            if prune {
-                prune_archives(cfg, true, false)?;
-            }
         }
 
         Action::Build {
@@ -123,6 +124,10 @@ pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
                     Path::new(&cfg.paths.archive_dir),
                     force,
                 )?;
+
+                if prune {
+                    prune_archives(cfg, false, true)?;
+                }
             }
 
             if do_clean {
@@ -136,10 +141,6 @@ pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
                 &version,
                 legacy,
             )?;
-
-            if prune {
-                prune_archives(cfg, true, false)?;
-            }
         }
     }
 
