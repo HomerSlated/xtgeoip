@@ -243,7 +243,7 @@ commands:
       required: true
       choices:
         s: { summary: "Show configuration" }
-        d: { summary: "Delete configuration" }
+        d: { summary: "Show default (example) configuration" }
         e: { summary: "Edit configuration" }
     constraints:
       exactly_one_positional: true

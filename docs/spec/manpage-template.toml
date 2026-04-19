@@ -1,13 +1,4 @@
-.TH XTGEOIP 1 "" "xtgeoip 0.1.0" "User Commands"
-.SH NAME
-xtgeoip \- Build and manage xt_geoip data from MaxMind GeoLite2 CSVs.
-.SH SYNOPSIS
-.B xtgeoip
-[\fB\-b\fR] [\fB\-c\fR] [\fB\-p\fR] [\fB\-f\fR]
-.br
-.B xtgeoip
-\fIcommand\fR [\fIoptions\fR]
-.SH DESCRIPTION
+description = '''
 \fBxtgeoip\fR is a Rust reimplementation of \fIxt_geoip_build_maxmind\fR
 (originally by Jan Engelhardt and Philip Prindeville),
 with additional features, correctness improvements, and legacy compatibility mode.
@@ -47,7 +38,9 @@ and one for IPv6
 .IR CN.iv4 ).
 .PP
 \fBxtgeoip\fR must be run as root to write to the output directory.
-.SH COMMANDS
+'''
+
+commands = '''
 .TP
 .BI "build " "[\fB\-b\fR] [\fB\-c\fR] [\fB\-p\fR] [\fB\-f\fR] [\fB\-l\fR]"
 Build binary xt_geoip database files from a locally stored GeoLite2 CSV archive.
@@ -101,7 +94,9 @@ Open the system configuration file in
 .B \-s
 Show the current system configuration.
 .RE
-.SH OPTIONS
+'''
+
+options = '''
 .TP
 .BR \-b ", " \-\-backup
 Back up the current binary database to a compressed tarball in the archive
@@ -210,7 +205,9 @@ in a context where both fetch and backup are active
 is an error: the prune target is ambiguous.
 To prune both, run the program twice.
 .RE
-.SH EXECUTION ORDER
+'''
+
+execution_order = '''
 The order in which flags are given on the command line is always ignored.
 The execution order is fixed and determined by the most logical sequence for
 the operations requested.
@@ -238,7 +235,9 @@ and
 .B "xtgeoip \-c \-b"
 are identical; the declared order of flags has no effect on the order of
 execution.
-.SH LEGACY MODE
+'''
+
+legacy_mode = '''
 The original Perl implementation contains a known data error: it maps some
 MaxMind continent-code rows to country codes, producing semantically incorrect
 output.
@@ -283,7 +282,9 @@ To clean them up, run:
 .RS
 .B xtgeoip build \-c \-f
 .RE
-.SH CONFIGURATION
+'''
+
+configuration = '''
 The system configuration file is
 .B /etc/xtgeoip.conf
 (TOML format).
@@ -328,68 +329,9 @@ Use
 to display the active configuration, or
 .B "xtgeoip conf \-d"
 to display the full default configuration with comments.
-.SH EXAMPLES
-.TP
-.B xtgeoip -h
-display usage
-.TP
-.B xtgeoip -b
-backup database
-.TP
-.B xtgeoip -c
-clean database
-.TP
-.B xtgeoip -b -c
-backup then clean
-.TP
-.B xtgeoip -b -p
-backup then prune
-.TP
-.B xtgeoip build
-build database
-.TP
-.B xtgeoip build -l
-build (legacy mode)
-.TP
-.B xtgeoip build -b -p
-backup then prune then build
-.TP
-.B xtgeoip build -c -f
-clean then build
-.TP
-.B xtgeoip build -b -c -p
-backup, prune, clean, build
-.TP
-.B xtgeoip conf -s
-show configuration
-.TP
-.B xtgeoip conf -d
-show default configuration
-.TP
-.B xtgeoip conf -e
-edit configuration
-.TP
-.B xtgeoip fetch
-fetch CSVs
-.TP
-.B xtgeoip fetch -p
-fetch then prune archives
-.TP
-.B xtgeoip run
-fetch then build
-.TP
-.B xtgeoip run -l
-fetch then build (legacy)
-.TP
-.B xtgeoip run -p
-fetch then prune then build
-.TP
-.B xtgeoip run -c -p
-clean then fetch then prune then build
-.TP
-.B xtgeoip run -c -f
-force clean then fetch then build
-.SH FILES
+'''
+
+files = '''
 .TP
 .I /etc/xtgeoip.conf
 System configuration file.
@@ -408,12 +350,17 @@ Stores binary IP range files
 .IR *.iv6 ),
 the version file, the BLAKE3 manifest, and (when present) the orphaned file
 list.
-.SH SEE ALSO
+'''
+
+see_also = '''
 .BR xt_geoip (8),
 .BR iptables (8),
 .BR nftables (8),
 .BR xtables-addons (7)
-.SH AUTHORS
+'''
+
+authors = '''
 Original Perl implementation by Jan Engelhardt and Philip Prindeville.
 .br
 Rust reimplementation by Haze N Sparkle.
+'''

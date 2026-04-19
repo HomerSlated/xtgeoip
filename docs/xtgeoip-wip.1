@@ -330,65 +330,66 @@ to display the active configuration, or
 to display the full default configuration with comments.
 .SH EXAMPLES
 .TP
-.B xtgeoip -h
-display usage
+.B xtgeoip \-h
+Display usage.
 .TP
-.B xtgeoip -b
-backup database
+.B xtgeoip \-b
+Back up current database.
 .TP
-.B xtgeoip -c
-clean database
+.B xtgeoip \-c
+Clean (delete) current database files.
 .TP
-.B xtgeoip -b -c
-backup then clean
+.B xtgeoip \-b \-c
+Back up, then clean.
 .TP
-.B xtgeoip -b -p
-backup then prune
+.B xtgeoip \-b \-p
+Back up, then prune older binary archives.
 .TP
 .B xtgeoip build
-build database
+Build database from local CSV archive.
 .TP
-.B xtgeoip build -l
-build (legacy mode)
+.B xtgeoip build \-l
+Build in legacy mode.
 .TP
-.B xtgeoip build -b -p
-backup then prune then build
+.B xtgeoip build \-b \-p
+Back up, prune old binary archives, then build.
 .TP
-.B xtgeoip build -c -f
-clean then build
+.B xtgeoip build \-c \-f
+Force-delete all iv4/iv6 files, then build.
 .TP
-.B xtgeoip build -b -c -p
-backup, prune, clean, build
+.B xtgeoip build \-b \-c \-p
+Back up, prune binary archives, clean, then build.
 .TP
-.B xtgeoip conf -s
-show configuration
+.B xtgeoip conf \-s
+Show current configuration.
 .TP
-.B xtgeoip conf -d
-show default configuration
+.B xtgeoip conf \-d
+Show default (example) configuration.
 .TP
-.B xtgeoip conf -e
-edit configuration
+.B xtgeoip conf \-e
+Open configuration in
+.BR $EDITOR .
 .TP
 .B xtgeoip fetch
-fetch CSVs
+Download latest GeoLite2 CSV archive.
 .TP
-.B xtgeoip fetch -p
-fetch then prune archives
+.B xtgeoip fetch \-p
+Download, then prune older CSV archives.
 .TP
 .B xtgeoip run
-fetch then build
+Full pipeline: fetch, then build.
 .TP
-.B xtgeoip run -l
-fetch then build (legacy)
+.B xtgeoip run \-l
+Full pipeline in legacy mode.
 .TP
-.B xtgeoip run -p
-fetch then prune then build
+.B xtgeoip run \-p
+Full pipeline, pruning CSV archives after fetch.
 .TP
-.B xtgeoip run -c -p
-clean then fetch then prune then build
+.B xtgeoip run \-c \-p
+Clean, then full pipeline with CSV archive pruning.
 .TP
-.B xtgeoip run -c -f
-force clean then fetch then build
+.B xtgeoip run \-c \-f
+Force-clean, then full pipeline.
 .SH FILES
 .TP
 .I /etc/xtgeoip.conf
