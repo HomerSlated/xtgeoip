@@ -177,13 +177,10 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
                  used: &mut BTreeSet<String>|
      -> anyhow::Result<()> {
         if let Some(reason) = &ex.reason
-            && !spec.reason_templates.contains_key(&reason.code) {
-                anyhow::bail!(
-                    "Unknown reason code {} in {}",
-                    reason.code,
-                    scope
-                );
-            }
+            && !spec.reason_templates.contains_key(&reason.code)
+        {
+            anyhow::bail!("Unknown reason code {} in {}", reason.code, scope);
+        }
 
         if !ex.valid {
             let maps_to = ex.maps_to.as_ref().ok_or_else(|| {
@@ -191,9 +188,10 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
             })?;
 
             if let Some(ec) = error_cases
-                && !ec.contains_key(maps_to) {
-                    anyhow::bail!("Unknown error case {}", maps_to);
-                }
+                && !ec.contains_key(maps_to)
+            {
+                anyhow::bail!("Unknown error case {}", maps_to);
+            }
 
             used.insert(maps_to.clone());
         }
@@ -276,15 +274,16 @@ fn resolve_outcome(spec: &Spec, ex: &Example) -> String {
     }
 
     if let Some(reason) = &ex.reason
-        && let Some(t) = spec.reason_templates.get(&reason.code) {
-            let mut text = t.text.clone();
-            if let Some(args) = &reason.args {
-                for (k, v) in args {
-                    text = text.replace(&format!("{{{}}}", k), v);
-                }
+        && let Some(t) = spec.reason_templates.get(&reason.code)
+    {
+        let mut text = t.text.clone();
+        if let Some(args) = &reason.args {
+            for (k, v) in args {
+                text = text.replace(&format!("{{{}}}", k), v);
             }
-            return text;
         }
+        return text;
+    }
 
     "ERROR".into()
 }
@@ -485,7 +484,10 @@ fn generate_testcases_yaml(spec: &Spec) -> anyhow::Result<String> {
 
 /* ---------------- MANPAGE ---------------- */
 
-fn generate_manpage(spec: &Spec, tmpl: &ManpageTemplate) -> anyhow::Result<String> {
+fn generate_manpage(
+    spec: &Spec,
+    tmpl: &ManpageTemplate,
+) -> anyhow::Result<String> {
     let prog = &spec.meta.program;
     let version = env!("CARGO_PKG_VERSION");
     let mut out = String::new();
@@ -505,7 +507,11 @@ fn generate_manpage(spec: &Spec, tmpl: &ManpageTemplate) -> anyhow::Result<Strin
     ));
 
     // NAME (from spec meta)
-    push_section(&mut out, "NAME", &format!("{} \\- {}\n", prog, spec.meta.summary));
+    push_section(
+        &mut out,
+        "NAME",
+        &format!("{} \\- {}\n", prog, spec.meta.summary),
+    );
 
     // SYNOPSIS (from spec top_level flags + command names)
     out.push_str(".SH SYNOPSIS\n");

@@ -46,10 +46,11 @@ fn main() -> anyhow::Result<()> {
         let id = tc.case_id.as_deref().unwrap_or("?");
 
         if let Some(want) = filter_case
-            && tc.case_id.as_deref() != Some(want) {
-                skipped += 1;
-                continue;
-            }
+            && tc.case_id.as_deref() != Some(want)
+        {
+            skipped += 1;
+            continue;
+        }
 
         if filter_failed_only && tc.key != "f" {
             skipped += 1;
