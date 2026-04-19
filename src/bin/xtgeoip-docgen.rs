@@ -112,6 +112,19 @@ pub struct ReasonTemplate {
     pub text: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct ManpageTemplate {
+    description: String,
+    commands: String,
+    options: String,
+    execution_order: String,
+    legacy_mode: String,
+    configuration: String,
+    files: String,
+    see_also: String,
+    authors: String,
+}
+
 #[derive(Debug, Serialize)]
 struct Testcase {
     case_id: Option<String>,
@@ -126,12 +139,15 @@ fn main() -> anyhow::Result<()> {
 
     validate_spec(&spec)?;
 
+    let toml_str = fs::read_to_string("docs/spec/manpage-template.toml")?;
+    let tmpl: ManpageTemplate = toml::from_str(&toml_str)?;
+
     fs::create_dir_all("docs/generated")?;
     fs::create_dir_all("src/generated")?;
 
     fs::write("docs/generated/usage.md", generate_usage_md(&spec)?)?;
     fs::write("docs/generated/tldr.md", generate_tldr_md(&spec)?)?;
-    fs::write("docs/generated/xtgeoip.1", generate_manpage(&spec)?)?;
+    fs::write("docs/generated/xtgeoip.1", generate_manpage(&spec, &tmpl)?)?;
     fs::write(
         "src/generated/error_text.rs",
         generate_error_text_rs(&spec)?,
@@ -469,132 +485,80 @@ fn generate_testcases_yaml(spec: &Spec) -> anyhow::Result<String> {
 
 /* ---------------- MANPAGE ---------------- */
 
-fn generate_manpage(spec: &Spec) -> anyhow::Result<String> {
+fn generate_manpage(spec: &Spec, tmpl: &ManpageTemplate) -> anyhow::Result<String> {
     let prog = &spec.meta.program;
+    let version = env!("CARGO_PKG_VERSION");
     let mut out = String::new();
+
+    let push_section = |out: &mut String, heading: &str, body: &str| {
+        out.push_str(&format!(".SH {}\n", heading));
+        out.push_str(body.trim_end_matches('\n'));
+        out.push('\n');
+    };
 
     // Header
     out.push_str(&format!(
         ".TH {} 1 \"\" \"{} {}\" \"User Commands\"\n",
         prog.to_uppercase(),
         prog,
-        spec.version
+        version
     ));
 
-    // NAME
-    out.push_str(".SH NAME\n");
-    out.push_str(&format!("{} \\- {}\n", prog, spec.meta.summary));
+    // NAME (from spec meta)
+    push_section(&mut out, "NAME", &format!("{} \\- {}\n", prog, spec.meta.summary));
 
-    // SYNOPSIS
+    // SYNOPSIS (from spec top_level flags + command names)
     out.push_str(".SH SYNOPSIS\n");
     if let Some(cmd) = &spec.top_level
-        && let CommandSpec::FlagCommand { allowed_flags, .. } = cmd {
-            let flags: String = allowed_flags
-                .iter()
-                .map(|f| format!("[\\fB\\-{}\\fR]", f))
-                .collect::<Vec<_>>()
-                .join(" ");
-            out.push_str(&format!(".B {}\n{}\n.br\n", prog, flags));
-        }
+        && let CommandSpec::FlagCommand { allowed_flags, .. } = cmd
+    {
+        let flags: String = allowed_flags
+            .iter()
+            .map(|f| format!("[\\fB\\-{}\\fR]", f))
+            .collect::<Vec<_>>()
+            .join(" ");
+        out.push_str(&format!(".B {}\n{}\n.br\n", prog, flags));
+    }
     out.push_str(&format!(".B {}\n\\fIcommand\\fR [\\fIoptions\\fR]\n", prog));
 
-    // DESCRIPTION
-    out.push_str(".SH DESCRIPTION\n");
-    out.push_str(&format!(
-        "\\fB{}\\fR downloads MaxMind GeoLite2 CSV databases and converts \
-         them into binary IP range files for the Linux xt_geoip kernel \
-         module.\n",
-        prog
-    ));
+    // DESCRIPTION, COMMANDS, OPTIONS, EXECUTION ORDER, LEGACY MODE,
+    // CONFIGURATION from template
+    push_section(&mut out, "DESCRIPTION", &tmpl.description);
+    push_section(&mut out, "COMMANDS", &tmpl.commands);
+    push_section(&mut out, "OPTIONS", &tmpl.options);
+    push_section(&mut out, "EXECUTION ORDER", &tmpl.execution_order);
+    push_section(&mut out, "LEGACY MODE", &tmpl.legacy_mode);
+    push_section(&mut out, "CONFIGURATION", &tmpl.configuration);
 
-    // COMMANDS
-    out.push_str(".SH COMMANDS\n");
-    for (name, cmd) in &spec.commands {
-        match cmd {
-            CommandSpec::FlagCommand {
-                summary,
-                allowed_flags,
-                ..
-            } => {
-                let flags: String = allowed_flags
-                    .iter()
-                    .map(|f| format!("[\\fB\\-{}\\fR]", f))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                out.push_str(&format!(
-                    ".TP\n.BI \"{} \" \"{}\"\n{}\n",
-                    name, flags, summary
-                ));
-            }
-            CommandSpec::SelectorCommand {
-                summary,
-                positional,
-                ..
-            } => {
-                let choices: String = positional
-                    .choices
-                    .keys()
-                    .map(|k| format!("\\fB\\-{}\\fR", k))
-                    .collect::<Vec<_>>()
-                    .join("|");
-                out.push_str(&format!(
-                    ".TP\n.BI \"{}\" \" {}\"\n{}\n",
-                    name, choices, summary
-                ));
-                out.push_str(".RS\n");
-                for (choice, ch) in &positional.choices {
-                    out.push_str(&format!(
-                        ".TP\n.B \\-{}\n{}\n",
-                        choice, ch.summary
-                    ));
-                }
-                out.push_str(".RE\n");
-            }
-        }
-    }
-
-    // OPTIONS
-    out.push_str(".SH OPTIONS\n");
-    for (short, fd) in &spec.flags {
-        out.push_str(&format!(
-            ".TP\n.BR \\-{} \", \" \\-\\-{}\n{}\n",
-            short, fd.long, fd.summary
-        ));
-    }
-
-    // EXAMPLES
+    // EXAMPLES (from spec valid examples)
     out.push_str(".SH EXAMPLES\n");
-
-    {
-        let mut emit_valid = |exs: &[Example]| {
-            for ex in exs {
-                if ex.valid {
-                    let desc = ex.outcome.as_deref().unwrap_or("");
-                    out.push_str(&format!(".TP\n.B {}\n{}\n", ex.cmd, desc));
-                }
+    let emit_valid = |out: &mut String, exs: &[Example]| {
+        for ex in exs {
+            if ex.valid {
+                let desc = ex.outcome.as_deref().unwrap_or("");
+                out.push_str(&format!(".TP\n.B {}\n{}\n", ex.cmd, desc));
             }
+        }
+    };
+    if let Some(cmd) = &spec.top_level {
+        let exs = match cmd {
+            CommandSpec::FlagCommand { examples, .. }
+            | CommandSpec::SelectorCommand { examples, .. } => examples,
         };
-
-        if let Some(cmd) = &spec.top_level {
-            let exs = match cmd {
-                CommandSpec::FlagCommand { examples, .. }
-                | CommandSpec::SelectorCommand { examples, .. } => examples,
-            };
-            emit_valid(exs);
-        }
-
-        for cmd in spec.commands.values() {
-            let exs = match cmd {
-                CommandSpec::FlagCommand { examples, .. }
-                | CommandSpec::SelectorCommand { examples, .. } => examples,
-            };
-            emit_valid(exs);
-        }
+        emit_valid(&mut out, exs);
+    }
+    for cmd in spec.commands.values() {
+        let exs = match cmd {
+            CommandSpec::FlagCommand { examples, .. }
+            | CommandSpec::SelectorCommand { examples, .. } => examples,
+        };
+        emit_valid(&mut out, exs);
     }
 
-    // SEE ALSO
-    out.push_str(".SH SEE ALSO\n");
-    out.push_str(".BR xt_geoip (8),\n.BR iptables (8)\n");
+    // FILES, SEE ALSO, AUTHORS from template
+    push_section(&mut out, "FILES", &tmpl.files);
+    push_section(&mut out, "SEE ALSO", &tmpl.see_also);
+    push_section(&mut out, "AUTHORS", &tmpl.authors);
 
     Ok(out)
 }
