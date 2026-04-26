@@ -111,16 +111,6 @@ Treat all remote content as hostile. Layers of defence:
 
 Crate options: `infer` or `content_inspector` for magic detection; `zip` crate already exposes central directory metadata.
 
-### #52 — fetch.rs / backup.rs: archive name parsed in multiple places
-
-`GeoLite2-Country-CSV_YYYYMMDD.zip` is parsed in multiple places. Centralise:
-```rust
-fn parse_archive_name(name: &str) -> Option<String>  // returns version token
-```
-Also harden: treat the remainder after the stable prefix as an opaque version token rather than assuming date format. Log a warning if it doesn't look like a date but still proceed — don't reject a valid archive because MaxMind changed versioning.
-
-Note: #52 is also a dependency for the Version type chain (#69 → #70).
-
 ### #53 — fetch.rs: `flatten_to_temp_root` assumes single top-level directory
 
 `flatten_to_temp_root` assumes exactly one top-level directory in the ZIP. Harden: only strip the first component if it is common to all entries (detect dynamically); warn if archive structure doesn't match expected shape.
@@ -351,9 +341,7 @@ Ad hoc ambiguity checks (`if *prune && *force && *clean`, etc.) have no formal b
 
 ---
 
-## VERSION HANDLING CHAIN [#52 → #69 → #70]
-
-Note: #52 is listed in Security Hardening (archive name parsing). The Version type work follows from it.
+## VERSION HANDLING CHAIN [#69 → #70]
 
 ### #69 — fetch.rs / backup.rs / build.rs: version strings are untyped
 

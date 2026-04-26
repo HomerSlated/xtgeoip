@@ -11,7 +11,7 @@ use tar::Builder;
 
 use crate::{
     config::Config,
-    messages::{error, info},
+    messages::{error, info, warn},
 };
 
 const VERSION_FILE: &str = "version";
@@ -429,8 +429,18 @@ fn prune_csv_archives(dir: &Path, keep: usize) -> Result<usize> {
             continue;
         }
 
-        if let Some(ver) = extract_version(name) {
-            by_version.entry(ver).or_default().push(path.clone());
+        match parse_archive_name(name) {
+            Some(ver) => {
+                by_version
+                    .entry(ver.to_owned())
+                    .or_default()
+                    .push(path.clone());
+            }
+            None => {
+                warn(&format!(
+                    "Skipping CSV archive with unparseable name: {name}"
+                ));
+            }
         }
     }
 
@@ -496,8 +506,18 @@ fn prune_bin_archives(dir: &Path, keep: usize) -> Result<usize> {
             continue;
         }
 
-        if let Some(ver) = extract_version(name) {
-            by_version.entry(ver).or_default().push(path.clone());
+        match parse_archive_name(name) {
+            Some(ver) => {
+                by_version
+                    .entry(ver.to_owned())
+                    .or_default()
+                    .push(path.clone());
+            }
+            None => {
+                warn(&format!(
+                    "Skipping bin archive with unparseable name: {name}"
+                ));
+            }
         }
     }
 
@@ -530,21 +550,19 @@ fn prune_bin_archives(dir: &Path, keep: usize) -> Result<usize> {
     Ok(removed)
 }
 
-/// Extract the version component from a GeoLite2 archive filename.
+/// Parse the version token from a GeoLite2 archive filename.
+/// Returns the text between the last `_` and the first `.` after it.
+/// The token is treated as opaque — no digit or length validation.
 ///
 /// Examples:
-/// - GeoLite2-Country-CSV_20260324.zip
-/// - GeoLite2-Country-CSV_20260324.zip.sha256
-/// - GeoLite2-Country-bin_20260324.tar.gz
-/// - GeoLite2-Country-bin_unverified_20260324.tar.gz
-fn extract_version(name: &str) -> Option<String> {
+/// - `GeoLite2-Country-CSV_20260324.zip`              → `"20260324"`
+/// - `GeoLite2-Country-CSV_20260324.zip.sha256`       → `"20260324"`
+/// - `GeoLite2-Country-bin_20260324.tar.gz`           → `"20260324"`
+/// - `GeoLite2-Country-bin_unverified_20260324.tar.gz`→ `"20260324"`
+pub(crate) fn parse_archive_name(name: &str) -> Option<&str> {
     let idx = name.rfind('_')?;
-    let part = &name[idx + 1..];
-    let digits: String =
-        part.chars().take_while(|c| c.is_ascii_digit()).collect();
-    if digits.len() == 8 {
-        Some(digits)
-    } else {
-        None
-    }
+    let after = &name[idx + 1..];
+    let end = after.find('.').unwrap_or(after.len());
+    let token = &after[..end];
+    if token.is_empty() { None } else { Some(token) }
 }
