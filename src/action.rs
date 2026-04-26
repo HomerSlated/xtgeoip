@@ -9,7 +9,7 @@ use anyhow::Result;
 use crate::{
     backup::{backup, delete, prune_archives},
     build::build,
-    config::{ConfAction, Config, run_conf},
+    config::{ConfAction, Config},
     fetch::{FetchMode, fetch},
 };
 
@@ -43,10 +43,14 @@ pub enum Action {
     Conf(ConfAction),
 }
 
+impl Action {
+    pub fn requires_root(&self) -> bool {
+        !matches!(self, Action::Conf(_))
+    }
+}
+
 pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
     match action {
-        Action::Conf(conf) => run_conf(conf)?,
-
         Action::TopLevelBackup {
             clean,
             force,
@@ -142,6 +146,8 @@ pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
                 legacy,
             )?;
         }
+
+        Action::Conf(_) => unreachable!("Conf is handled before run_action"),
     }
 
     Ok(())

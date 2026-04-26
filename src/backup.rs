@@ -7,7 +7,6 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail};
 use flate2::{Compression, write::GzEncoder};
-use glob::glob;
 use tar::Builder;
 
 use crate::{
@@ -25,23 +24,45 @@ fn manifest_path_for_version(data_dir: &Path, version: &str) -> PathBuf {
     data_dir.join(format!("GeoLite2-Country-bin_{}.blake3", version))
 }
 
-/// Collect IV files: 2-char country codes, with .iv4 or .iv6, including digits
-/// and letters.
+/// Collect IV files: 2-char uppercase/digit country codes, extension iv4 or iv6.
 fn iv_files(data_dir: &Path) -> Result<Vec<PathBuf>> {
-    let mut files: Vec<PathBuf> =
-        glob(&format!("{}/*[0-9A-Z][0-9A-Z].iv[46]", data_dir.display()))?
-            .filter_map(Result::ok)
-            .collect();
+    let mut files: Vec<PathBuf> = fs::read_dir(data_dir)
+        .with_context(|| {
+            format!("Cannot read directory {}", data_dir.display())
+        })?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            let Some(name) = p.file_name().and_then(|n| n.to_str()) else {
+                return false;
+            };
+            let Some(ext) = p.extension().and_then(|e| e.to_str()) else {
+                return false;
+            };
+            if ext != "iv4" && ext != "iv6" {
+                return false;
+            }
+            let stem = &name[..name.len() - ext.len() - 1];
+            stem.len() == 2
+                && stem
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || c.is_ascii_uppercase())
+        })
+        .collect();
     files.sort();
     Ok(files)
 }
 
 /// Collect all .blake3 manifest files in the data directory.
 fn all_blake3_files(data_dir: &Path) -> Result<Vec<PathBuf>> {
-    let mut files: Vec<PathBuf> =
-        glob(&format!("{}/*.blake3", data_dir.display()))?
-            .filter_map(Result::ok)
-            .collect();
+    let mut files: Vec<PathBuf> = fs::read_dir(data_dir)
+        .with_context(|| {
+            format!("Cannot read directory {}", data_dir.display())
+        })?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("blake3"))
+        .collect();
     files.sort();
     Ok(files)
 }
@@ -62,7 +83,6 @@ fn verify_manifest_files(
 
         let (expected_hash, file_name) = line
             .split_once("  ")
-            .or_else(|| line.split_once(' '))
             .ok_or_else(|| anyhow!("Malformed manifest at line {}", idx + 1))?;
 
         let file_name = file_name.trim();
@@ -103,9 +123,9 @@ fn verify_manifest_files(
     Ok(verified_files)
 }
 
-/// Create tar.gz archive from a list of files.
-fn create_tarball(output_path: &Path, files: &[PathBuf]) -> Result<()> {
-    let tar_gz = fs::File::create(output_path)?;
+/// Write a tar.gz archive to `path` (inner step; no atomicity).
+fn write_tarball(path: &Path, files: &[PathBuf]) -> Result<()> {
+    let tar_gz = fs::File::create(path)?;
     let enc = GzEncoder::new(tar_gz, Compression::default());
     let mut tar = Builder::new(enc);
 
@@ -120,6 +140,26 @@ fn create_tarball(output_path: &Path, files: &[PathBuf]) -> Result<()> {
 
     tar.finish()?;
     Ok(())
+}
+
+/// Create tar.gz archive atomically: write to `.part`, rename on success.
+fn create_tarball(output_path: &Path, files: &[PathBuf]) -> Result<()> {
+    let mut tmp_name = output_path.as_os_str().to_os_string();
+    tmp_name.push(".part");
+    let tmp_path = PathBuf::from(tmp_name);
+
+    if let Err(e) = write_tarball(&tmp_path, files) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(e);
+    }
+
+    fs::rename(&tmp_path, output_path).with_context(|| {
+        format!(
+            "Failed to rename {} to {}",
+            tmp_path.display(),
+            output_path.display()
+        )
+    })
 }
 
 /// Collect files for a force backup/delete — no verification, just grab
@@ -180,12 +220,14 @@ pub fn backup(data_dir: &Path, backup_dir: &Path, force: bool) -> Result<()> {
     })?;
 
     if force {
-        let (files, version) = gather_files_force(data_dir)?;
+        let (mut files, version) = gather_files_force(data_dir)?;
         if files.is_empty() {
             let msg = "Nothing to back up";
             error(msg);
             bail!(msg);
         }
+        files.sort();
+        files.dedup();
         let output_path = backup_dir.join(format!(
             "GeoLite2-Country-bin_unverified_{}.tar.gz",
             version
@@ -201,6 +243,8 @@ pub fn backup(data_dir: &Path, backup_dir: &Path, force: bool) -> Result<()> {
     let (mut files, version, manifest_path) = gather_files_verified(data_dir)?;
     files.push(version_path(data_dir));
     files.push(manifest_path);
+    files.sort();
+    files.dedup();
 
     let output_path =
         backup_dir.join(format!("GeoLite2-Country-bin_{}.tar.gz", version));
@@ -213,24 +257,29 @@ pub fn backup(data_dir: &Path, backup_dir: &Path, force: bool) -> Result<()> {
 }
 
 fn delete_all(data_dir: &Path, files: &[PathBuf]) -> Result<()> {
-    let failed: Vec<&PathBuf> = files
-        .iter()
-        .filter(|f| fs::remove_file(f).is_err())
-        .collect();
+    let mut failed: Vec<(&PathBuf, std::io::Error)> = Vec::new();
+    for f in files {
+        if let Err(e) = fs::remove_file(f) {
+            failed.push((f, e));
+        }
+    }
     if !failed.is_empty() {
-        let msg = format!("{} file(s) could not be deleted", failed.len());
-        error(&msg);
-        // TODO: handle write failure to orphaned file
+        for (f, e) in &failed {
+            error(&format!("Failed to delete {}: {e:#}", f.display()));
+        }
+        let list = failed
+            .iter()
+            .map(|(p, _)| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
         let orphaned_path = data_dir.join("orphaned");
-        let _ = fs::write(
-            &orphaned_path,
-            failed
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join("\n"),
-        );
-        bail!(msg);
+        if let Err(e) = fs::write(&orphaned_path, &list) {
+            error(&format!(
+                "Could not write failed-delete list to \"{}\": {e:#}",
+                orphaned_path.display()
+            ));
+        }
+        bail!("{} file(s) could not be deleted", failed.len());
     }
     Ok(())
 }
@@ -248,9 +297,10 @@ pub fn delete(data_dir: &Path, force: bool) -> Result<()> {
             .into_iter()
             .chain(orphan_path.exists().then_some(orphan_path))
             .collect();
+        let n = all_files.len();
         delete_all(data_dir, &all_files)?;
         info(&format!(
-            "Force deleted binary data files from {}",
+            "Force deleted {n} file(s) from {}",
             data_dir.display()
         ));
         return Ok(());
@@ -261,10 +311,11 @@ pub fn delete(data_dir: &Path, force: bool) -> Result<()> {
         .into_iter()
         .chain([version_path(data_dir), manifest_path])
         .collect();
+    let n = all_files.len();
     delete_all(data_dir, &all_files)?;
 
     info(&format!(
-        "Deleted old binary data files from {}",
+        "Deleted {n} file(s) from {}",
         data_dir.display()
     ));
     Ok(())

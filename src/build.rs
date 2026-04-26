@@ -1,6 +1,6 @@
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     ffi::OsStr,
     fs::{self, File},
     path::Path,
@@ -117,17 +117,18 @@ pub fn build(
 
     let mut checksums: Vec<(String, String)> =
         Vec::with_capacity(write_results.len());
-    let mut write_errors = 0usize;
+    let mut write_errors: Vec<anyhow::Error> = Vec::new();
     for result in write_results {
         match result {
             Ok(entry) => checksums.push(entry),
-            Err(_) => write_errors += 1,
+            Err(e) => write_errors.push(e),
         }
     }
-    if write_errors > 0 {
-        let msg = format!("{} file write(s) failed during build", write_errors);
-        messages::error(&msg);
-        bail!(msg);
+    if !write_errors.is_empty() {
+        for e in &write_errors {
+            messages::error(&format!("{e:#}"));
+        }
+        bail!("{} file write(s) failed during build", write_errors.len());
     }
     checksums.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
@@ -161,36 +162,43 @@ pub fn build(
         })
         .collect();
 
-    let written_files: Vec<_> = files_to_write
+    let written_set: HashSet<_> = files_to_write
         .iter()
         .chain(std::iter::once(&manifest_path))
+        .cloned()
         .collect();
 
     let orphaned: Vec<_> = all_existing
         .into_iter()
-        .filter(|p| !written_files.contains(&p))
+        .filter(|p| !written_set.contains(p))
         .collect();
 
     if !orphaned.is_empty() {
         let orphaned_path = target_dir.join("orphaned");
-        fs::write(
-            &orphaned_path,
-            orphaned
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join("\n"),
-        )?;
         messages::warn(&format!(
-            "{} orphaned files detected in \"{}\".",
+            "{} orphaned files detected in \"{}\":",
             orphaned.len(),
             target_dir.display()
         ));
-        messages::warn(&format!(
-            "Please run `xtgeoip build -c -f` or manually delete files listed \
-             in \"{}\" for a clean install.",
-            orphaned_path.display()
-        ));
+        for p in &orphaned {
+            messages::warn(&format!("  {}", p.display()));
+        }
+        let list = orphaned
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        match fs::write(&orphaned_path, &list) {
+            Ok(()) => messages::warn(&format!(
+                "Run `xtgeoip build -c -f` or delete files listed in \"{}\" \
+                 for a clean install.",
+                orphaned_path.display()
+            )),
+            Err(e) => messages::warn(&format!(
+                "Could not write orphaned file list to \"{}\": {e:#}",
+                orphaned_path.display()
+            )),
+        }
     }
 
     // -------------------------
@@ -216,8 +224,7 @@ fn load_countries(
 ) -> anyhow::Result<(HashMap<String, String>, BTreeMap<String, String>)> {
     let file_path = source_dir.join("GeoLite2-Country-Locations-en.csv");
     let file = File::open(&file_path)?;
-    // Safety: the CSV file is not modified while we hold this mapping
-    let mmap = unsafe { Mmap::map(&file)? };
+    let mmap = mmap_file(&file)?;
     let mut rdr = ReaderBuilder::new()
         .has_headers(true)
         .from_reader(mmap.as_ref());
@@ -350,8 +357,7 @@ fn load_blocks_v4(
 ) -> anyhow::Result<HashMap<String, Vec<(u32, u32)>>> {
     const FILE_NAME: &str = "GeoLite2-Country-Blocks-IPv4.csv";
     let file = File::open(source_dir.join(FILE_NAME))?;
-    // Safety: the CSV file is not modified while we hold this mapping
-    let mmap = unsafe { Mmap::map(&file)? };
+    let mmap = mmap_file(&file)?;
     let mut rdr = ReaderBuilder::new()
         .has_headers(true)
         .from_reader(mmap.as_ref());
@@ -410,8 +416,7 @@ fn load_blocks_v6(
 ) -> anyhow::Result<HashMap<String, Vec<(u128, u128)>>> {
     const FILE_NAME: &str = "GeoLite2-Country-Blocks-IPv6.csv";
     let file = File::open(source_dir.join(FILE_NAME))?;
-    // Safety: the CSV file is not modified while we hold this mapping
-    let mmap = unsafe { Mmap::map(&file)? };
+    let mmap = mmap_file(&file)?;
     let mut rdr = ReaderBuilder::new()
         .has_headers(true)
         .from_reader(mmap.as_ref());
@@ -547,6 +552,14 @@ fn merge_ranges_v6(ranges: &[(u128, u128)]) -> Vec<(u128, u128)> {
         }
     }
     merged
+}
+
+// -------------------------
+// mmap helper
+// -------------------------
+fn mmap_file(file: &File) -> anyhow::Result<Mmap> {
+    // Safety: caller must not mutate the file while the mapping is live
+    Ok(unsafe { Mmap::map(file)? })
 }
 
 // -------------------------
