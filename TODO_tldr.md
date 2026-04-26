@@ -40,7 +40,6 @@
 
 - [#61] global: parse-then-validate everywhere; never assume parsing implies validity; audit all crates
 - [#51] fetch.rs: validate ZIP magic bytes, reject path traversal/absolute paths/executables before extraction; check CSV headers and field ranges after extraction
-- [#53] fetch.rs: detect common top-level prefix dynamically instead of assuming single directory; warn on unexpected shape
 
 ---
 
