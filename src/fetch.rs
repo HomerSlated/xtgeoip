@@ -22,7 +22,7 @@ const BASE_DELAY_SECS: u64 = 2;
 use tempfile::TempDir;
 use zip::ZipArchive;
 
-use crate::{config::Config, messages};
+use crate::{backup::parse_archive_name, config::Config, messages};
 
 #[derive(Clone, Copy, Debug)]
 pub enum FetchMode {
@@ -97,12 +97,24 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
         .context("Content-Disposition header contains non-UTF-8 characters")?
         .to_owned();
 
-    let version = extract_version(&content_disposition).ok_or_else(|| {
-        anyhow::anyhow!(
-            "Could not extract version from Content-Disposition: {:?}",
-            content_disposition
-        )
-    })?;
+    let cd_filename =
+        parse_content_disposition_filename(&content_disposition).ok_or_else(
+            || {
+                anyhow::anyhow!(
+                    "Could not extract filename from Content-Disposition: {:?}",
+                    content_disposition
+                )
+            },
+        )?;
+
+    let version = parse_archive_name(cd_filename)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Could not extract version from archive filename {:?}",
+                cd_filename
+            )
+        })?
+        .to_owned();
 
     messages::info(&format!("Remote archive version: {version}"));
 
@@ -278,19 +290,20 @@ fn find_latest_local_csv_archive(
             continue;
         };
 
-        let prefix = "GeoLite2-Country-CSV_";
-        let suffix = ".zip";
-
-        if !name.starts_with(prefix) || !name.ends_with(suffix) {
+        if !name.starts_with("GeoLite2-Country-CSV_") || !name.ends_with(".zip")
+        {
             continue;
         }
 
-        let version = name[prefix.len()..name.len() - suffix.len()].to_string();
-
-        // Must be exactly 8 digits
-        if version.len() != 8 || !version.chars().all(|c| c.is_ascii_digit()) {
-            continue;
-        }
+        let version = match parse_archive_name(name) {
+            Some(v) => v.to_owned(),
+            None => {
+                messages::warn(&format!(
+                    "Skipping archive with unexpected name: {name}"
+                ));
+                continue;
+            }
+        };
 
         match &best {
             Some((_, best_version)) if version <= *best_version => {}
@@ -448,29 +461,18 @@ fn verify_cached_archive(
     Ok(actual_hash == expected_hash)
 }
 
-/// Extracts the 8-digit date version from a Content-Disposition header.
+/// Extract the `filename=` value from a `Content-Disposition` header.
 ///
-/// Handles: `attachment; filename=GeoLite2-Country-CSV_20260227.zip`
-/// and:     `attachment; filename="GeoLite2-Country-CSV_20260227.zip"`
-fn extract_version(content_disposition: &str) -> Option<String> {
-    let filename = content_disposition
+/// Handles both quoted and unquoted forms:
+/// - `attachment; filename=GeoLite2-Country-CSV_20260227.zip`
+/// - `attachment; filename="GeoLite2-Country-CSV_20260227.zip"`
+fn parse_content_disposition_filename(cd: &str) -> Option<&str> {
+    let filename = cd
         .split(';')
         .map(str::trim)
         .find(|part| part.to_ascii_lowercase().starts_with("filename="))?
         .split_once('=')?
         .1
         .trim_matches('"');
-
-    // Filename is now e.g. "GeoLite2-Country-CSV_20260227.zip"
-    let version_part = filename.split('_').nth(1)?;
-    let digits: String = version_part
-        .chars()
-        .take_while(|c| c.is_ascii_digit())
-        .collect();
-
-    if digits.len() == 8 {
-        Some(digits)
-    } else {
-        None
-    }
+    if filename.is_empty() { None } else { Some(filename) }
 }

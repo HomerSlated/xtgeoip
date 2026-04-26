@@ -40,7 +40,6 @@
 
 - [#61] global: parse-then-validate everywhere; never assume parsing implies validity; audit all crates
 - [#51] fetch.rs: validate ZIP magic bytes, reject path traversal/absolute paths/executables before extraction; check CSV headers and field ranges after extraction
-- [#52] fetch.rs/backup.rs: centralise archive name parsing into `parse_archive_name`; treat version token as opaque; warn if format unexpected but don't reject
 - [#53] fetch.rs: detect common top-level prefix dynamically instead of assuming single directory; warn on unexpected shape
 
 ---
@@ -100,9 +99,9 @@
 
 ---
 
-## VERSION HANDLING CHAIN [#52 → #69 → #70]
+## VERSION HANDLING CHAIN [#69 → #70]
 
-- [#69] all: introduce `struct Version(String)` with `parse`, `as_str`, `archive_name`; depends on #52
+- [#69] all: introduce `struct Version(String)` with `parse`, `as_str`, `archive_name`
 - [#70] backup.rs: replace `BTreeMap<String, _>` with `BTreeMap<Version, _>` for explicit sort semantics; depends on #69
 
 ---
