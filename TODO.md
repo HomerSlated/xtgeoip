@@ -111,10 +111,6 @@ Treat all remote content as hostile. Layers of defence:
 
 Crate options: `infer` or `content_inspector` for magic detection; `zip` crate already exposes central directory metadata.
 
-### #53 — fetch.rs: `flatten_to_temp_root` assumes single top-level directory
-
-`flatten_to_temp_root` assumes exactly one top-level directory in the ZIP. Harden: only strip the first component if it is common to all entries (detect dynamically); warn if archive structure doesn't match expected shape.
-
 ---
 
 ## MIGRATION
@@ -279,7 +275,7 @@ Requires `dashmap` or `Mutex<HashMap>`. **Check against invariant #5.**
 resolve_version()  → determine version (remote HEAD or local)
 acquire_archive()  → download or confirm local archive valid
 verify_archive()   → checksum + size + magic checks (#49, #50, #51)
-extract_archive()  → unpack to temp, flatten, move into place (#53, #54)
+extract_archive()  → unpack to temp, flatten, move into place (#54)
 ```
 **Constraint: must not break any existing parallelism inside `fetch()`.**
 

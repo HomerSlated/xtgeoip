@@ -320,7 +320,44 @@ fn find_latest_local_csv_archive(
     })
 }
 
-/// Extract zip archive into a temporary directory and return it
+/// Detect a common top-level directory prefix shared by all ZIP entries.
+///
+/// Returns `Some(name)` when all entries sit inside one directory, so the
+/// extraction loop can strip that component.  Returns `None` when the archive
+/// is flat or has multiple top-level directories.
+fn detect_top_level_prefix(
+    zip: &mut ZipArchive<File>,
+) -> Result<Option<String>> {
+    let mut prefix: Option<String> = None;
+    let mut has_nested = false;
+
+    for i in 0..zip.len() {
+        let entry = zip.by_index(i).context("Failed to read ZIP entry")?;
+        let Some(enclosed) = entry.enclosed_name() else { continue };
+
+        let mut comps = enclosed.components();
+        let first = match comps.next() {
+            Some(c) => c.as_os_str().to_string_lossy().into_owned(),
+            None => continue,
+        };
+        if comps.next().is_some() {
+            has_nested = true;
+        }
+        match &prefix {
+            None => prefix = Some(first),
+            Some(prev) if prev == &first => {}
+            Some(_) => return Ok(None), // multiple distinct first components
+        }
+    }
+
+    if has_nested { Ok(prefix) } else { Ok(None) }
+}
+
+/// Extract zip archive into a temporary directory and return it.
+///
+/// Detects a common top-level directory prefix and strips it so that CSV
+/// files land directly in the temp root.  Warns if the archive structure
+/// doesn't match the expected single-directory layout.
 fn extract_archive_to_temp(archive_path: &Path) -> Result<TempDir> {
     let temp_dir = TempDir::new()
         .context("Failed to create temporary extraction directory")?;
@@ -329,6 +366,13 @@ fn extract_archive_to_temp(archive_path: &Path) -> Result<TempDir> {
     let mut zip =
         ZipArchive::new(file).context("Failed to read zip archive")?;
 
+    let prefix = detect_top_level_prefix(&mut zip)?;
+    if prefix.is_none() && !zip.is_empty() {
+        messages::warn(
+            "ZIP archive lacks a common top-level directory; extracting flat.",
+        );
+    }
+
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).context("Failed to read zip entry")?;
 
@@ -336,7 +380,17 @@ fn extract_archive_to_temp(archive_path: &Path) -> Result<TempDir> {
             anyhow::anyhow!("Zip entry contains invalid path")
         })?;
 
-        let outpath = flatten_to_temp_root(temp_dir.path(), &enclosed);
+        let relative: PathBuf = if prefix.is_some() {
+            enclosed.components().skip(1).collect()
+        } else {
+            enclosed.to_owned()
+        };
+
+        if relative.as_os_str().is_empty() {
+            continue;
+        }
+
+        let outpath = temp_dir.path().join(&relative);
 
         if entry.is_dir() {
             fs::create_dir_all(&outpath).with_context(|| {
@@ -359,25 +413,6 @@ fn extract_archive_to_temp(archive_path: &Path) -> Result<TempDir> {
     }
 
     Ok(temp_dir)
-}
-
-/// Flatten MaxMind's top-level versioned directory so CSVs land directly in
-/// temp root
-fn flatten_to_temp_root(temp_root: &Path, entry_path: &Path) -> PathBuf {
-    let components: Vec<_> = entry_path.components().collect();
-
-    let slice = if components.len() > 1 {
-        &components[1..]
-    } else {
-        &components[..]
-    };
-
-    let mut outpath = PathBuf::from(temp_root);
-    for comp in slice {
-        outpath.push(comp.as_os_str());
-    }
-
-    outpath
 }
 
 /// Writer wrapper that hashes while writing
