@@ -3,11 +3,22 @@ use std::{
     fs::{self, File},
     io::{self, Read, Write},
     path::{Path, PathBuf},
+    thread,
+    time::Duration,
 };
 
 use anyhow::{Context, Result, bail};
-use reqwest::{blocking::Client, header::CONTENT_DISPOSITION};
+use reqwest::{
+    blocking::Client,
+    header::{CONTENT_DISPOSITION, CONTENT_LENGTH},
+};
 use sha2::{Digest, Sha256};
+
+const MAX_DOWNLOAD_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
+const SIZE_TOLERANCE: f64 = 0.5; // ±50% of last known archive size
+const DEFAULT_TIMEOUT_SECS: u64 = 300;
+const MAX_RETRIES: u32 = 3;
+const BASE_DELAY_SECS: u64 = 2;
 use tempfile::TempDir;
 use zip::ZipArchive;
 
@@ -57,75 +68,143 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
             "/",
             env!("CARGO_PKG_VERSION")
         ))
+        .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
         .build()?;
 
     messages::info("Checking remote archive version...");
 
-    let resp = client
-        .get(format!("{maxmind_url}?suffix=zip"))
-        .basic_auth(account_id, Some(license_key))
-        .send()
-        .context("Failed to query MaxMind archive")?;
+    let resp = send_with_retry(|| {
+        client
+            .get(format!("{maxmind_url}?suffix=zip"))
+            .basic_auth(account_id, Some(license_key))
+            .send()
+    })?;
 
     if !resp.status().is_success() {
         bail!("Remote request failed: {}", resp.status());
     }
 
-    // Extract version from Content-Disposition filename
-    let remote_filename = resp
+    // Parse Content-Disposition; each failure mode gets a distinct message
+    let content_disposition = resp
         .headers()
         .get(CONTENT_DISPOSITION)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Content-Disposition header absent from MaxMind response"
+            )
+        })?
+        .to_str()
+        .context("Content-Disposition header contains non-UTF-8 characters")?
+        .to_owned();
 
-    let version = extract_version(remote_filename).ok_or_else(|| {
-        anyhow::anyhow!("Failed to parse version from filename")
+    let version = extract_version(&content_disposition).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Could not extract version from Content-Disposition: {:?}",
+            content_disposition
+        )
     })?;
 
     messages::info(&format!("Remote archive version: {version}"));
+
+    // Guard against absurd Content-Length before doing anything else
+    let content_length = resp
+        .headers()
+        .get(CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok());
+
+    if let Some(len) = content_length {
+        if len > MAX_DOWNLOAD_BYTES {
+            bail!(
+                "Content-Length {len} exceeds maximum allowed size \
+                 {MAX_DOWNLOAD_BYTES}"
+            );
+        }
+        if let Ok((prev_path, _)) = find_latest_local_csv_archive(archive_dir)
+            && let Ok(meta) = fs::metadata(&prev_path)
+        {
+            let prev = meta.len();
+            let lo = (prev as f64 * (1.0 - SIZE_TOLERANCE)) as u64;
+            let hi = (prev as f64 * (1.0 + SIZE_TOLERANCE)) as u64;
+            if len < lo || len > hi {
+                messages::warn(&format!(
+                    "Remote Content-Length {len} is outside expected \
+                     range [{lo}, {hi}] (±50% of previous {prev} bytes). \
+                     Proceeding with caution."
+                ));
+            }
+        }
+    }
 
     let archive_path =
         archive_dir.join(format!("GeoLite2-Country-CSV_{version}.zip"));
     let checksum_path =
         archive_dir.join(format!("GeoLite2-Country-CSV_{version}.zip.sha256"));
 
+    // Re-verify cached archive before trusting it
     if archive_path.exists() && checksum_path.exists() {
-        messages::info(&format!(
-            "Reusing local copy: {}",
-            archive_path.display()
-        ));
-        let temp_dir = extract_archive_to_temp(&archive_path)?;
-        return Ok((temp_dir, version));
+        match verify_cached_archive(&archive_path, &checksum_path) {
+            Ok(true) => {
+                messages::info(&format!(
+                    "Reusing verified local copy: {}",
+                    archive_path.display()
+                ));
+                let temp_dir = extract_archive_to_temp(&archive_path)?;
+                return Ok((temp_dir, version));
+            }
+            Ok(false) => {
+                messages::warn(
+                    "Local archive checksum mismatch — re-downloading.",
+                );
+            }
+            Err(e) => {
+                messages::warn(&format!(
+                    "Could not verify local archive: {e:#} — re-downloading."
+                ));
+            }
+        }
     }
 
-    messages::info("No local copy of this version. Downloading...");
+    messages::info("No verified local copy of this version. Downloading...");
+
+    // Download to a .part file; rename atomically on success
+    let tmp_path = archive_path.with_extension("zip.part");
 
     // Stream archive directly to file + hash while copying
     let mut archive_file =
-        File::create(&archive_path).context("Failed to create archive file")?;
+        File::create(&tmp_path).context("Failed to create archive file")?;
 
     let mut hasher = Sha256::new();
 
-    {
+    let written = {
         let mut hashing_writer = HashingWriter {
             inner: &mut archive_file,
             hasher: &mut hasher,
         };
-
-        let mut limited = resp.take(10 * 1024 * 1024 * 1024); // 10GB safety cap
+        // +1 so we can detect a breach vs. exactly-at-limit
+        let mut limited = resp.take(MAX_DOWNLOAD_BYTES + 1);
         io::copy(&mut limited, &mut hashing_writer)
-            .context("Failed while downloading archive")?;
+            .context("Failed while downloading archive")?
+    };
+
+    if written > MAX_DOWNLOAD_BYTES {
+        let _ = fs::remove_file(&tmp_path);
+        bail!(
+            "Download exceeded {MAX_DOWNLOAD_BYTES} bytes — refusing to use \
+             truncated archive"
+        );
     }
 
     let actual_hash = format!("{:x}", hasher.finalize());
 
     // Download checksum
     let checksum_url = format!("{maxmind_url}?suffix=zip.sha256");
-    let mut checksum_resp = client
-        .get(&checksum_url)
-        .basic_auth(account_id, Some(license_key))
-        .send()
-        .context("Failed to download checksum")?;
+    let mut checksum_resp = send_with_retry(|| {
+        client
+            .get(&checksum_url)
+            .basic_auth(account_id, Some(license_key))
+            .send()
+    })?;
 
     if !checksum_resp.status().is_success() {
         bail!("Checksum request failed: {}", checksum_resp.status());
@@ -143,10 +222,10 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
 
     // Verify checksum
     if actual_hash != expected_hash {
-        if let Err(e) = fs::remove_file(&archive_path) {
+        if let Err(e) = fs::remove_file(&tmp_path) {
             messages::warn(&format!(
-                "Failed to remove corrupt archive {}: {}",
-                archive_path.display(),
+                "Failed to remove partial download {}: {}",
+                tmp_path.display(),
                 e
             ));
         }
@@ -159,6 +238,14 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
     }
 
     messages::info("Checksum verification successful.");
+
+    fs::rename(&tmp_path, &archive_path).with_context(|| {
+        format!(
+            "Failed to rename {} to {}",
+            tmp_path.display(),
+            archive_path.display()
+        )
+    })?;
 
     // Save checksum
     fs::write(&checksum_path, checksum_text)
@@ -296,6 +383,69 @@ impl<'a, W: Write> Write for HashingWriter<'a, W> {
     fn flush(&mut self) -> io::Result<()> {
         self.inner.flush()
     }
+}
+
+/// Retry a send closure on transient network errors or 5xx responses.
+fn send_with_retry<F>(f: F) -> Result<reqwest::blocking::Response>
+where
+    F: Fn() -> reqwest::Result<reqwest::blocking::Response>,
+{
+    let mut attempt = 0u32;
+    loop {
+        match f() {
+            Err(e) if attempt < MAX_RETRIES && (e.is_timeout() || e.is_connect()) => {
+                let delay = BASE_DELAY_SECS * 2u64.pow(attempt);
+                messages::warn(&format!(
+                    "Transient network error (attempt {}/{MAX_RETRIES}): {e}. \
+                     Retrying in {delay}s...",
+                    attempt + 1
+                ));
+                thread::sleep(Duration::from_secs(delay));
+                attempt += 1;
+            }
+            Err(e) => return Err(e.into()),
+            Ok(resp) if resp.status().is_server_error() && attempt < MAX_RETRIES => {
+                let delay = BASE_DELAY_SECS * 2u64.pow(attempt);
+                messages::warn(&format!(
+                    "Server error {} (attempt {}/{MAX_RETRIES}). \
+                     Retrying in {delay}s...",
+                    resp.status(),
+                    attempt + 1
+                ));
+                thread::sleep(Duration::from_secs(delay));
+                attempt += 1;
+            }
+            Ok(resp) => return Ok(resp),
+        }
+    }
+}
+
+/// Re-verify a cached archive against its stored SHA-256 checksum.
+fn verify_cached_archive(
+    archive_path: &Path,
+    checksum_path: &Path,
+) -> Result<bool> {
+    let checksum_text =
+        fs::read_to_string(checksum_path).with_context(|| {
+            format!(
+                "Failed to read checksum file {}",
+                checksum_path.display()
+            )
+        })?;
+    let expected_hash = checksum_text
+        .split_whitespace()
+        .next()
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Invalid checksum format in {}",
+                checksum_path.display()
+            )
+        })?;
+    let data = fs::read(archive_path).with_context(|| {
+        format!("Failed to read archive {}", archive_path.display())
+    })?;
+    let actual_hash = format!("{:x}", Sha256::digest(&data));
+    Ok(actual_hash == expected_hash)
 }
 
 /// Extracts the 8-digit date version from a Content-Disposition header.

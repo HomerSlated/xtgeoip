@@ -5,6 +5,11 @@ use clap::{Parser, Subcommand};
 
 use crate::{action::Action, config::ConfAction};
 
+pub enum CliOutcome {
+    Action(Action),
+    ShowHelp,
+}
+
 #[derive(Parser)]
 #[command(
     name = "xtgeoip",
@@ -147,8 +152,8 @@ fn conf_action(default: bool, show: bool) -> ConfAction {
     }
 }
 
-/// Normalize CLI input into Action
-pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
+/// Normalize CLI input into a CliOutcome
+pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
     use Commands::*;
 
     // Top-level --legacy is invalid unless used with build/run subcommands
@@ -164,7 +169,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                 default,
                 show,
                 edit: _,
-            } => Ok(Some(Action::Conf(conf_action(*default, *show)))),
+            } => Ok(CliOutcome::Action(Action::Conf(conf_action(*default, *show)))),
 
             Run {
                 prune,
@@ -191,7 +196,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                     )));
                 }
 
-                Ok(Some(Action::Run {
+                Ok(CliOutcome::Action(Action::Run {
                     prune: *prune,
                     legacy: *legacy,
                     backup: *backup,
@@ -222,7 +227,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                     )));
                 }
 
-                Ok(Some(Action::Build {
+                Ok(CliOutcome::Action(Action::Build {
                     legacy: *legacy,
                     backup: *backup,
                     clean: *clean,
@@ -260,7 +265,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
                     )));
                 }
 
-                Ok(Some(Action::Fetch { prune: *prune }))
+                Ok(CliOutcome::Action(Action::Fetch { prune: *prune }))
             }
         }
     } else {
@@ -271,7 +276,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
         let f = cli.force;
 
         if !b && !c && !p && !f {
-            return Ok(None);
+            return Ok(CliOutcome::ShowHelp);
         }
 
         // -p alone invalid
@@ -301,7 +306,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
         }
 
         if b {
-            return Ok(Some(Action::TopLevelBackup {
+            return Ok(CliOutcome::Action(Action::TopLevelBackup {
                 clean: c,
                 force: f,
                 prune: p,
@@ -309,7 +314,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
         }
 
         if c {
-            return Ok(Some(Action::TopLevelClean { force: f }));
+            return Ok(CliOutcome::Action(Action::TopLevelClean { force: f }));
         }
 
         Err(anyhow!("Unsupported top-level flag combination"))

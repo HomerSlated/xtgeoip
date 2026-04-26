@@ -21,27 +21,43 @@ mod messages;
 
 use crate::{
     action::{Action, run_action},
-    cli::Cli,
+    cli::{Cli, CliOutcome},
     config::load_config,
     messages::{init_logger, log_early_error},
 };
 
-fn normalize_cli_to_action(cli: &Cli) -> Result<Option<Action>> {
-    crate::cli::normalize_cli_to_action(cli)
+const EXIT_CLI_ERROR: i32 = 2;
+const EXIT_RUNTIME_ERROR: i32 = 1;
+
+fn is_root() -> bool {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("Uid:"))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|uid| uid.parse::<u32>().ok())
+        })
+        .map(|uid| uid == 0)
+        .unwrap_or(false)
 }
 
 fn run(cli: Cli) -> Result<()> {
-    let action = normalize_cli_to_action(&cli).map_err(|e| {
+    let outcome = cli::normalize_cli_to_action(&cli).map_err(|e| {
         eprintln!("Error: {e}");
         e
     })?;
 
-    match action {
-        Some(Action::Conf(conf_action)) => {
+    match outcome {
+        CliOutcome::Action(Action::Conf(conf_action)) => {
             config::run_conf(conf_action)?;
         }
 
-        Some(action) => {
+        CliOutcome::Action(action) => {
+            if action.requires_root() && !is_root() {
+                eprintln!("Error: You must be root to run xtgeoip");
+                std::process::exit(EXIT_RUNTIME_ERROR);
+            }
             let cfg = load_config().map_err(|e| {
                 log_early_error(&format!("Failed to load config: {}", e));
                 e
@@ -52,11 +68,11 @@ fn run(cli: Cli) -> Result<()> {
                 .as_ref()
                 .and_then(|p| p.threads)
                 .filter(|&t| t > 0)
-            {
-                rayon::ThreadPoolBuilder::new()
+                && let Err(e) = rayon::ThreadPoolBuilder::new()
                     .num_threads(threads)
                     .build_global()
-                    .ok();
+            {
+                messages::warn(&format!("Rayon thread pool init failed: {e}"));
             }
 
             if let Some(log_file) =
@@ -68,7 +84,7 @@ fn run(cli: Cli) -> Result<()> {
             run_action(&cfg, action)?;
         }
 
-        None => {
+        CliOutcome::ShowHelp => {
             Cli::command().print_help()?;
             println!();
             let e = anyhow::anyhow!("No command or top-level action specified");
@@ -94,20 +110,13 @@ fn main() -> Result<()> {
                     e.kind()
                 ));
                 e.print()?;
-                process::exit(2);
+                process::exit(EXIT_CLI_ERROR);
             }
         },
     };
 
-    if let Err(e) = run(cli) {
-        if let Some(os_err) = e.downcast_ref::<std::io::Error>()
-            && os_err.kind() == std::io::ErrorKind::PermissionDenied
-        {
-            eprintln!("Error: You must be root to run xtgeoip");
-            process::exit(1);
-        }
-
-        process::exit(1);
+    if run(cli).is_err() {
+        process::exit(EXIT_RUNTIME_ERROR);
     }
 
     Ok(())

@@ -23,55 +23,8 @@
 
 ---
 
-## IMMEDIATE FIXES: SILENT FAILURES AND ERROR CONTEXT
-
-- [#35] build.rs: collect write errors with context instead of `write_errors += 1`
-- [#63] backup.rs: collect delete errors with context instead of `.is_err()` filter
-- [#66] build.rs: log orphan file list write failure; always emit full list to stdout and log
-- [#13] config.rs: wrap `fs::copy` failure with `.with_context`; pre-check source existence
-- [#14] config.rs: check editor exit status; handle unset/empty `$EDITOR` before spawn
-- [#72] backup.rs/build.rs: include file count in all bulk-delete log messages
-
----
-
-## IMMEDIATE FIXES: CORRECTNESS
-
-- [#36] build.rs: replace O(n²) `contains` in orphan filter with `HashSet`
-- [#37] build.rs/fetch.rs: deduplicate `unsafe { Mmap::map }` into one `mmap_file` helper
-- [#60] backup.rs: enforce double-space separator in manifest parser; reject single-space
-- [#4] main.rs: surface Rayon pool init failures via `OnceLock` instead of `.ok()`
-- [#7] main.rs: define `EXIT_RUNTIME_ERROR`/`EXIT_CLI_ERROR` constants; consider typed error taxonomy
-- [#33] cli.rs: replace `Result<Option<Action>>` with `Result<CliOutcome>` where `CliOutcome` is `Action | ShowHelp`
-- [#59] backup.rs: replace fragile `glob()` with `fs::read_dir` + explicit predicate; drop `glob` crate if unused
-
----
-
-## ATOMICITY: WRITE-TO-TEMP PATTERN [#48, #64, #65]
-
-- [#48] fetch.rs: download to `.zip.part`, rename atomically on success
-- [#64] backup.rs: write backup to `.tar.gz.part`, rename atomically on success
-- [#65] backup.rs: deduplicate file list with `sort(); dedup()` before tar construction
-
----
-
-## FETCH RESILIENCE
-
-- [#47] fetch.rs: add 300s timeout to `Client::builder()`; consider making it configurable
-- [#46] fetch.rs: audit `Content-Disposition` parsing chain for panic/silent-None paths
-- [#49] fetch.rs: re-verify cached archive checksum before reusing; warn and re-download on mismatch
-- [#55] fetch.rs: add exponential backoff retry (3 retries, 2s base); transient errors only
-- [#50+56] fetch.rs: enforce `MAX_DOWNLOAD_BYTES` with explicit failure on breach; check `Content-Length` against historical size with ±50% tolerance before download
-
----
-
 ## CONFIG AND CONF SUBCOMMAND
 
-- [#12] config.rs: centralise `SYSTEM_CONFIG` path into one `system_config_path()` function
-- [#11] config.rs: add `cfg.validate()` after `toml::from_str` for semantic invariants
-- [#10] config.rs: guard interactive prompts behind `IsTerminal` check; print actionable message in non-TTY mode
-- [#16] config.rs: split `ensure_system_config_exists` into `config_exists`, `create_default_config`, `prompt_create_config`; depends on #10
-- [#23] main.rs/action.rs: handle `Action::Conf` in one place only (prefer `main.rs`, before `run_action`)
-- [#6] main.rs: check `requires_root()` upfront before execution; avoid post-hoc `downcast_ref`
 - [#15] config.rs: give each `ConfAction` variant explicit preconditions and error type; depends on #7
 - [#1] messages.rs/config.rs: make file logging optional via TOML config and CLI flag override
 
@@ -112,7 +65,6 @@
 ## ARCHITECTURE: ANALYSIS AND SMALL REFACTORS
 
 - [#8] all modules: audit separation of concerns before larger refactoring; prerequisite step
-- [#3] main.rs: remove redundant local `normalize_cli_to_action` wrapper
 - [#5] main.rs: split `run()` into five explicit phases: parse → resolve → config → init → execute
 - [#28] cli.rs: consolidate repeated flags into `CommonFlags` struct with `#[command(flatten)]`
 - [#18] all: build `ResolvedPaths` once after config load instead of reconstructing at every call site
