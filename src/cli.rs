@@ -169,7 +169,9 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
                 default,
                 show,
                 edit: _,
-            } => Ok(CliOutcome::Action(Action::Conf(conf_action(*default, *show)))),
+            } => Ok(CliOutcome::Action(Action::Conf(conf_action(
+                *default, *show,
+            )))),
 
             Run {
                 prune,
