@@ -3,7 +3,7 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     ffi::OsStr,
     fs::{self, File},
-    path::Path,
+    path::{Path, PathBuf},
     sync::atomic::{AtomicUsize, Ordering},
 };
 
@@ -42,7 +42,6 @@ pub fn build(
     }
 
     let (country_id, mut country_name) = load_countries(source_dir, legacy)?;
-
     country_name
         .entry("A1".into())
         .or_insert_with(|| "Anonymous Proxy".into());
@@ -53,23 +52,21 @@ pub fn build(
         .entry("O1".into())
         .or_insert_with(|| "Other Country".into());
 
-    let mut country_ranges: BTreeMap<String, CountryRanges> = country_name
-        .keys()
-        .map(|cc| (cc.clone(), CountryRanges::default()))
-        .collect();
-
-    for cc in ["A1", "A2", "O1"] {
-        country_ranges.entry(cc.to_string()).or_default();
-    }
-
-    // Load IPv4 and IPv6 block files in parallel
+    let country_count = country_name.len();
     let (v4_result, v6_result) = rayon::join(
-        || load_blocks_v4(source_dir, &country_id),
-        || load_blocks_v6(source_dir, &country_id),
+        || load_blocks_v4(source_dir, &country_id, country_count),
+        || load_blocks_v6(source_dir, &country_id, country_count),
     );
     let v4_pools = v4_result?;
     let v6_pools = v6_result?;
 
+    let mut country_ranges: BTreeMap<String, CountryRanges> = country_name
+        .keys()
+        .map(|cc| (cc.clone(), CountryRanges::default()))
+        .collect();
+    for cc in ["A1", "A2", "O1"] {
+        country_ranges.entry(cc.to_string()).or_default();
+    }
     for (cc, pool) in v4_pools {
         country_ranges.entry(cc).or_default().pool_v4 = pool;
     }
@@ -77,11 +74,29 @@ pub fn build(
         country_ranges.entry(cc).or_default().pool_v6 = pool;
     }
 
-    std::fs::create_dir_all(target_dir)?;
+    let (written_paths, checksums) = write_outputs(&country_ranges, target_dir)?;
+    let manifest_path = generate_manifest(target_dir, version, checksums)?;
+    detect_orphans(target_dir, &written_paths, &manifest_path)?;
 
-    // -------------------------
-    // Prepare files we will write
-    // -------------------------
+    messages::info(&format!("Countries processed: {}", country_count));
+    let ipv4_count: usize =
+        country_ranges.values().map(|cr| cr.pool_v4.len()).sum();
+    let ipv6_count: usize =
+        country_ranges.values().map(|cr| cr.pool_v6.len()).sum();
+    messages::info(&format!("IPv4 country ranges: {}", ipv4_count));
+    messages::info(&format!("IPv6 country ranges: {}", ipv6_count));
+
+    Ok(())
+}
+
+type WriteOutputs = (Vec<PathBuf>, Vec<(String, String)>);
+
+fn write_outputs(
+    country_ranges: &BTreeMap<String, CountryRanges>,
+    target_dir: &Path,
+) -> anyhow::Result<WriteOutputs> {
+    fs::create_dir_all(target_dir)?;
+
     let files_to_write: Vec<_> = country_ranges
         .keys()
         .flat_map(|iso| {
@@ -90,9 +105,6 @@ pub fn build(
         })
         .collect();
 
-    // -------------------------
-    // Detect overwrites
-    // -------------------------
     let overwrite_count = files_to_write.iter().filter(|f| f.exists()).count();
     if overwrite_count > 0 {
         messages::warn(&format!(
@@ -101,9 +113,6 @@ pub fn build(
         ));
     }
 
-    // -------------------------
-    // Write country files in parallel, collecting (filename, hash) pairs
-    // -------------------------
     let write_results: Vec<anyhow::Result<(String, String)>> = country_ranges
         .par_iter()
         .flat_map(|(iso, cr)| {
@@ -132,14 +141,16 @@ pub fn build(
     }
     checksums.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
-    // -------------------------
-    // Version file
-    // -------------------------
+    Ok((files_to_write, checksums))
+}
+
+fn generate_manifest(
+    target_dir: &Path,
+    version: &Version,
+    checksums: Vec<(String, String)>,
+) -> anyhow::Result<PathBuf> {
     fs::write(target_dir.join("version"), format!("{version}\n"))?;
 
-    // -------------------------
-    // Blake3 manifest (single write, no re-read of files)
-    // -------------------------
     let manifest_name = version.bin_manifest_name();
     let manifest_path = target_dir.join(&manifest_name);
     let manifest_content: String = checksums
@@ -148,9 +159,14 @@ pub fn build(
         .collect();
     fs::write(&manifest_path, manifest_content.as_bytes())?;
 
-    // -------------------------
-    // Detect orphaned files
-    // -------------------------
+    Ok(manifest_path)
+}
+
+fn detect_orphans(
+    target_dir: &Path,
+    written: &[PathBuf],
+    manifest_path: &Path,
+) -> anyhow::Result<()> {
     let all_existing: Vec<_> = fs::read_dir(target_dir)?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
@@ -165,78 +181,68 @@ pub fn build(
         })
         .collect();
 
-    let written_set: HashSet<_> = files_to_write
-        .iter()
-        .chain(std::iter::once(&manifest_path))
-        .cloned()
-        .collect();
+    let mut written_set: HashSet<PathBuf> =
+        HashSet::with_capacity(written.len() + 1);
+    written_set.extend(written.iter().cloned());
+    written_set.insert(manifest_path.to_path_buf());
 
     let orphaned: Vec<_> = all_existing
         .into_iter()
         .filter(|p| !written_set.contains(p))
         .collect();
 
-    if !orphaned.is_empty() {
-        // Stale manifests (.blake3/.sha256) are unconditionally superseded by
-        // the new manifest — delete them silently.
-        let (stale_manifests, stale_iv): (Vec<_>, Vec<_>) =
-            orphaned.into_iter().partition(|p| {
-                matches!(
-                    p.extension().and_then(|e| e.to_str()),
-                    Some("blake3") | Some("sha256")
-                )
-            });
+    if orphaned.is_empty() {
+        return Ok(());
+    }
 
-        for path in &stale_manifests {
-            if let Err(e) = fs::remove_file(path) {
-                messages::warn(&format!(
-                    "Failed to delete stale manifest {}: {e:#}",
-                    path.display()
-                ));
-            }
-        }
+    // Stale manifests (.blake3/.sha256) are unconditionally superseded by
+    // the new manifest — delete them silently.
+    let (stale_manifests, stale_iv): (Vec<_>, Vec<_>) =
+        orphaned.into_iter().partition(|p| {
+            matches!(
+                p.extension().and_then(|e| e.to_str()),
+                Some("blake3") | Some("sha256")
+            )
+        });
 
-        // Orphaned iv4/iv6 files require user action (e.g. legacy→normal
-        // mode transition leaving EU.iv4/EU.iv6 behind).
-        if !stale_iv.is_empty() {
-            let orphaned_path = target_dir.join("orphaned");
+    for path in &stale_manifests {
+        if let Err(e) = fs::remove_file(path) {
             messages::warn(&format!(
-                "{} orphaned files detected in \"{}\":",
-                stale_iv.len(),
-                target_dir.display()
+                "Failed to delete stale manifest {}: {e:#}",
+                path.display()
             ));
-            for p in &stale_iv {
-                messages::warn(&format!("  {}", p.display()));
-            }
-            let list = stale_iv
-                .iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join("\n");
-            match fs::write(&orphaned_path, &list) {
-                Ok(()) => messages::warn(&format!(
-                    "Run `xtgeoip build -c -f` or delete files listed in \
-                     \"{}\" for a clean install.",
-                    orphaned_path.display()
-                )),
-                Err(e) => messages::warn(&format!(
-                    "Could not write orphaned file list to \"{}\": {e:#}",
-                    orphaned_path.display()
-                )),
-            }
         }
     }
 
-    // -------------------------
-    // Summary
-    // -------------------------
-    messages::info(&format!("Countries processed: {}", country_name.len()));
-    let ipv4_count: usize =
-        country_ranges.values().map(|cr| cr.pool_v4.len()).sum();
-    let ipv6_count: usize =
-        country_ranges.values().map(|cr| cr.pool_v6.len()).sum();
-    messages::info(&format!("IPv4 country ranges: {}", ipv4_count));
-    messages::info(&format!("IPv6 country ranges: {}", ipv6_count));
+    // Orphaned iv4/iv6 files require user action (e.g. legacy→normal
+    // mode transition leaving EU.iv4/EU.iv6 behind).
+    if !stale_iv.is_empty() {
+        let orphaned_path = target_dir.join("orphaned");
+        messages::warn(&format!(
+            "{} orphaned files detected in \"{}\":",
+            stale_iv.len(),
+            target_dir.display()
+        ));
+        for p in &stale_iv {
+            messages::warn(&format!("  {}", p.display()));
+        }
+        let list = stale_iv
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        match fs::write(&orphaned_path, &list) {
+            Ok(()) => messages::warn(&format!(
+                "Run `xtgeoip build -c -f` or delete files listed in \
+                 \"{}\" for a clean install.",
+                orphaned_path.display()
+            )),
+            Err(e) => messages::warn(&format!(
+                "Could not write orphaned file list to \"{}\": {e:#}",
+                orphaned_path.display()
+            )),
+        }
+    }
 
     Ok(())
 }
@@ -387,6 +393,7 @@ fn parse_block_indices(
 fn load_blocks_v4(
     source_dir: &Path,
     country_id: &HashMap<String, String>,
+    country_count: usize,
 ) -> anyhow::Result<HashMap<String, Vec<(u32, u32)>>> {
     const FILE_NAME: &str = "GeoLite2-Country-Blocks-IPv4.csv";
     let file = File::open(source_dir.join(FILE_NAME))?;
@@ -428,7 +435,8 @@ fn load_blocks_v4(
         messages::warn(&format!("{n} malformed rows skipped in {FILE_NAME}"));
     }
 
-    let mut pools: HashMap<String, Vec<(u32, u32)>> = HashMap::new();
+    let mut pools: HashMap<String, Vec<(u32, u32)>> =
+        HashMap::with_capacity(country_count);
     for (cc, range_opt) in parsed {
         if let Some(range) = range_opt {
             pools.entry(cc).or_default().push(range);
@@ -436,7 +444,7 @@ fn load_blocks_v4(
     }
     pools
         .par_iter_mut()
-        .for_each(|(_, v)| *v = merge_ranges_v4(v));
+        .for_each(|(_, v)| *v = merge_ranges(v));
     Ok(pools)
 }
 
@@ -446,6 +454,7 @@ fn load_blocks_v4(
 fn load_blocks_v6(
     source_dir: &Path,
     country_id: &HashMap<String, String>,
+    country_count: usize,
 ) -> anyhow::Result<HashMap<String, Vec<(u128, u128)>>> {
     const FILE_NAME: &str = "GeoLite2-Country-Blocks-IPv6.csv";
     let file = File::open(source_dir.join(FILE_NAME))?;
@@ -487,7 +496,8 @@ fn load_blocks_v6(
         messages::warn(&format!("{n} malformed rows skipped in {FILE_NAME}"));
     }
 
-    let mut pools: HashMap<String, Vec<(u128, u128)>> = HashMap::new();
+    let mut pools: HashMap<String, Vec<(u128, u128)>> =
+        HashMap::with_capacity(country_count);
     for (cc, range_opt) in parsed {
         if let Some(range) = range_opt {
             pools.entry(cc).or_default().push(range);
@@ -495,7 +505,7 @@ fn load_blocks_v6(
     }
     pools
         .par_iter_mut()
-        .for_each(|(_, v)| *v = merge_ranges_v6(v));
+        .for_each(|(_, v)| *v = merge_ranges(v));
     Ok(pools)
 }
 
@@ -549,35 +559,30 @@ fn cidr_to_range_ipv6(cidr: &str) -> Option<(u128, u128)> {
 // -------------------------
 // Merge ranges
 // -------------------------
-fn merge_ranges_v4(ranges: &[(u32, u32)]) -> Vec<(u32, u32)> {
-    if ranges.is_empty() {
-        return vec![];
+trait IpInt: Copy + Ord {
+    fn saturating_inc(self) -> Self;
+}
+impl IpInt for u32 {
+    fn saturating_inc(self) -> u32 {
+        self.saturating_add(1)
     }
-    let mut sorted = ranges.to_vec();
-    sorted.sort_unstable_by_key(|r| r.0);
-    let mut merged: Vec<(u32, u32)> = Vec::with_capacity(sorted.len());
-    for &(start, end) in &sorted {
-        if let Some(last) = merged.last_mut()
-            && start <= last.1.saturating_add(1)
-        {
-            last.1 = last.1.max(end);
-        } else {
-            merged.push((start, end));
-        }
+}
+impl IpInt for u128 {
+    fn saturating_inc(self) -> u128 {
+        self.saturating_add(1)
     }
-    merged
 }
 
-fn merge_ranges_v6(ranges: &[(u128, u128)]) -> Vec<(u128, u128)> {
+fn merge_ranges<T: IpInt>(ranges: &[(T, T)]) -> Vec<(T, T)> {
     if ranges.is_empty() {
         return vec![];
     }
     let mut sorted = ranges.to_vec();
     sorted.sort_unstable_by_key(|r| r.0);
-    let mut merged: Vec<(u128, u128)> = Vec::with_capacity(sorted.len());
+    let mut merged: Vec<(T, T)> = Vec::with_capacity(sorted.len());
     for &(start, end) in &sorted {
         if let Some(last) = merged.last_mut()
-            && start <= last.1.saturating_add(1)
+            && start <= last.1.saturating_inc()
         {
             last.1 = last.1.max(end);
         } else {

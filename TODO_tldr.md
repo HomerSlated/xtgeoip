@@ -49,16 +49,13 @@
 - [#5] main.rs: split `run()` into five explicit phases: parse → resolve → config → init → execute
 - [#28] cli.rs: consolidate repeated flags into `CommonFlags` struct with `#[command(flatten)]`
 - [#18] all: build `ResolvedPaths` once after config load instead of reconstructing at every call site
-- [#43] build.rs: pre-size HashMaps with `HashMap::with_capacity(country_count)`
-- [#42] build.rs: merge `merge_ranges_v4` / `merge_ranges_v6` into one generic function
 - [#62] build.rs: stream file hashing via `io::copy` instead of `fs::read` into memory; verify invariant #5
 
 ---
 
 ## ARCHITECTURE: build.rs RESTRUCTURING
 
-- [#41] build.rs: split `build()` into `load_data` / `transform` / `write_outputs` / `generate_manifest` / `detect_orphans`
-- [#45] build.rs: atomic build swap — write to temp dir, rename on success, discard on failure; depends on #41
+- [#45] build.rs: atomic build swap — write to temp dir, rename on success, discard on failure
 - [#38] build.rs: stream CSV rows into `DashMap` grouping instead of materialising all rows first; check invariant #5
 
 ---
