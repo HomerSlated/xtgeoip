@@ -18,6 +18,7 @@ mod cli;
 mod config;
 mod fetch;
 mod messages;
+mod version;
 
 use crate::{
     action::{Action, run_action},

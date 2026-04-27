@@ -13,7 +13,7 @@ use ipnetwork::IpNetwork;
 use memmap2::Mmap;
 use rayon::prelude::*;
 
-use crate::messages;
+use crate::{messages, version::Version};
 
 #[derive(Default)]
 struct CountryRanges {
@@ -32,7 +32,7 @@ struct BlockIndices {
 pub fn build(
     source_dir: &Path,
     target_dir: &Path,
-    version: &str,
+    version: &Version,
     legacy: bool,
 ) -> anyhow::Result<()> {
     if legacy {
@@ -140,7 +140,7 @@ pub fn build(
     // -------------------------
     // Blake3 manifest (single write, no re-read of files)
     // -------------------------
-    let manifest_name = format!("GeoLite2-Country-bin_{version}.blake3");
+    let manifest_name = version.bin_manifest_name();
     let manifest_path = target_dir.join(&manifest_name);
     let manifest_content: String = checksums
         .iter()
@@ -158,7 +158,10 @@ pub fn build(
             let ext = p.extension().and_then(OsStr::to_str).unwrap_or("");
             let fname = p.file_name().and_then(OsStr::to_str).unwrap_or("");
             fname != "version"
-                && (ext == "iv4" || ext == "iv6" || ext == "blake3")
+                && (ext == "iv4"
+                    || ext == "iv6"
+                    || ext == "blake3"
+                    || ext == "sha256")
         })
         .collect();
 
@@ -174,30 +177,53 @@ pub fn build(
         .collect();
 
     if !orphaned.is_empty() {
-        let orphaned_path = target_dir.join("orphaned");
-        messages::warn(&format!(
-            "{} orphaned files detected in \"{}\":",
-            orphaned.len(),
-            target_dir.display()
-        ));
-        for p in &orphaned {
-            messages::warn(&format!("  {}", p.display()));
+        // Stale manifests (.blake3/.sha256) are unconditionally superseded by
+        // the new manifest — delete them silently.
+        let (stale_manifests, stale_iv): (Vec<_>, Vec<_>) =
+            orphaned.into_iter().partition(|p| {
+                matches!(
+                    p.extension().and_then(|e| e.to_str()),
+                    Some("blake3") | Some("sha256")
+                )
+            });
+
+        for path in &stale_manifests {
+            if let Err(e) = fs::remove_file(path) {
+                messages::warn(&format!(
+                    "Failed to delete stale manifest {}: {e:#}",
+                    path.display()
+                ));
+            }
         }
-        let list = orphaned
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
-        match fs::write(&orphaned_path, &list) {
-            Ok(()) => messages::warn(&format!(
-                "Run `xtgeoip build -c -f` or delete files listed in \"{}\" \
-                 for a clean install.",
-                orphaned_path.display()
-            )),
-            Err(e) => messages::warn(&format!(
-                "Could not write orphaned file list to \"{}\": {e:#}",
-                orphaned_path.display()
-            )),
+
+        // Orphaned iv4/iv6 files require user action (e.g. legacy→normal
+        // mode transition leaving EU.iv4/EU.iv6 behind).
+        if !stale_iv.is_empty() {
+            let orphaned_path = target_dir.join("orphaned");
+            messages::warn(&format!(
+                "{} orphaned files detected in \"{}\":",
+                stale_iv.len(),
+                target_dir.display()
+            ));
+            for p in &stale_iv {
+                messages::warn(&format!("  {}", p.display()));
+            }
+            let list = stale_iv
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            match fs::write(&orphaned_path, &list) {
+                Ok(()) => messages::warn(&format!(
+                    "Run `xtgeoip build -c -f` or delete files listed in \
+                     \"{}\" for a clean install.",
+                    orphaned_path.display()
+                )),
+                Err(e) => messages::warn(&format!(
+                    "Could not write orphaned file list to \"{}\": {e:#}",
+                    orphaned_path.display()
+                )),
+            }
         }
     }
 
@@ -273,7 +299,14 @@ fn load_countries(
     for record in rdr.records() {
         let rec = record?;
         let geoname = rec.get(idx_geoname).unwrap_or("").to_string();
-        let iso = rec.get(idx_iso).unwrap_or("").to_string();
+        let iso = {
+            let raw = rec.get(idx_iso).unwrap_or("");
+            if raw.contains('/') || raw.contains('\\') || raw == ".." || raw == "." {
+                String::new()
+            } else {
+                raw.to_string()
+            }
+        };
         let name = rec.get(idx_name).unwrap_or("").to_string();
         let continent = rec.get(idx_continent).unwrap_or("").to_string();
 

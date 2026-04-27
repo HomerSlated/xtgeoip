@@ -8,6 +8,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+use csv::ReaderBuilder;
 use reqwest::{
     blocking::Client,
     header::{CONTENT_DISPOSITION, CONTENT_LENGTH},
@@ -22,7 +23,7 @@ const BASE_DELAY_SECS: u64 = 2;
 use tempfile::TempDir;
 use zip::ZipArchive;
 
-use crate::{backup::parse_archive_name, config::Config, messages};
+use crate::{config::Config, messages, version::Version};
 
 #[derive(Clone, Copy, Debug)]
 pub enum FetchMode {
@@ -30,7 +31,7 @@ pub enum FetchMode {
     Local,
 }
 
-pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
+pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, Version)> {
     let archive_dir = Path::new(&config.paths.archive_dir);
 
     // Local-only mode: skip remote entirely, use latest valid local archive
@@ -43,6 +44,7 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
             archive_path.display()
         ));
         let temp_dir = extract_archive_to_temp(&archive_path)?;
+        validate_csv_contents(temp_dir.path())?;
         return Ok((temp_dir, version));
     }
 
@@ -107,14 +109,21 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
             },
         )?;
 
-    let version = parse_archive_name(cd_filename)
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "Could not extract version from archive filename {:?}",
-                cd_filename
-            )
-        })?
-        .to_owned();
+    let version = Version::parse(cd_filename).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Could not extract version from archive filename {:?}",
+            cd_filename
+        )
+    })?;
+
+    if !(version.as_str().len() == 8
+        && version.as_str().chars().all(|c| c.is_ascii_digit()))
+    {
+        messages::warn(&format!(
+            "Archive version token {:?} does not look like a date — proceeding anyway",
+            version
+        ));
+    }
 
     messages::info(&format!("Remote archive version: {version}"));
 
@@ -162,6 +171,7 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
                     archive_path.display()
                 ));
                 let temp_dir = extract_archive_to_temp(&archive_path)?;
+                validate_csv_contents(temp_dir.path())?;
                 return Ok((temp_dir, version));
             }
             Ok(false) => {
@@ -266,6 +276,7 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
     messages::info(&format!("Saved archive as {}", archive_path.display()));
 
     let temp_dir = extract_archive_to_temp(&archive_path)?;
+    validate_csv_contents(temp_dir.path())?;
     Ok((temp_dir, version))
 }
 
@@ -273,8 +284,8 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, String)> {
 /// `GeoLite2-Country-CSV_YYYYMMDD.zip`
 fn find_latest_local_csv_archive(
     archive_dir: &Path,
-) -> Result<(PathBuf, String)> {
-    let mut best: Option<(PathBuf, String)> = None;
+) -> Result<(PathBuf, Version)> {
+    let mut best: Option<(PathBuf, Version)> = None;
 
     for entry in fs::read_dir(archive_dir)
         .with_context(|| format!("Failed to read {}", archive_dir.display()))?
@@ -295,8 +306,8 @@ fn find_latest_local_csv_archive(
             continue;
         }
 
-        let version = match parse_archive_name(name) {
-            Some(v) => v.to_owned(),
+        let version = match Version::parse(name) {
+            Some(v) => v,
             None => {
                 messages::warn(&format!(
                     "Skipping archive with unexpected name: {name}"
@@ -320,21 +331,61 @@ fn find_latest_local_csv_archive(
     })
 }
 
-/// Detect a common top-level directory prefix shared by all ZIP entries.
+/// Check that `path` starts with the ZIP local-file signature (`PK\x03\x04`).
+fn verify_zip_magic(path: &Path) -> Result<()> {
+    let mut f = File::open(path)
+        .with_context(|| format!("Failed to open {}", path.display()))?;
+    let mut magic = [0u8; 4];
+    f.read_exact(&mut magic).with_context(|| {
+        format!("Failed to read magic bytes from {}", path.display())
+    })?;
+    if magic != [0x50, 0x4B, 0x03, 0x04] {
+        bail!(
+            "Not a valid ZIP archive (bad magic bytes): {}",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
+/// Scan all ZIP entries for security issues and detect the common top-level
+/// directory prefix.
 ///
-/// Returns `Some(name)` when all entries sit inside one directory, so the
-/// extraction loop can strip that component.  Returns `None` when the archive
-/// is flat or has multiple top-level directories.
-fn detect_top_level_prefix(
-    zip: &mut ZipArchive<File>,
-) -> Result<Option<String>> {
+/// Rejects path traversal, absolute paths, and entries with executable bits.
+/// Returns `Some(name)` when all entries share one top-level directory (so the
+/// caller can strip it), or `None` for flat or multi-root archives.
+fn scan_zip_entries(zip: &mut ZipArchive<File>) -> Result<Option<String>> {
     let mut prefix: Option<String> = None;
     let mut has_nested = false;
+    let mut prefix_ambiguous = false;
 
     for i in 0..zip.len() {
         let entry = zip.by_index(i).context("Failed to read ZIP entry")?;
-        let Some(enclosed) = entry.enclosed_name() else { continue };
+        let raw_name = entry.name().to_owned();
 
+        if raw_name.split(['/', '\\']).any(|c| c == "..") {
+            bail!("ZIP entry contains path traversal: {:?}", raw_name);
+        }
+        if raw_name.starts_with('/')
+            || raw_name.starts_with('\\')
+            || raw_name.contains(":/")
+            || raw_name.contains(":\\")
+        {
+            bail!("ZIP entry contains absolute path: {:?}", raw_name);
+        }
+        if !entry.is_dir()
+            && let Some(mode) = entry.unix_mode()
+            && mode & 0o111 != 0
+        {
+            bail!("ZIP entry has executable bits set: {:?}", raw_name);
+        }
+
+        if prefix_ambiguous {
+            continue;
+        }
+        let Some(enclosed) = entry.enclosed_name() else {
+            bail!("ZIP entry has unsanitizable path: {:?}", raw_name);
+        };
         let mut comps = enclosed.components();
         let first = match comps.next() {
             Some(c) => c.as_os_str().to_string_lossy().into_owned(),
@@ -346,19 +397,20 @@ fn detect_top_level_prefix(
         match &prefix {
             None => prefix = Some(first),
             Some(prev) if prev == &first => {}
-            Some(_) => return Ok(None), // multiple distinct first components
+            Some(_) => prefix_ambiguous = true,
         }
     }
 
-    if has_nested { Ok(prefix) } else { Ok(None) }
+    if prefix_ambiguous || !has_nested { Ok(None) } else { Ok(prefix) }
 }
 
 /// Extract zip archive into a temporary directory and return it.
 ///
-/// Detects a common top-level directory prefix and strips it so that CSV
-/// files land directly in the temp root.  Warns if the archive structure
-/// doesn't match the expected single-directory layout.
+/// Validates magic bytes and scans all entries for security issues before
+/// extracting. Strips the common top-level directory prefix so that CSV files
+/// land directly in the temp root.
 fn extract_archive_to_temp(archive_path: &Path) -> Result<TempDir> {
+    verify_zip_magic(archive_path)?;
     let temp_dir = TempDir::new()
         .context("Failed to create temporary extraction directory")?;
     let file = File::open(archive_path)
@@ -366,7 +418,7 @@ fn extract_archive_to_temp(archive_path: &Path) -> Result<TempDir> {
     let mut zip =
         ZipArchive::new(file).context("Failed to read zip archive")?;
 
-    let prefix = detect_top_level_prefix(&mut zip)?;
+    let prefix = scan_zip_entries(&mut zip)?;
     if prefix.is_none() && !zip.is_empty() {
         messages::warn(
             "ZIP archive lacks a common top-level directory; extracting flat.",
@@ -510,4 +562,107 @@ fn parse_content_disposition_filename(cd: &str) -> Option<&str> {
         .1
         .trim_matches('"');
     if filename.is_empty() { None } else { Some(filename) }
+}
+
+/// Validate CSV files extracted into `dir`: locations (en) and both blocks
+/// files must exist, have the required columns, and pass first-row sanity
+/// checks.
+fn validate_csv_contents(dir: &Path) -> Result<()> {
+    validate_locations_csv(&dir.join("GeoLite2-Country-Locations-en.csv"))?;
+    for suffix in ["IPv4", "IPv6"] {
+        validate_blocks_csv(
+            &dir.join(format!("GeoLite2-Country-Blocks-{suffix}.csv")),
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_locations_csv(path: &Path) -> Result<()> {
+    let mut rdr = ReaderBuilder::new().from_path(path).with_context(|| {
+        format!("Failed to open {}", path.display())
+    })?;
+    let headers = rdr
+        .headers()
+        .with_context(|| {
+            format!("Failed to read headers from {}", path.display())
+        })?
+        .clone();
+    for col in ["geoname_id", "country_iso_code", "continent_code"] {
+        if !headers.iter().any(|h| h == col) {
+            bail!(
+                "Missing required column {:?} in {}",
+                col,
+                path.display()
+            );
+        }
+    }
+    let gid_idx = headers.iter().position(|h| h == "geoname_id").unwrap();
+    if let Some(result) = rdr.records().next() {
+        let rec = result.with_context(|| {
+            format!("Failed to read first row of {}", path.display())
+        })?;
+        if let Some(val) = rec.get(gid_idx)
+            && val.parse::<u64>().is_err()
+        {
+            bail!(
+                "geoname_id {:?} is not numeric in {}",
+                val,
+                path.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+fn validate_blocks_csv(path: &Path) -> Result<()> {
+    let mut rdr = ReaderBuilder::new().from_path(path).with_context(|| {
+        format!("Failed to open {}", path.display())
+    })?;
+    let headers = rdr
+        .headers()
+        .with_context(|| {
+            format!("Failed to read headers from {}", path.display())
+        })?
+        .clone();
+    for col in [
+        "network",
+        "geoname_id",
+        "is_anonymous_proxy",
+        "is_satellite_provider",
+    ] {
+        if !headers.iter().any(|h| h == col) {
+            bail!(
+                "Missing required column {:?} in {}",
+                col,
+                path.display()
+            );
+        }
+    }
+    if let Some(result) = rdr.records().next() {
+        let rec = result.with_context(|| {
+            format!("Failed to read first row of {}", path.display())
+        })?;
+        let net_idx = headers.iter().position(|h| h == "network").unwrap();
+        if let Some(net) = rec.get(net_idx)
+            && !net.contains('/')
+        {
+            messages::warn(&format!(
+                "First network {:?} in {} does not look like CIDR",
+                net,
+                path.display()
+            ));
+        }
+        for col in ["is_anonymous_proxy", "is_satellite_provider"] {
+            let idx = headers.iter().position(|h| h == col).unwrap();
+            if let Some(val) = rec.get(idx)
+                && val != "0" && val != "1"
+            {
+                messages::warn(&format!(
+                    "{col:?} value {val:?} in {} is not 0 or 1",
+                    path.display()
+                ));
+            }
+        }
+    }
+    Ok(())
 }

@@ -69,47 +69,9 @@ Note [#32]: Preserve the `Action` construction pattern — the change is in the 
 
 ## CONFIG AND CONF SUBCOMMAND
 
-### #15 — config.rs: `ConfAction` missing preconditions and error taxonomy
-
-`ConfAction` is a clean enum but missing explicit preconditions (e.g. `Edit` requires config to exist — currently buried in control flow) and error taxonomy integration. Each variant should carry/derive its own precondition check and error type. Depends on #7 (exit codes) and the spec-driven direction.
-
 ### #1 — messages.rs / config.rs: file logging not optional
 
 Logging to file should be optional. Configurable via `[logging]` in TOML config, overridable with a CLI flag (flag takes precedence). When disabled, log output goes to stderr only (or is suppressed, TBD).
-
----
-
-## LOGGING AND STEP VISIBILITY
-
-### #25 — action.rs: no logging at dispatch points
-
-`action.rs` does zero logging. Add lightweight log calls at each dispatch point:
-```rust
-messages::info("Starting backup");
-messages::info("Running fetch (remote)");
-messages::info("Building binary database");
-```
-Each `Step` (see #17) should emit at least one log line when it begins.
-
----
-
-## SECURITY HARDENING
-
-### #61 — global: parse-then-validate principle
-
-No parser, loader, `File::open()`, download handler, or deserialiser should be trusted for validation unless it explicitly enforces it. Rule: **Parse, then validate. Never assume parsing implies validity.** Apply everywhere — CSV reader, TOML deserialiser, ZIP extractor, `reqwest`, manifest parser, `serde`. Where a crate claims to validate, audit whether its validation is strict enough for a hostile input scenario.
-
-### #51 — fetch.rs: remote content not treated as hostile
-
-Treat all remote content as hostile. Layers of defence:
-
-**Before extraction**: verify ZIP magic bytes (`PK\x03\x04`); check central directory for path traversal (`../`), absolute paths, unexpected file types (executables, symlinks), entry count sanity.
-
-**After extraction**: verify each file has expected extension (`.csv`) and plausible size; check CSV header row matches expected column schema.
-
-**Parser hardening**: guard against empty required fields, semantically invalid values (negative geoname_ids, country codes > 2 chars, IP ranges where start > end), excessively long field values.
-
-Crate options: `infer` or `content_inspector` for magic detection; `zip` crate already exposes central directory metadata.
 
 ---
 
@@ -122,31 +84,6 @@ Crate options: `infer` or `content_inspector` for magic detection; `zip` crate a
 ---
 
 ## TYPED ENUMS: ELIMINATING BOOLEAN TRAPS
-
-### #21 — action.rs / build.rs: `prune_archives` takes opaque booleans
-
-`prune_archives(cfg, bool, bool)` — two opaque positional booleans. Replace:
-```rust
-enum PruneMode { CsvOnly, BinOnly, Both }
-fn prune_archives(cfg: &Config, mode: PruneMode) -> Result<()>
-```
-Inconsistencies across call sites become visible. `Step::Prune` can carry its `PruneMode` as data.
-
-### #67 — backup.rs: `backup` takes opaque force bool
-
-`fn backup(..., force: bool)` — the Verified/Force distinction is good design but opaque. Replace:
-```rust
-enum BackupMode { Verified, Force }
-fn backup(cfg: &Config, mode: BackupMode) -> Result<()>
-```
-
-### #68 — backup.rs: `gather_files_force` and `gather_files_verified` share structure
-
-Once `BackupMode` exists (#67), merge into:
-```rust
-fn gather_files(data_dir: &Path, mode: BackupMode) -> Result<Vec<PathBuf>>
-```
-Depends on #67.
 
 ### #39 — build.rs: country codes are heap-allocated `String`
 
@@ -334,27 +271,6 @@ Pick one defensible position consistently: either trust CLI completely (Action h
 ### #29 — cli.rs: ambiguity checks have no formal basis
 
 Ad hoc ambiguity checks (`if *prune && *force && *clean`, etc.) have no formal basis. "Ambiguous" is undefined. A combination is ambiguous if and only if the execution planner (#17) cannot produce a deterministic `Vec<Step>`. Remove current checks once planner exists; let inability to plan be the rejection signal.
-
----
-
-## VERSION HANDLING CHAIN [#69 → #70]
-
-### #69 — fetch.rs / backup.rs / build.rs: version strings are untyped
-
-Version strings are raw `String` everywhere. Introduce a typed wrapper (depends on #52):
-```rust
-struct Version(String);
-impl Version {
-    fn parse(s: &str) -> Option<Self> { ... }
-    fn as_str(&self) -> &str { &self.0 }
-    fn archive_name(&self) -> String { ... }
-}
-```
-Validation and formatting helpers replace ad hoc `format!()` scattered across three files.
-
-### #70 — backup.rs: version ordering is implicit in string sort
-
-`BTreeMap<String, Vec<PathBuf>>` relies on lexicographic ordering of `YYYYMMDD` strings. This is correct but implicit. Once #69 exists, use `BTreeMap<Version, _>` with `Ord` derived on numeric value — sort order becomes a compile-time guarantee.
 
 ---
 
