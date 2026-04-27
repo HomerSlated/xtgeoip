@@ -139,18 +139,6 @@ pub struct CommonFlags {
 struct ResolvedPaths<'a> { output: &'a Path, archive: &'a Path }
 ```
 
-### #43 — build.rs: HashMaps not pre-sized
-
-HashMaps are default capacity and rehash as they grow. Pre-size where upper bound is known: `HashMap::with_capacity(country_count)`.
-
-### #42 — build.rs: `merge_ranges_v4` and `merge_ranges_v6` are duplicates
-
-`merge_ranges_v4` and `merge_ranges_v6` are identical except for address type. Consolidate:
-```rust
-fn merge_ranges<T>(ranges: &[(T, T)]) -> Vec<(T, T)>
-where T: Copy + Ord + num_traits::One + std::ops::Add<Output = T>
-```
-
 ### #62 — build.rs: file hashing loads entire file into memory
 
 `fs::read(&file_path)?` loads entire file for hashing. Stream instead:
@@ -166,21 +154,9 @@ Verify vs invariant #5 — confirm no sequential bottleneck introduced.
 
 ## ARCHITECTURE: build.rs RESTRUCTURING
 
-### #41 — build.rs: `build()` does too many things
-
-`build()` does too many things. Split into focused phases:
-```
-load_data()          → CSV parsing
-transform()          → group ranges by country code
-write_outputs()      → write binary files, return paths + checksums
-generate_manifest()  → write manifest from checksums
-detect_orphans()     → compare written paths against existing files
-```
-`build()` becomes an orchestrator.
-
 ### #45 — build.rs: interrupted build leaves inconsistent state
 
-Data files, version file, and manifest are written independently. Interrupted build leaves partial inconsistent state. Apply atomic swap at the build level (#41 first):
+Data files, version file, and manifest are written independently. Interrupted build leaves partial inconsistent state. Apply atomic swap at the build level:
 1. Write all output to a temporary directory
 2. Write version and manifest into same temp dir last
 3. `rename()` temp dir into place (atomic on same filesystem)
