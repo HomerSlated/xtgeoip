@@ -87,9 +87,9 @@ impl ConfAction {
                 ensure_system_config_exists()?;
                 if !system_config_path().exists() {
                     bail!(
-                        "Cannot edit: {SYSTEM_CONFIG} does not exist. \
-                         Run `xtgeoip conf -d` to view the default config, \
-                         then create {SYSTEM_CONFIG} manually."
+                        "Cannot edit: {SYSTEM_CONFIG} does not exist. Run \
+                         `xtgeoip conf -d` to view the default config, then \
+                         create {SYSTEM_CONFIG} manually."
                     );
                 }
                 Ok(())
@@ -105,8 +105,8 @@ fn config_exists() -> bool {
 fn create_default_config() -> Result<()> {
     if !Path::new(DEFAULT_CONFIG).exists() {
         bail!(
-            "Default config example not found at {DEFAULT_CONFIG}. \
-             You may need to reinstall xtgeoip."
+            "Default config example not found at {DEFAULT_CONFIG}. You may \
+             need to reinstall xtgeoip."
         );
     }
     fs::copy(DEFAULT_CONFIG, SYSTEM_CONFIG).with_context(|| {
@@ -120,9 +120,8 @@ fn create_default_config() -> Result<()> {
 fn prompt_create_config() -> Result<bool> {
     if !io::stdin().is_terminal() {
         eprintln!(
-            "Error: {SYSTEM_CONFIG} does not exist. \
-             Run `xtgeoip conf -d` to view the default config, \
-             then create {SYSTEM_CONFIG} manually."
+            "Error: {SYSTEM_CONFIG} does not exist. Run `xtgeoip conf -d` to \
+             view the default config, then create {SYSTEM_CONFIG} manually."
         );
         bail!("{SYSTEM_CONFIG} missing and stdin is not a terminal");
     }
@@ -180,7 +179,9 @@ pub fn run_conf(action: ConfAction) -> Result<()> {
             let status = Command::new(&editor)
                 .arg(SYSTEM_CONFIG)
                 .status()
-                .with_context(|| format!("Failed to launch editor '{editor}'"))?;
+                .with_context(|| {
+                    format!("Failed to launch editor '{editor}'")
+                })?;
             if !status.success() {
                 bail!("Editor '{editor}' exited with {status}");
             }

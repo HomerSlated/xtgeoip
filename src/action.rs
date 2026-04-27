@@ -57,7 +57,11 @@ pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
             force,
             prune,
         } => {
-            let mode = if force { BackupMode::Force } else { BackupMode::Verified };
+            let mode = if force {
+                BackupMode::Force
+            } else {
+                BackupMode::Verified
+            };
             messages::info("Backing up database...");
             backup(
                 Path::new(&cfg.paths.output_dir),
@@ -77,7 +81,11 @@ pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
         }
 
         Action::TopLevelClean { force } => {
-            let mode = if force { BackupMode::Force } else { BackupMode::Verified };
+            let mode = if force {
+                BackupMode::Force
+            } else {
+                BackupMode::Verified
+            };
             messages::info("Cleaning output directory...");
             delete(Path::new(&cfg.paths.output_dir), mode)?;
         }
@@ -97,7 +105,11 @@ pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
             prune,
             legacy,
         } => {
-            let mode = if force { BackupMode::Force } else { BackupMode::Verified };
+            let mode = if force {
+                BackupMode::Force
+            } else {
+                BackupMode::Verified
+            };
             if do_backup {
                 messages::info("Backing up database...");
                 backup(
@@ -135,7 +147,11 @@ pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
             prune,
             legacy,
         } => {
-            let mode = if force { BackupMode::Force } else { BackupMode::Verified };
+            let mode = if force {
+                BackupMode::Force
+            } else {
+                BackupMode::Verified
+            };
             if do_backup {
                 messages::info("Backing up database...");
                 backup(

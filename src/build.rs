@@ -74,7 +74,8 @@ pub fn build(
         country_ranges.entry(cc).or_default().pool_v6 = pool;
     }
 
-    let (written_paths, checksums) = write_outputs(&country_ranges, target_dir)?;
+    let (written_paths, checksums) =
+        write_outputs(&country_ranges, target_dir)?;
     let manifest_path = generate_manifest(target_dir, version, checksums)?;
     detect_orphans(target_dir, &written_paths, &manifest_path)?;
 
@@ -233,8 +234,8 @@ fn detect_orphans(
             .join("\n");
         match fs::write(&orphaned_path, &list) {
             Ok(()) => messages::warn(&format!(
-                "Run `xtgeoip build -c -f` or delete files listed in \
-                 \"{}\" for a clean install.",
+                "Run `xtgeoip build -c -f` or delete files listed in \"{}\" \
+                 for a clean install.",
                 orphaned_path.display()
             )),
             Err(e) => messages::warn(&format!(
@@ -307,7 +308,11 @@ fn load_countries(
         let geoname = rec.get(idx_geoname).unwrap_or("").to_string();
         let iso = {
             let raw = rec.get(idx_iso).unwrap_or("");
-            if raw.contains('/') || raw.contains('\\') || raw == ".." || raw == "." {
+            if raw.contains('/')
+                || raw.contains('\\')
+                || raw == ".."
+                || raw == "."
+            {
                 String::new()
             } else {
                 raw.to_string()
@@ -442,9 +447,7 @@ fn load_blocks_v4(
             pools.entry(cc).or_default().push(range);
         }
     }
-    pools
-        .par_iter_mut()
-        .for_each(|(_, v)| *v = merge_ranges(v));
+    pools.par_iter_mut().for_each(|(_, v)| *v = merge_ranges(v));
     Ok(pools)
 }
 
@@ -503,9 +506,7 @@ fn load_blocks_v6(
             pools.entry(cc).or_default().push(range);
         }
     }
-    pools
-        .par_iter_mut()
-        .for_each(|(_, v)| *v = merge_ranges(v));
+    pools.par_iter_mut().for_each(|(_, v)| *v = merge_ranges(v));
     Ok(pools)
 }
 

@@ -99,15 +99,13 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, Version)> {
         .context("Content-Disposition header contains non-UTF-8 characters")?
         .to_owned();
 
-    let cd_filename =
-        parse_content_disposition_filename(&content_disposition).ok_or_else(
-            || {
-                anyhow::anyhow!(
-                    "Could not extract filename from Content-Disposition: {:?}",
-                    content_disposition
-                )
-            },
-        )?;
+    let cd_filename = parse_content_disposition_filename(&content_disposition)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Could not extract filename from Content-Disposition: {:?}",
+                content_disposition
+            )
+        })?;
 
     let version = Version::parse(cd_filename).ok_or_else(|| {
         anyhow::anyhow!(
@@ -120,7 +118,8 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, Version)> {
         && version.as_str().chars().all(|c| c.is_ascii_digit()))
     {
         messages::warn(&format!(
-            "Archive version token {:?} does not look like a date — proceeding anyway",
+            "Archive version token {:?} does not look like a date — \
+             proceeding anyway",
             version
         ));
     }
@@ -149,9 +148,9 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, Version)> {
             let hi = (prev as f64 * (1.0 + SIZE_TOLERANCE)) as u64;
             if len < lo || len > hi {
                 messages::warn(&format!(
-                    "Remote Content-Length {len} is outside expected \
-                     range [{lo}, {hi}] (±50% of previous {prev} bytes). \
-                     Proceeding with caution."
+                    "Remote Content-Length {len} is outside expected range \
+                     [{lo}, {hi}] (±50% of previous {prev} bytes). Proceeding \
+                     with caution."
                 ));
             }
         }
@@ -401,7 +400,11 @@ fn scan_zip_entries(zip: &mut ZipArchive<File>) -> Result<Option<String>> {
         }
     }
 
-    if prefix_ambiguous || !has_nested { Ok(None) } else { Ok(prefix) }
+    if prefix_ambiguous || !has_nested {
+        Ok(None)
+    } else {
+        Ok(prefix)
+    }
 }
 
 /// Extract zip archive into a temporary directory and return it.
@@ -493,7 +496,10 @@ where
     let mut attempt = 0u32;
     loop {
         match f() {
-            Err(e) if attempt < MAX_RETRIES && (e.is_timeout() || e.is_connect()) => {
+            Err(e)
+                if attempt < MAX_RETRIES
+                    && (e.is_timeout() || e.is_connect()) =>
+            {
                 let delay = BASE_DELAY_SECS * 2u64.pow(attempt);
                 messages::warn(&format!(
                     "Transient network error (attempt {}/{MAX_RETRIES}): {e}. \
@@ -504,11 +510,13 @@ where
                 attempt += 1;
             }
             Err(e) => return Err(e.into()),
-            Ok(resp) if resp.status().is_server_error() && attempt < MAX_RETRIES => {
+            Ok(resp)
+                if resp.status().is_server_error() && attempt < MAX_RETRIES =>
+            {
                 let delay = BASE_DELAY_SECS * 2u64.pow(attempt);
                 messages::warn(&format!(
-                    "Server error {} (attempt {}/{MAX_RETRIES}). \
-                     Retrying in {delay}s...",
+                    "Server error {} (attempt {}/{MAX_RETRIES}). Retrying in \
+                     {delay}s...",
                     resp.status(),
                     attempt + 1
                 ));
@@ -527,15 +535,10 @@ fn verify_cached_archive(
 ) -> Result<bool> {
     let checksum_text =
         fs::read_to_string(checksum_path).with_context(|| {
-            format!(
-                "Failed to read checksum file {}",
-                checksum_path.display()
-            )
+            format!("Failed to read checksum file {}", checksum_path.display())
         })?;
-    let expected_hash = checksum_text
-        .split_whitespace()
-        .next()
-        .ok_or_else(|| {
+    let expected_hash =
+        checksum_text.split_whitespace().next().ok_or_else(|| {
             anyhow::anyhow!(
                 "Invalid checksum format in {}",
                 checksum_path.display()
@@ -561,7 +564,11 @@ fn parse_content_disposition_filename(cd: &str) -> Option<&str> {
         .split_once('=')?
         .1
         .trim_matches('"');
-    if filename.is_empty() { None } else { Some(filename) }
+    if filename.is_empty() {
+        None
+    } else {
+        Some(filename)
+    }
 }
 
 /// Validate CSV files extracted into `dir`: locations (en) and both blocks
@@ -578,9 +585,9 @@ fn validate_csv_contents(dir: &Path) -> Result<()> {
 }
 
 fn validate_locations_csv(path: &Path) -> Result<()> {
-    let mut rdr = ReaderBuilder::new().from_path(path).with_context(|| {
-        format!("Failed to open {}", path.display())
-    })?;
+    let mut rdr = ReaderBuilder::new()
+        .from_path(path)
+        .with_context(|| format!("Failed to open {}", path.display()))?;
     let headers = rdr
         .headers()
         .with_context(|| {
@@ -589,11 +596,7 @@ fn validate_locations_csv(path: &Path) -> Result<()> {
         .clone();
     for col in ["geoname_id", "country_iso_code", "continent_code"] {
         if !headers.iter().any(|h| h == col) {
-            bail!(
-                "Missing required column {:?} in {}",
-                col,
-                path.display()
-            );
+            bail!("Missing required column {:?} in {}", col, path.display());
         }
     }
     let gid_idx = headers.iter().position(|h| h == "geoname_id").unwrap();
@@ -604,20 +607,16 @@ fn validate_locations_csv(path: &Path) -> Result<()> {
         if let Some(val) = rec.get(gid_idx)
             && val.parse::<u64>().is_err()
         {
-            bail!(
-                "geoname_id {:?} is not numeric in {}",
-                val,
-                path.display()
-            );
+            bail!("geoname_id {:?} is not numeric in {}", val, path.display());
         }
     }
     Ok(())
 }
 
 fn validate_blocks_csv(path: &Path) -> Result<()> {
-    let mut rdr = ReaderBuilder::new().from_path(path).with_context(|| {
-        format!("Failed to open {}", path.display())
-    })?;
+    let mut rdr = ReaderBuilder::new()
+        .from_path(path)
+        .with_context(|| format!("Failed to open {}", path.display()))?;
     let headers = rdr
         .headers()
         .with_context(|| {
@@ -631,11 +630,7 @@ fn validate_blocks_csv(path: &Path) -> Result<()> {
         "is_satellite_provider",
     ] {
         if !headers.iter().any(|h| h == col) {
-            bail!(
-                "Missing required column {:?} in {}",
-                col,
-                path.display()
-            );
+            bail!("Missing required column {:?} in {}", col, path.display());
         }
     }
     if let Some(result) = rdr.records().next() {
@@ -655,7 +650,8 @@ fn validate_blocks_csv(path: &Path) -> Result<()> {
         for col in ["is_anonymous_proxy", "is_satellite_provider"] {
             let idx = headers.iter().position(|h| h == col).unwrap();
             if let Some(val) = rec.get(idx)
-                && val != "0" && val != "1"
+                && val != "0"
+                && val != "1"
             {
                 messages::warn(&format!(
                     "{col:?} value {val:?} in {} is not 0 or 1",

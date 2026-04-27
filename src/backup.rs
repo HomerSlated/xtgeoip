@@ -37,7 +37,8 @@ fn manifest_path_for_version(data_dir: &Path, version: &str) -> PathBuf {
     data_dir.join(format!("GeoLite2-Country-bin_{}.blake3", version))
 }
 
-/// Collect IV files: 2-char uppercase/digit country codes, extension iv4 or iv6.
+/// Collect IV files: 2-char uppercase/digit country codes, extension iv4 or
+/// iv6.
 fn iv_files(data_dir: &Path) -> Result<Vec<PathBuf>> {
     let mut files: Vec<PathBuf> = fs::read_dir(data_dir)
         .with_context(|| {
@@ -272,8 +273,10 @@ pub fn backup(
     }
 
     let output_path = match mode {
-        BackupMode::Force => backup_dir
-            .join(format!("GeoLite2-Country-bin_unverified_{}.tar.gz", version)),
+        BackupMode::Force => backup_dir.join(format!(
+            "GeoLite2-Country-bin_unverified_{}.tar.gz",
+            version
+        )),
         BackupMode::Verified => {
             files.push(version_path(data_dir));
             if let Some(m) = manifest {
@@ -353,9 +356,10 @@ pub fn delete(data_dir: &Path, mode: BackupMode) -> Result<()> {
     delete_all(data_dir, &all_files)?;
 
     match mode {
-        BackupMode::Force => {
-            info(&format!("Force deleted {n} file(s) from {}", data_dir.display()))
-        }
+        BackupMode::Force => info(&format!(
+            "Force deleted {n} file(s) from {}",
+            data_dir.display()
+        )),
         BackupMode::Verified => {
             info(&format!("Deleted {n} file(s) from {}", data_dir.display()))
         }
@@ -465,10 +469,7 @@ fn prune_csv_archives(dir: &Path, keep: usize) -> Result<usize> {
 
         match Version::parse(name) {
             Some(ver) => {
-                by_version
-                    .entry(ver)
-                    .or_default()
-                    .push(path.clone());
+                by_version.entry(ver).or_default().push(path.clone());
             }
             None => {
                 warn(&format!(
@@ -542,10 +543,7 @@ fn prune_bin_archives(dir: &Path, keep: usize) -> Result<usize> {
 
         match Version::parse(name) {
             Some(ver) => {
-                by_version
-                    .entry(ver)
-                    .or_default()
-                    .push(path.clone());
+                by_version.entry(ver).or_default().push(path.clone());
             }
             None => {
                 warn(&format!(
