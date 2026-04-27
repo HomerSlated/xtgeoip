@@ -77,6 +77,27 @@ pub enum ConfAction {
     Default,
 }
 
+impl ConfAction {
+    /// Check that the invariants this action requires hold before running.
+    pub fn check_preconditions(&self) -> Result<()> {
+        match self {
+            ConfAction::Default => Ok(()),
+            ConfAction::Show => ensure_system_config_exists(),
+            ConfAction::Edit => {
+                ensure_system_config_exists()?;
+                if !system_config_path().exists() {
+                    bail!(
+                        "Cannot edit: {SYSTEM_CONFIG} does not exist. \
+                         Run `xtgeoip conf -d` to view the default config, \
+                         then create {SYSTEM_CONFIG} manually."
+                    );
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 fn config_exists() -> bool {
     system_config_path().exists()
 }
@@ -137,14 +158,13 @@ fn ensure_system_config_exists() -> Result<()> {
 
 /// Perform the requested action for `xtgeoip conf`
 pub fn run_conf(action: ConfAction) -> Result<()> {
+    action.check_preconditions()?;
     match action {
         ConfAction::Default => {
-            // Show default config, ignore system config existence
             let contents = fs::read_to_string(DEFAULT_CONFIG)?;
             println!("{contents}");
         }
         ConfAction::Show => {
-            ensure_system_config_exists()?;
             if system_config_path().exists() {
                 let contents = fs::read_to_string(SYSTEM_CONFIG)?;
                 println!("{contents}");
@@ -152,23 +172,17 @@ pub fn run_conf(action: ConfAction) -> Result<()> {
                 println!("No system config exists to show.");
             }
         }
-
         ConfAction::Edit => {
-            ensure_system_config_exists()?;
-            if system_config_path().exists() {
-                let editor = std::env::var("EDITOR")
-                    .ok()
-                    .filter(|e| !e.is_empty())
-                    .unwrap_or_else(|| "vi".to_string());
-                let status = Command::new(&editor)
-                    .arg(SYSTEM_CONFIG)
-                    .status()
-                    .with_context(|| {
-                        format!("Failed to launch editor '{editor}'")
-                    })?;
-                if !status.success() {
-                    bail!("Editor '{editor}' exited with {status}");
-                }
+            let editor = std::env::var("EDITOR")
+                .ok()
+                .filter(|e| !e.is_empty())
+                .unwrap_or_else(|| "vi".to_string());
+            let status = Command::new(&editor)
+                .arg(SYSTEM_CONFIG)
+                .status()
+                .with_context(|| format!("Failed to launch editor '{editor}'"))?;
+            if !status.success() {
+                bail!("Editor '{editor}' exited with {status}");
             }
         }
     }

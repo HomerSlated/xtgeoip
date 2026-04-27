@@ -12,9 +12,22 @@ use tar::Builder;
 use crate::{
     config::Config,
     messages::{error, info, warn},
+    version::Version,
 };
 
 const VERSION_FILE: &str = "version";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackupMode {
+    Verified,
+    Force,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PruneMode {
+    Csv,
+    Bin,
+}
 
 fn version_path(data_dir: &Path) -> PathBuf {
     data_dir.join(VERSION_FILE)
@@ -93,6 +106,20 @@ fn verify_manifest_files(
             bail!(msg);
         }
 
+        if file_name.contains('/')
+            || file_name.contains('\\')
+            || file_name == ".."
+            || file_name == "."
+        {
+            let msg = format!(
+                "Manifest contains unsafe file name {:?} at line {}",
+                file_name,
+                idx + 1
+            );
+            error(&msg);
+            bail!(msg);
+        }
+
         let file_path = data_dir.join(file_name);
         if !file_path.exists() {
             let msg = format!(
@@ -164,93 +191,108 @@ fn create_tarball(output_path: &Path, files: &[PathBuf]) -> Result<()> {
 
 /// Collect files for a force backup/delete — no verification, just grab
 /// everything
-fn gather_files_force(data_dir: &Path) -> Result<(Vec<PathBuf>, String)> {
-    let version = fs::read_to_string(version_path(data_dir))
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|_| "unknown_version".to_string());
-
-    let mut files = iv_files(data_dir)?;
-    let version_file = version_path(data_dir);
-    if version_file.exists() {
-        files.push(version_file);
-    }
-    files.extend(all_blake3_files(data_dir)?);
-
-    Ok((files, version))
-}
-
-/// Collect files for a normal backup/delete — requires valid version + manifest
-/// + verified checksums
-fn gather_files_verified(
+/// Collect files for backup/delete. Force mode grabs everything; Verified mode
+/// requires a valid version file, existing manifest, and passing checksums.
+fn gather_files(
     data_dir: &Path,
-) -> Result<(Vec<PathBuf>, String, PathBuf)> {
-    let version = fs::read_to_string(version_path(data_dir))
-        .map(|s| s.trim().to_string())
-        .map_err(|_| {
-            let msg = format!(
-                "Version file missing: {}. Use -f to force operation",
-                version_path(data_dir).display()
-            );
-            error(&msg);
-            anyhow!(msg)
-        })?;
+    mode: BackupMode,
+) -> Result<(Vec<PathBuf>, String, Option<PathBuf>)> {
+    match mode {
+        BackupMode::Force => {
+            let version = fs::read_to_string(version_path(data_dir))
+                .map(|s| {
+                    let v = s.trim().to_string();
+                    if v.contains('/') || v.contains('\\') {
+                        "unknown_version".to_string()
+                    } else {
+                        v
+                    }
+                })
+                .unwrap_or_else(|_| "unknown_version".to_string());
 
-    let manifest_path = manifest_path_for_version(data_dir, &version);
+            let mut files = iv_files(data_dir)?;
+            let version_file = version_path(data_dir);
+            if version_file.exists() {
+                files.push(version_file);
+            }
+            files.extend(all_blake3_files(data_dir)?);
+            Ok((files, version, None))
+        }
+        BackupMode::Verified => {
+            let version = fs::read_to_string(version_path(data_dir))
+                .map(|s| s.trim().to_string())
+                .map_err(|_| {
+                    let msg = format!(
+                        "Version file missing: {}. Use -f to force operation",
+                        version_path(data_dir).display()
+                    );
+                    error(&msg);
+                    anyhow!(msg)
+                })?;
 
-    if !manifest_path.exists() {
-        let msg = format!(
-            "Manifest missing: {}\nExpected manifest not found. Use -f to \
-             force",
-            manifest_path.display()
-        );
-        error(&msg);
-        bail!(msg);
+            if version.contains('/') || version.contains('\\') {
+                bail!(
+                    "Version string contains unsafe characters: {:?}",
+                    version
+                );
+            }
+
+            let manifest_path = manifest_path_for_version(data_dir, &version);
+            if !manifest_path.exists() {
+                let msg = format!(
+                    "Manifest missing: {}\nExpected manifest not found. Use \
+                     -f to force",
+                    manifest_path.display()
+                );
+                error(&msg);
+                bail!(msg);
+            }
+
+            let files = verify_manifest_files(data_dir, &manifest_path)?;
+            Ok((files, version, Some(manifest_path)))
+        }
     }
-
-    let files = verify_manifest_files(data_dir, &manifest_path)?;
-
-    Ok((files, version, manifest_path))
 }
 
-/// Backup IV files, version file, and manifest. Force option allows backup even
-/// if version/manifest missing.
-pub fn backup(data_dir: &Path, backup_dir: &Path, force: bool) -> Result<()> {
+/// Backup IV files, version file, and manifest.
+pub fn backup(
+    data_dir: &Path,
+    backup_dir: &Path,
+    mode: BackupMode,
+) -> Result<()> {
     fs::create_dir_all(backup_dir).with_context(|| {
         format!("Failed to create backup directory {}", backup_dir.display())
     })?;
 
-    if force {
-        let (mut files, version) = gather_files_force(data_dir)?;
-        if files.is_empty() {
-            let msg = "Nothing to back up";
-            error(msg);
-            bail!(msg);
-        }
-        files.sort();
-        files.dedup();
-        let output_path = backup_dir.join(format!(
-            "GeoLite2-Country-bin_unverified_{}.tar.gz",
-            version
-        ));
-        create_tarball(&output_path, &files)?;
-        info(&format!(
-            "Backed up unverified binary data to {}",
-            output_path.display()
-        ));
-        return Ok(());
+    let (mut files, version, manifest) = gather_files(data_dir, mode)?;
+    if files.is_empty() {
+        let msg = "Nothing to back up";
+        error(msg);
+        bail!(msg);
     }
 
-    let (mut files, version, manifest_path) = gather_files_verified(data_dir)?;
-    files.push(version_path(data_dir));
-    files.push(manifest_path);
+    let output_path = match mode {
+        BackupMode::Force => backup_dir
+            .join(format!("GeoLite2-Country-bin_unverified_{}.tar.gz", version)),
+        BackupMode::Verified => {
+            files.push(version_path(data_dir));
+            if let Some(m) = manifest {
+                files.push(m);
+            }
+            backup_dir.join(format!("GeoLite2-Country-bin_{}.tar.gz", version))
+        }
+    };
+
     files.sort();
     files.dedup();
-
-    let output_path =
-        backup_dir.join(format!("GeoLite2-Country-bin_{}.tar.gz", version));
     create_tarball(&output_path, &files)?;
+
+    let label = match mode {
+        BackupMode::Force => "unverified binary",
+        BackupMode::Verified => "binary",
+    };
     info(&format!(
-        "Backed up binary data to {}",
+        "Backed up {label} data to {}",
         output_path.display()
     ));
     Ok(())
@@ -284,40 +326,40 @@ fn delete_all(data_dir: &Path, files: &[PathBuf]) -> Result<()> {
     Ok(())
 }
 
-pub fn delete(data_dir: &Path, force: bool) -> Result<()> {
-    if force {
-        let (files, _version) = gather_files_force(data_dir)?;
-        if files.is_empty() {
-            let msg = "Nothing to delete";
-            error(msg);
-            bail!(msg);
-        }
-        let orphan_path = data_dir.join("orphaned");
-        let all_files: Vec<PathBuf> = files
-            .into_iter()
-            .chain(orphan_path.exists().then_some(orphan_path))
-            .collect();
-        let n = all_files.len();
-        delete_all(data_dir, &all_files)?;
-        info(&format!(
-            "Force deleted {n} file(s) from {}",
-            data_dir.display()
-        ));
-        return Ok(());
+pub fn delete(data_dir: &Path, mode: BackupMode) -> Result<()> {
+    let (files, _version, manifest) = gather_files(data_dir, mode)?;
+    if files.is_empty() {
+        let msg = "Nothing to delete";
+        error(msg);
+        bail!(msg);
     }
 
-    let (files, _version, manifest_path) = gather_files_verified(data_dir)?;
-    let all_files: Vec<PathBuf> = files
-        .into_iter()
-        .chain([version_path(data_dir), manifest_path])
-        .collect();
+    let all_files: Vec<PathBuf> = match mode {
+        BackupMode::Force => {
+            let orphan_path = data_dir.join("orphaned");
+            files
+                .into_iter()
+                .chain(orphan_path.exists().then_some(orphan_path))
+                .collect()
+        }
+        BackupMode::Verified => files
+            .into_iter()
+            .chain([version_path(data_dir)])
+            .chain(manifest)
+            .collect(),
+    };
+
     let n = all_files.len();
     delete_all(data_dir, &all_files)?;
 
-    info(&format!(
-        "Deleted {n} file(s) from {}",
-        data_dir.display()
-    ));
+    match mode {
+        BackupMode::Force => {
+            info(&format!("Force deleted {n} file(s) from {}", data_dir.display()))
+        }
+        BackupMode::Verified => {
+            info(&format!("Deleted {n} file(s) from {}", data_dir.display()))
+        }
+    }
     Ok(())
 }
 
@@ -329,20 +371,12 @@ struct PruneSummary {
 
 /// Prune old GeoLite2 archives according to the config.
 ///
-/// - `prune_csv` => operate on GeoLite2-Country-CSV_* archives (+ .sha256)
-/// - `prune_bin` => operate on GeoLite2-Country-bin_* archives (verified +
-///   unverified)
-///
 /// Behaviour:
 /// - Fails hard if the archive directory is missing or invalid.
 /// - Fails if `paths.archive_prune < 1`.
 /// - Prints a concise summary on success.
 /// - Prints a partial summary before failing on error.
-pub fn prune_archives(
-    cfg: &Config,
-    prune_csv: bool,
-    prune_bin: bool,
-) -> Result<()> {
+pub fn prune_archives(cfg: &Config, mode: PruneMode) -> Result<()> {
     let archive_dir = Path::new(&cfg.paths.archive_dir);
     let keep = cfg.paths.archive_prune;
 
@@ -366,7 +400,7 @@ pub fn prune_archives(
         bin_removed: 0,
     };
 
-    if prune_csv {
+    if mode == PruneMode::Csv {
         match prune_csv_archives(archive_dir, keep) {
             Ok(count) => summary.csv_removed = count,
             Err(e) => {
@@ -376,7 +410,7 @@ pub fn prune_archives(
         }
     }
 
-    if prune_bin {
+    if mode == PruneMode::Bin {
         match prune_bin_archives(archive_dir, keep) {
             Ok(count) => summary.bin_removed = count,
             Err(e) => {
@@ -407,7 +441,7 @@ fn prune_csv_archives(dir: &Path, keep: usize) -> Result<usize> {
     })?;
 
     // Map: version -> Vec<PathBuf> (zip + sha256)
-    let mut by_version: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
+    let mut by_version: BTreeMap<Version, Vec<PathBuf>> = BTreeMap::new();
 
     for entry in entries {
         let entry = entry?;
@@ -429,10 +463,10 @@ fn prune_csv_archives(dir: &Path, keep: usize) -> Result<usize> {
             continue;
         }
 
-        match parse_archive_name(name) {
+        match Version::parse(name) {
             Some(ver) => {
                 by_version
-                    .entry(ver.to_owned())
+                    .entry(ver)
                     .or_default()
                     .push(path.clone());
             }
@@ -479,7 +513,7 @@ fn prune_bin_archives(dir: &Path, keep: usize) -> Result<usize> {
     })?;
 
     // Map: version -> Vec<PathBuf> (verified + unverified)
-    let mut by_version: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
+    let mut by_version: BTreeMap<Version, Vec<PathBuf>> = BTreeMap::new();
 
     for entry in entries {
         let entry = entry?;
@@ -506,10 +540,10 @@ fn prune_bin_archives(dir: &Path, keep: usize) -> Result<usize> {
             continue;
         }
 
-        match parse_archive_name(name) {
+        match Version::parse(name) {
             Some(ver) => {
                 by_version
-                    .entry(ver.to_owned())
+                    .entry(ver)
                     .or_default()
                     .push(path.clone());
             }
@@ -548,21 +582,4 @@ fn prune_bin_archives(dir: &Path, keep: usize) -> Result<usize> {
     }
 
     Ok(removed)
-}
-
-/// Parse the version token from a GeoLite2 archive filename.
-/// Returns the text between the last `_` and the first `.` after it.
-/// The token is treated as opaque — no digit or length validation.
-///
-/// Examples:
-/// - `GeoLite2-Country-CSV_20260324.zip`              → `"20260324"`
-/// - `GeoLite2-Country-CSV_20260324.zip.sha256`       → `"20260324"`
-/// - `GeoLite2-Country-bin_20260324.tar.gz`           → `"20260324"`
-/// - `GeoLite2-Country-bin_unverified_20260324.tar.gz`→ `"20260324"`
-pub(crate) fn parse_archive_name(name: &str) -> Option<&str> {
-    let idx = name.rfind('_')?;
-    let after = &name[idx + 1..];
-    let end = after.find('.').unwrap_or(after.len());
-    let token = &after[..end];
-    if token.is_empty() { None } else { Some(token) }
 }

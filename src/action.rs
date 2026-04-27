@@ -7,10 +7,11 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::{
-    backup::{backup, delete, prune_archives},
+    backup::{BackupMode, PruneMode, backup, delete, prune_archives},
     build::build,
     config::{ConfAction, Config},
     fetch::{FetchMode, fetch},
+    messages,
 };
 
 #[derive(Debug)]
@@ -56,29 +57,36 @@ pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
             force,
             prune,
         } => {
+            let mode = if force { BackupMode::Force } else { BackupMode::Verified };
+            messages::info("Backing up database...");
             backup(
                 Path::new(&cfg.paths.output_dir),
                 Path::new(&cfg.paths.archive_dir),
-                force,
+                mode,
             )?;
 
             if prune {
-                prune_archives(cfg, false, true)?;
+                messages::info("Pruning bin archives...");
+                prune_archives(cfg, PruneMode::Bin)?;
             }
 
             if clean {
-                delete(Path::new(&cfg.paths.output_dir), force)?;
+                messages::info("Cleaning output directory...");
+                delete(Path::new(&cfg.paths.output_dir), mode)?;
             }
         }
 
         Action::TopLevelClean { force } => {
-            delete(Path::new(&cfg.paths.output_dir), force)?;
+            let mode = if force { BackupMode::Force } else { BackupMode::Verified };
+            messages::info("Cleaning output directory...");
+            delete(Path::new(&cfg.paths.output_dir), mode)?;
         }
 
         Action::Fetch { prune } => {
             fetch(cfg, FetchMode::Remote)?;
             if prune {
-                prune_archives(cfg, true, false)?;
+                messages::info("Pruning CSV archives...");
+                prune_archives(cfg, PruneMode::Csv)?;
             }
         }
 
@@ -89,24 +97,29 @@ pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
             prune,
             legacy,
         } => {
+            let mode = if force { BackupMode::Force } else { BackupMode::Verified };
             if do_backup {
+                messages::info("Backing up database...");
                 backup(
                     Path::new(&cfg.paths.output_dir),
                     Path::new(&cfg.paths.archive_dir),
-                    force,
+                    mode,
                 )?;
             }
 
             if do_clean {
-                delete(Path::new(&cfg.paths.output_dir), force)?;
+                messages::info("Cleaning output directory...");
+                delete(Path::new(&cfg.paths.output_dir), mode)?;
             }
 
             let (temp_dir, version) = fetch(cfg, FetchMode::Remote)?;
 
             if prune {
-                prune_archives(cfg, true, false)?;
+                messages::info("Pruning CSV archives...");
+                prune_archives(cfg, PruneMode::Csv)?;
             }
 
+            messages::info("Building binary database...");
             build(
                 temp_dir.path(),
                 Path::new(&cfg.paths.output_dir),
@@ -122,23 +135,28 @@ pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
             prune,
             legacy,
         } => {
+            let mode = if force { BackupMode::Force } else { BackupMode::Verified };
             if do_backup {
+                messages::info("Backing up database...");
                 backup(
                     Path::new(&cfg.paths.output_dir),
                     Path::new(&cfg.paths.archive_dir),
-                    force,
+                    mode,
                 )?;
 
                 if prune {
-                    prune_archives(cfg, false, true)?;
+                    messages::info("Pruning bin archives...");
+                    prune_archives(cfg, PruneMode::Bin)?;
                 }
             }
 
             if do_clean {
-                delete(Path::new(&cfg.paths.output_dir), force)?;
+                messages::info("Cleaning output directory...");
+                delete(Path::new(&cfg.paths.output_dir), mode)?;
             }
 
             let (temp_dir, version) = fetch(cfg, FetchMode::Local)?;
+            messages::info("Building binary database...");
             build(
                 temp_dir.path(),
                 Path::new(&cfg.paths.output_dir),

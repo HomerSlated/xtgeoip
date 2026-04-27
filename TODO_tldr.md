@@ -25,21 +25,7 @@
 
 ## CONFIG AND CONF SUBCOMMAND
 
-- [#15] config.rs: give each `ConfAction` variant explicit preconditions and error type; depends on #7
 - [#1] messages.rs/config.rs: make file logging optional via TOML config and CLI flag override
-
----
-
-## LOGGING AND STEP VISIBILITY
-
-- [#25] action.rs: add at least one `messages::info` log call per dispatch point / Step
-
----
-
-## SECURITY HARDENING
-
-- [#61] global: parse-then-validate everywhere; never assume parsing implies validity; audit all crates
-- [#51] fetch.rs: validate ZIP magic bytes, reject path traversal/absolute paths/executables before extraction; check CSV headers and field ranges after extraction
 
 ---
 
@@ -51,9 +37,6 @@
 
 ## TYPED ENUMS: ELIMINATING BOOLEAN TRAPS
 
-- [#21] action.rs/build.rs: replace `prune_archives(cfg, bool, bool)` with `PruneMode` enum
-- [#67] backup.rs: replace `backup(..., force: bool)` with `BackupMode { Verified, Force }`
-- [#68] backup.rs: merge `gather_files_force` / `gather_files_verified` into one `gather_files(mode)`; depends on #67
 - [#39] build.rs: replace `String` country codes with `[u8; 2]` or `enum CountryCode { Iso, O1, A1, A2 }`
   - [#40] O1 fallback logic centralised by `CountryCode::O1`; no more duplication
   - [#44] `"O1".to_string()` allocations eliminated by enum variants
@@ -95,13 +78,6 @@
 - [#22] action.rs: bring `FetchMode::Remote | Local` into spec YAML; depends on #17
 - [#20+30] cli.rs/action.rs: consolidate duplicated "prune requires backup" (and similar) into one shared predicate; long-term: spec-driven semantics layer
 - [#29] cli.rs: remove ad hoc ambiguity checks; let planner inability to produce a `Vec<Step>` be the rejection signal
-
----
-
-## VERSION HANDLING CHAIN [#69 → #70]
-
-- [#69] all: introduce `struct Version(String)` with `parse`, `as_str`, `archive_name`
-- [#70] backup.rs: replace `BTreeMap<String, _>` with `BTreeMap<Version, _>` for explicit sort semantics; depends on #69
 
 ---
 
