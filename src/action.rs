@@ -1,10 +1,9 @@
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
-/// xtgeoip Actions
 /// xtgeoip action runner
-/// Handles all Action enum variants
 use std::path::Path;
 
 use anyhow::Result;
+use tempfile::TempDir;
 
 use crate::{
     backup::{BackupMode, PruneMode, backup, delete, prune_archives},
@@ -12,6 +11,7 @@ use crate::{
     config::{ConfAction, Config},
     fetch::{FetchMode, fetch},
     messages,
+    version::Version,
 };
 
 #[derive(Debug)]
@@ -50,138 +50,180 @@ impl Action {
     }
 }
 
-pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
+struct ResolvedPaths<'a> {
+    output: &'a Path,
+    archive: &'a Path,
+}
+
+fn resolve_paths(cfg: &Config) -> ResolvedPaths<'_> {
+    ResolvedPaths {
+        output: Path::new(&cfg.paths.output_dir),
+        archive: Path::new(&cfg.paths.archive_dir),
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Step {
+    Backup { mode: BackupMode },
+    Clean { mode: BackupMode },
+    Fetch { mode: FetchMode },
+    PruneCsv,
+    PruneBin,
+    Build { legacy: bool },
+}
+
+fn backup_mode(force: bool) -> BackupMode {
+    if force {
+        BackupMode::Force
+    } else {
+        BackupMode::Verified
+    }
+}
+
+fn plan(action: &Action) -> Vec<Step> {
     match action {
         Action::TopLevelBackup {
             clean,
             force,
             prune,
         } => {
-            let mode = if force {
-                BackupMode::Force
-            } else {
-                BackupMode::Verified
-            };
-            messages::info("Backing up database...");
-            backup(
-                Path::new(&cfg.paths.output_dir),
-                Path::new(&cfg.paths.archive_dir),
-                mode,
-            )?;
-
-            if prune {
-                messages::info("Pruning bin archives...");
-                prune_archives(cfg, PruneMode::Bin)?;
+            let mode = backup_mode(*force);
+            let mut steps = vec![Step::Backup { mode }];
+            if *prune {
+                steps.push(Step::PruneBin);
             }
-
-            if clean {
-                messages::info("Cleaning output directory...");
-                delete(Path::new(&cfg.paths.output_dir), mode)?;
+            if *clean {
+                steps.push(Step::Clean { mode });
             }
+            steps
         }
 
         Action::TopLevelClean { force } => {
-            let mode = if force {
-                BackupMode::Force
-            } else {
-                BackupMode::Verified
-            };
-            messages::info("Cleaning output directory...");
-            delete(Path::new(&cfg.paths.output_dir), mode)?;
+            vec![Step::Clean {
+                mode: backup_mode(*force),
+            }]
         }
 
         Action::Fetch { prune } => {
-            fetch(cfg, FetchMode::Remote)?;
-            if prune {
-                messages::info("Pruning CSV archives...");
-                prune_archives(cfg, PruneMode::Csv)?;
+            let mut steps = vec![Step::Fetch {
+                mode: FetchMode::Remote,
+            }];
+            if *prune {
+                steps.push(Step::PruneCsv);
             }
+            steps
         }
 
         Action::Run {
-            backup: do_backup,
-            clean: do_clean,
+            backup,
+            clean,
             force,
             prune,
             legacy,
         } => {
-            let mode = if force {
-                BackupMode::Force
-            } else {
-                BackupMode::Verified
-            };
-            if do_backup {
-                messages::info("Backing up database...");
-                backup(
-                    Path::new(&cfg.paths.output_dir),
-                    Path::new(&cfg.paths.archive_dir),
-                    mode,
-                )?;
+            let mode = backup_mode(*force);
+            let mut steps = vec![];
+            if *backup {
+                steps.push(Step::Backup { mode });
             }
-
-            if do_clean {
-                messages::info("Cleaning output directory...");
-                delete(Path::new(&cfg.paths.output_dir), mode)?;
+            if *clean {
+                steps.push(Step::Clean { mode });
             }
-
-            let (temp_dir, version) = fetch(cfg, FetchMode::Remote)?;
-
-            if prune {
-                messages::info("Pruning CSV archives...");
-                prune_archives(cfg, PruneMode::Csv)?;
+            steps.push(Step::Fetch {
+                mode: FetchMode::Remote,
+            });
+            if *prune {
+                steps.push(Step::PruneCsv);
             }
-
-            messages::info("Building binary database...");
-            build(
-                temp_dir.path(),
-                Path::new(&cfg.paths.output_dir),
-                &version,
-                legacy,
-            )?;
+            steps.push(Step::Build { legacy: *legacy });
+            steps
         }
 
         Action::Build {
-            backup: do_backup,
-            clean: do_clean,
+            backup,
+            clean,
             force,
             prune,
             legacy,
         } => {
-            let mode = if force {
-                BackupMode::Force
-            } else {
-                BackupMode::Verified
-            };
-            if do_backup {
-                messages::info("Backing up database...");
-                backup(
-                    Path::new(&cfg.paths.output_dir),
-                    Path::new(&cfg.paths.archive_dir),
-                    mode,
-                )?;
-
-                if prune {
-                    messages::info("Pruning bin archives...");
-                    prune_archives(cfg, PruneMode::Bin)?;
-                }
+            let mode = backup_mode(*force);
+            let mut steps = vec![];
+            if *backup {
+                steps.push(Step::Backup { mode });
             }
-
-            if do_clean {
-                messages::info("Cleaning output directory...");
-                delete(Path::new(&cfg.paths.output_dir), mode)?;
+            if *prune {
+                steps.push(Step::PruneBin);
             }
-
-            let (temp_dir, version) = fetch(cfg, FetchMode::Local)?;
-            messages::info("Building binary database...");
-            build(
-                temp_dir.path(),
-                Path::new(&cfg.paths.output_dir),
-                &version,
-                legacy,
-            )?;
+            if *clean {
+                steps.push(Step::Clean { mode });
+            }
+            steps.push(Step::Fetch {
+                mode: FetchMode::Local,
+            });
+            steps.push(Step::Build { legacy: *legacy });
+            steps
         }
 
-        Action::Conf(_) => unreachable!("Conf is handled before run_action"),
+        Action::Conf(_) => vec![],
+    }
+}
+
+#[derive(Default)]
+struct RunContext {
+    fetch_result: Option<(TempDir, Version)>,
+}
+
+fn execute_step(
+    cfg: &Config,
+    paths: &ResolvedPaths<'_>,
+    step: Step,
+    ctx: &mut RunContext,
+) -> Result<()> {
+    match step {
+        Step::Backup { mode } => {
+            messages::info("Backing up database...");
+            backup(paths.output, paths.archive, mode)?;
+        }
+
+        Step::Clean { mode } => {
+            messages::info("Cleaning output directory...");
+            delete(paths.output, mode)?;
+        }
+
+        Step::Fetch { mode } => {
+            ctx.fetch_result = Some(fetch(cfg, mode)?);
+        }
+
+        Step::PruneCsv => {
+            messages::info("Pruning CSV archives...");
+            prune_archives(cfg, PruneMode::Csv)?;
+        }
+
+        Step::PruneBin => {
+            messages::info("Pruning bin archives...");
+            prune_archives(cfg, PruneMode::Bin)?;
+        }
+
+        Step::Build { legacy } => {
+            let (temp_dir, version) = ctx
+                .fetch_result
+                .as_ref()
+                .expect("Build step requires prior Fetch");
+            messages::info("Building binary database...");
+            build(temp_dir.path(), paths.output, version, legacy)?;
+        }
+    }
+
+    Ok(())
+}
+
+pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
+    let paths = resolve_paths(cfg);
+    let steps = plan(&action);
+    let mut ctx = RunContext::default();
+
+    for step in steps {
+        execute_step(cfg, &paths, step, &mut ctx)?;
     }
 
     Ok(())

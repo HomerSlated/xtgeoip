@@ -1,7 +1,6 @@
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    ffi::OsStr,
+    collections::{BTreeMap, HashMap},
     fs::{self, File},
     path::{Path, PathBuf},
     sync::atomic::{AtomicUsize, Ordering},
@@ -12,6 +11,7 @@ use csv::ReaderBuilder;
 use ipnetwork::IpNetwork;
 use memmap2::Mmap;
 use rayon::prelude::*;
+use tempfile::TempDir;
 
 use crate::{messages, version::Version};
 
@@ -29,6 +29,49 @@ struct BlockIndices {
     sat: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum CountryCode {
+    Iso([u8; 2]),
+    A1,
+    A2,
+    O1,
+}
+
+impl CountryCode {
+    fn parse(s: &str) -> Option<Self> {
+        match s {
+            "A1" => Some(Self::A1),
+            "A2" => Some(Self::A2),
+            "O1" => Some(Self::O1),
+            _ => {
+                let b = s.as_bytes();
+                if b.len() == 2
+                    && b[0].is_ascii_alphabetic()
+                    && b[1].is_ascii_alphabetic()
+                {
+                    Some(Self::Iso([
+                        b[0].to_ascii_uppercase(),
+                        b[1].to_ascii_uppercase(),
+                    ]))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for CountryCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Iso(b) => write!(f, "{}{}", b[0] as char, b[1] as char),
+            Self::A1 => write!(f, "A1"),
+            Self::A2 => write!(f, "A2"),
+            Self::O1 => write!(f, "O1"),
+        }
+    }
+}
+
 pub fn build(
     source_dir: &Path,
     target_dir: &Path,
@@ -43,13 +86,13 @@ pub fn build(
 
     let (country_id, mut country_name) = load_countries(source_dir, legacy)?;
     country_name
-        .entry("A1".into())
+        .entry(CountryCode::A1)
         .or_insert_with(|| "Anonymous Proxy".into());
     country_name
-        .entry("A2".into())
+        .entry(CountryCode::A2)
         .or_insert_with(|| "Satellite Provider".into());
     country_name
-        .entry("O1".into())
+        .entry(CountryCode::O1)
         .or_insert_with(|| "Other Country".into());
 
     let country_count = country_name.len();
@@ -60,12 +103,12 @@ pub fn build(
     let v4_pools = v4_result?;
     let v6_pools = v6_result?;
 
-    let mut country_ranges: BTreeMap<String, CountryRanges> = country_name
+    let mut country_ranges: BTreeMap<CountryCode, CountryRanges> = country_name
         .keys()
-        .map(|cc| (cc.clone(), CountryRanges::default()))
+        .map(|&cc| (cc, CountryRanges::default()))
         .collect();
-    for cc in ["A1", "A2", "O1"] {
-        country_ranges.entry(cc.to_string()).or_default();
+    for cc in [CountryCode::A1, CountryCode::A2, CountryCode::O1] {
+        country_ranges.entry(cc).or_default();
     }
     for (cc, pool) in v4_pools {
         country_ranges.entry(cc).or_default().pool_v4 = pool;
@@ -74,10 +117,16 @@ pub fn build(
         country_ranges.entry(cc).or_default().pool_v6 = pool;
     }
 
-    let (written_paths, checksums) =
-        write_outputs(&country_ranges, target_dir)?;
-    let manifest_path = generate_manifest(target_dir, version, checksums)?;
-    detect_orphans(target_dir, &written_paths, &manifest_path)?;
+    let parent = target_dir.parent().unwrap_or(Path::new("."));
+    let temp_dir = TempDir::new_in(parent)?;
+
+    if target_dir.exists() {
+        messages::warn("Replacing existing database.");
+    }
+
+    let checksums = write_outputs(&country_ranges, temp_dir.path())?;
+    generate_manifest(temp_dir.path(), version, checksums)?;
+    atomic_swap(temp_dir, target_dir)?;
 
     messages::info(&format!("Countries processed: {}", country_count));
     let ipv4_count: usize =
@@ -90,34 +139,14 @@ pub fn build(
     Ok(())
 }
 
-type WriteOutputs = (Vec<PathBuf>, Vec<(String, String)>);
-
 fn write_outputs(
-    country_ranges: &BTreeMap<String, CountryRanges>,
-    target_dir: &Path,
-) -> anyhow::Result<WriteOutputs> {
-    fs::create_dir_all(target_dir)?;
-
-    let files_to_write: Vec<_> = country_ranges
-        .keys()
-        .flat_map(|iso| {
-            let base = target_dir.join(iso.to_uppercase());
-            vec![base.with_extension("iv4"), base.with_extension("iv6")]
-        })
-        .collect();
-
-    let overwrite_count = files_to_write.iter().filter(|f| f.exists()).count();
-    if overwrite_count > 0 {
-        messages::warn(&format!(
-            "{} country files (iv4/iv6) will be overwritten.",
-            overwrite_count
-        ));
-    }
-
+    country_ranges: &BTreeMap<CountryCode, CountryRanges>,
+    out_dir: &Path,
+) -> anyhow::Result<Vec<(String, String)>> {
     let write_results: Vec<anyhow::Result<(String, String)>> = country_ranges
         .par_iter()
-        .flat_map(|(iso, cr)| {
-            let base = target_dir.join(iso.to_uppercase());
+        .flat_map(|(cc, cr)| {
+            let base = out_dir.join(cc.to_string());
             vec![
                 write_country_v4(&base, &cr.pool_v4),
                 write_country_v6(&base, &cr.pool_v6),
@@ -142,107 +171,68 @@ fn write_outputs(
     }
     checksums.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
-    Ok((files_to_write, checksums))
+    Ok(checksums)
 }
 
 fn generate_manifest(
-    target_dir: &Path,
+    out_dir: &Path,
     version: &Version,
     checksums: Vec<(String, String)>,
-) -> anyhow::Result<PathBuf> {
-    fs::write(target_dir.join("version"), format!("{version}\n"))?;
+) -> anyhow::Result<()> {
+    fs::write(out_dir.join("version"), format!("{version}\n"))?;
 
     let manifest_name = version.bin_manifest_name();
-    let manifest_path = target_dir.join(&manifest_name);
     let manifest_content: String = checksums
         .iter()
         .map(|(fname, hash)| format!("{hash}  {fname}\n"))
         .collect();
-    fs::write(&manifest_path, manifest_content.as_bytes())?;
+    fs::write(out_dir.join(&manifest_name), manifest_content.as_bytes())?;
 
-    Ok(manifest_path)
+    Ok(())
 }
 
-fn detect_orphans(
-    target_dir: &Path,
-    written: &[PathBuf],
-    manifest_path: &Path,
-) -> anyhow::Result<()> {
-    let all_existing: Vec<_> = fs::read_dir(target_dir)?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| {
-            let ext = p.extension().and_then(OsStr::to_str).unwrap_or("");
-            let fname = p.file_name().and_then(OsStr::to_str).unwrap_or("");
-            fname != "version"
-                && (ext == "iv4"
-                    || ext == "iv6"
-                    || ext == "blake3"
-                    || ext == "sha256")
-        })
-        .collect();
-
-    let mut written_set: HashSet<PathBuf> =
-        HashSet::with_capacity(written.len() + 1);
-    written_set.extend(written.iter().cloned());
-    written_set.insert(manifest_path.to_path_buf());
-
-    let orphaned: Vec<_> = all_existing
-        .into_iter()
-        .filter(|p| !written_set.contains(p))
-        .collect();
-
-    if orphaned.is_empty() {
+fn atomic_swap(temp_dir: TempDir, target_dir: &Path) -> anyhow::Result<()> {
+    if !target_dir.exists() {
+        fs::rename(temp_dir.path(), target_dir)?;
         return Ok(());
     }
 
-    // Stale manifests (.blake3/.sha256) are unconditionally superseded by
-    // the new manifest — delete them silently.
-    let (stale_manifests, stale_iv): (Vec<_>, Vec<_>) =
-        orphaned.into_iter().partition(|p| {
-            matches!(
-                p.extension().and_then(|e| e.to_str()),
-                Some("blake3") | Some("sha256")
-            )
-        });
+    let old_target = {
+        let mut name = target_dir
+            .file_name()
+            .ok_or_else(|| anyhow::anyhow!("target_dir has no file name"))?
+            .to_os_string();
+        name.push(".old");
+        target_dir
+            .parent()
+            .map(|p| p.join(&name))
+            .unwrap_or_else(|| PathBuf::from(&name))
+    };
 
-    for path in &stale_manifests {
-        if let Err(e) = fs::remove_file(path) {
-            messages::warn(&format!(
-                "Failed to delete stale manifest {}: {e:#}",
-                path.display()
-            ));
-        }
+    if old_target.exists() {
+        bail!(
+            "Leftover directory \"{}\" from a previous failed build swap; \
+             inspect and remove it manually before building again.",
+            old_target.display()
+        );
     }
 
-    // Orphaned iv4/iv6 files require user action (e.g. legacy→normal
-    // mode transition leaving EU.iv4/EU.iv6 behind).
-    if !stale_iv.is_empty() {
-        let orphaned_path = target_dir.join("orphaned");
+    fs::rename(target_dir, &old_target)?;
+
+    if let Err(e) = fs::rename(temp_dir.path(), target_dir) {
+        if let Err(re) = fs::rename(&old_target, target_dir) {
+            messages::error(&format!(
+                "Restore of previous database failed: {re:#}"
+            ));
+        }
+        return Err(e.into());
+    }
+
+    if let Err(e) = fs::remove_dir_all(&old_target) {
         messages::warn(&format!(
-            "{} orphaned files detected in \"{}\":",
-            stale_iv.len(),
-            target_dir.display()
+            "Failed to remove previous database \"{}\": {e:#}",
+            old_target.display()
         ));
-        for p in &stale_iv {
-            messages::warn(&format!("  {}", p.display()));
-        }
-        let list = stale_iv
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
-        match fs::write(&orphaned_path, &list) {
-            Ok(()) => messages::warn(&format!(
-                "Run `xtgeoip build -c -f` or delete files listed in \"{}\" \
-                 for a clean install.",
-                orphaned_path.display()
-            )),
-            Err(e) => messages::warn(&format!(
-                "Could not write orphaned file list to \"{}\": {e:#}",
-                orphaned_path.display()
-            )),
-        }
     }
 
     Ok(())
@@ -254,7 +244,8 @@ fn detect_orphans(
 fn load_countries(
     source_dir: &Path,
     legacy: bool,
-) -> anyhow::Result<(HashMap<String, String>, BTreeMap<String, String>)> {
+) -> anyhow::Result<(HashMap<String, CountryCode>, BTreeMap<CountryCode, String>)>
+{
     let file_path = source_dir.join("GeoLite2-Country-Locations-en.csv");
     let file = File::open(&file_path)?;
     let mmap = mmap_file(&file)?;
@@ -300,30 +291,17 @@ fn load_countries(
             )
         })?;
 
-    let mut country_id: HashMap<String, String> = HashMap::new();
-    let mut country_name: BTreeMap<String, String> = BTreeMap::new();
+    let mut country_id: HashMap<String, CountryCode> = HashMap::new();
+    let mut country_name: BTreeMap<CountryCode, String> = BTreeMap::new();
 
     for record in rdr.records() {
         let rec = record?;
         let geoname = rec.get(idx_geoname).unwrap_or("").to_string();
-        let iso = {
-            let raw = rec.get(idx_iso).unwrap_or("");
-            if raw.contains('/')
-                || raw.contains('\\')
-                || raw == ".."
-                || raw == "."
-            {
-                String::new()
-            } else {
-                raw.to_string()
-            }
-        };
         let name = rec.get(idx_name).unwrap_or("").to_string();
-        let continent = rec.get(idx_continent).unwrap_or("").to_string();
 
-        if !iso.is_empty() {
-            country_id.insert(geoname.clone(), iso.clone());
-            country_name.entry(iso.clone()).or_insert(name);
+        if let Some(cc) = CountryCode::parse(rec.get(idx_iso).unwrap_or("")) {
+            country_id.insert(geoname, cc);
+            country_name.entry(cc).or_insert(name);
         } else if geoname == "6255148" || geoname == "6255147" {
             // Geoname 6255148 = Asia (continent), 6255147 = Europe (continent).
             // These are MaxMind CSV entries where country_iso_code is blank but
@@ -332,16 +310,17 @@ fn load_countries(
             // between Asia (AS) and American Samoa (AS), and a
             // non-existent EU country code. Correct behaviour maps
             // these to O1 (Other Country, ISO 3166 reserved).
-            if legacy {
-                country_id.insert(geoname.clone(), continent.clone());
-                country_name.entry(continent.clone()).or_insert(name);
+            let cc = if legacy {
+                CountryCode::parse(rec.get(idx_continent).unwrap_or(""))
+                    .unwrap_or(CountryCode::O1)
             } else {
-                country_id.insert(geoname.clone(), "O1".to_string());
-                country_name.entry("O1".to_string()).or_insert(name);
-            }
+                CountryCode::O1
+            };
+            country_id.insert(geoname, cc);
+            country_name.entry(cc).or_insert(name);
         } else {
-            country_id.insert(geoname.clone(), "".to_string());
-            country_name.entry("O1".to_string()).or_insert(name);
+            country_id.insert(geoname, CountryCode::O1);
+            country_name.entry(CountryCode::O1).or_insert(name);
         }
     }
 
@@ -397,9 +376,9 @@ fn parse_block_indices(
 // -------------------------
 fn load_blocks_v4(
     source_dir: &Path,
-    country_id: &HashMap<String, String>,
+    country_id: &HashMap<String, CountryCode>,
     country_count: usize,
-) -> anyhow::Result<HashMap<String, Vec<(u32, u32)>>> {
+) -> anyhow::Result<HashMap<CountryCode, Vec<(u32, u32)>>> {
     const FILE_NAME: &str = "GeoLite2-Country-Blocks-IPv4.csv";
     let file = File::open(source_dir.join(FILE_NAME))?;
     let mmap = mmap_file(&file)?;
@@ -410,7 +389,7 @@ fn load_blocks_v4(
     let idx = parse_block_indices(&headers, FILE_NAME)?;
 
     let skipped = AtomicUsize::new(0);
-    let parsed: Vec<(String, Option<(u32, u32)>)> = rdr
+    let parsed: Vec<(CountryCode, Option<(u32, u32)>)> = rdr
         .into_records()
         .par_bridge()
         .filter_map(|r| {
@@ -440,7 +419,7 @@ fn load_blocks_v4(
         messages::warn(&format!("{n} malformed rows skipped in {FILE_NAME}"));
     }
 
-    let mut pools: HashMap<String, Vec<(u32, u32)>> =
+    let mut pools: HashMap<CountryCode, Vec<(u32, u32)>> =
         HashMap::with_capacity(country_count);
     for (cc, range_opt) in parsed {
         if let Some(range) = range_opt {
@@ -456,9 +435,9 @@ fn load_blocks_v4(
 // -------------------------
 fn load_blocks_v6(
     source_dir: &Path,
-    country_id: &HashMap<String, String>,
+    country_id: &HashMap<String, CountryCode>,
     country_count: usize,
-) -> anyhow::Result<HashMap<String, Vec<(u128, u128)>>> {
+) -> anyhow::Result<HashMap<CountryCode, Vec<(u128, u128)>>> {
     const FILE_NAME: &str = "GeoLite2-Country-Blocks-IPv6.csv";
     let file = File::open(source_dir.join(FILE_NAME))?;
     let mmap = mmap_file(&file)?;
@@ -469,7 +448,7 @@ fn load_blocks_v6(
     let idx = parse_block_indices(&headers, FILE_NAME)?;
 
     let skipped = AtomicUsize::new(0);
-    let parsed: Vec<(String, Option<(u128, u128)>)> = rdr
+    let parsed: Vec<(CountryCode, Option<(u128, u128)>)> = rdr
         .into_records()
         .par_bridge()
         .filter_map(|r| {
@@ -499,7 +478,7 @@ fn load_blocks_v6(
         messages::warn(&format!("{n} malformed rows skipped in {FILE_NAME}"));
     }
 
-    let mut pools: HashMap<String, Vec<(u128, u128)>> =
+    let mut pools: HashMap<CountryCode, Vec<(u128, u128)>> =
         HashMap::with_capacity(country_count);
     for (cc, range_opt) in parsed {
         if let Some(range) = range_opt {
@@ -515,23 +494,19 @@ fn resolve_country_code(
     sat: bool,
     id: &str,
     rid: &str,
-    country_id: &HashMap<String, String>,
-) -> String {
+    country_id: &HashMap<String, CountryCode>,
+) -> CountryCode {
     if proxy {
-        return "A1".to_string();
+        return CountryCode::A1;
     }
     if sat {
-        return "A2".to_string();
+        return CountryCode::A2;
     }
     let key = if !id.is_empty() { id } else { rid };
     if key.is_empty() {
-        return "O1".to_string();
+        return CountryCode::O1;
     }
-    country_id
-        .get(key)
-        .filter(|s| !s.is_empty())
-        .cloned()
-        .unwrap_or_else(|| "O1".to_string())
+    country_id.get(key).copied().unwrap_or(CountryCode::O1)
 }
 
 // -------------------------
@@ -610,11 +585,16 @@ fn write_country_v4(
 ) -> anyhow::Result<(String, String)> {
     let file_path = file_base.with_extension("iv4");
     let mut buf = Vec::with_capacity(ranges.len() * 8);
+    let mut hasher = blake3::Hasher::new();
     for &(start, end) in ranges {
-        buf.extend_from_slice(&start.to_be_bytes());
-        buf.extend_from_slice(&end.to_be_bytes());
+        let s = start.to_be_bytes();
+        let e = end.to_be_bytes();
+        buf.extend_from_slice(&s);
+        buf.extend_from_slice(&e);
+        hasher.update(&s);
+        hasher.update(&e);
     }
-    let hash = blake3::hash(&buf).to_string();
+    let hash = hasher.finalize().to_string();
     fs::write(&file_path, &buf)?;
     let fname = file_path
         .file_name()
@@ -629,12 +609,17 @@ fn write_country_v6(
     ranges: &[(u128, u128)],
 ) -> anyhow::Result<(String, String)> {
     let file_path = file_base.with_extension("iv6");
-    let mut buf = Vec::with_capacity(ranges.len() * 16);
+    let mut buf = Vec::with_capacity(ranges.len() * 32);
+    let mut hasher = blake3::Hasher::new();
     for &(start, end) in ranges {
-        buf.extend_from_slice(&start.to_be_bytes());
-        buf.extend_from_slice(&end.to_be_bytes());
+        let s = start.to_be_bytes();
+        let e = end.to_be_bytes();
+        buf.extend_from_slice(&s);
+        buf.extend_from_slice(&e);
+        hasher.update(&s);
+        hasher.update(&e);
     }
-    let hash = blake3::hash(&buf).to_string();
+    let hash = hasher.finalize().to_string();
     fs::write(&file_path, &buf)?;
     let fname = file_path
         .file_name()

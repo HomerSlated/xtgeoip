@@ -43,6 +43,26 @@ fn is_root() -> bool {
         .unwrap_or(false)
 }
 
+fn init_runtime(cfg: &config::Config) -> Result<()> {
+    if let Some(threads) = cfg
+        .processing
+        .as_ref()
+        .and_then(|p| p.threads)
+        .filter(|&t| t > 0)
+        && let Err(e) = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build_global()
+    {
+        messages::warn(&format!("Rayon thread pool init failed: {e}"));
+    }
+
+    if let Some(log_file) = cfg.logging.as_ref().map(|l| l.log_file.as_str()) {
+        init_logger(log_file)?;
+    }
+
+    Ok(())
+}
+
 fn run(cli: Cli) -> Result<()> {
     let outcome = cli::normalize_cli_to_action(&cli).map_err(|e| {
         eprintln!("Error: {e}");
@@ -64,24 +84,7 @@ fn run(cli: Cli) -> Result<()> {
                 e
             })?;
 
-            if let Some(threads) = cfg
-                .processing
-                .as_ref()
-                .and_then(|p| p.threads)
-                .filter(|&t| t > 0)
-                && let Err(e) = rayon::ThreadPoolBuilder::new()
-                    .num_threads(threads)
-                    .build_global()
-            {
-                messages::warn(&format!("Rayon thread pool init failed: {e}"));
-            }
-
-            if let Some(log_file) =
-                cfg.logging.as_ref().map(|l| l.log_file.as_str())
-            {
-                init_logger(log_file)?;
-            }
-
+            init_runtime(&cfg)?;
             run_action(&cfg, action)?;
         }
 

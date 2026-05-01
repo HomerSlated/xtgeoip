@@ -61,7 +61,7 @@ CLI → parsed args
     → execution
 ```
 
-The `Action` enum is explicit, type-safe, and easy to extend — keep this shape. The Action construction blocks (e.g. `Ok(Some(Action::Build { legacy, backup, ... }))`) are the right pattern; the change needed is that they should be generated from the semantics layer rather than hand-written. The individual items in this TODO are stepping stones toward this architecture; items #5, #17, #19, #20, #22, #27/#31, #28, #29 are the key structural enablers.
+The `Action` enum is explicit, type-safe, and easy to extend — keep this shape. The Action construction blocks (e.g. `Ok(Some(Action::Build { legacy, backup, ... }))`) are the right pattern; the change needed is that they should be generated from the semantics layer rather than hand-written. The individual items in this TODO are stepping stones toward this architecture; items #22, #27/#31, #29 are the remaining structural enablers.
 
 Note [#32]: Preserve the `Action` construction pattern — the change is in the source of the construction logic, not its shape.
 
@@ -83,24 +83,6 @@ Logging to file should be optional. Configurable via `[logging]` in TOML config,
 
 ---
 
-## TYPED ENUMS: ELIMINATING BOOLEAN TRAPS
-
-### #39 — build.rs: country codes are heap-allocated `String`
-
-Country codes are `String` everywhere — always exactly 2 ASCII chars, `String` is expensive. Replace with:
-```rust
-type CountryCode = [u8; 2];
-```
-Or richer:
-```rust
-enum CountryCode { Iso([u8; 2]), O1, A1, A2 }
-```
-Stack-allocated, `Copy`, `PartialEq` by value, no cloning.
-
-*Note [#40]*: Once this enum exists, O1 fallback logic duplicated in `load_countries` and `resolve_country_code` is replaced by `CountryCode::O1` — centralised by the type itself.
-
-*Note [#44]*: Calls like `"O1".to_string()` that allocate on every use become enum variants with no allocation.
-
 ---
 
 ## ARCHITECTURE: ANALYSIS AND SMALL REFACTORS
@@ -109,58 +91,9 @@ Stack-allocated, `Copy`, `PartialEq` by value, no cloning.
 
 Re-analyse the distribution of responsibilities across all modules (including `main.rs`) to verify clean separation of concerns. Likely problem areas: overlap between `main.rs`, `cli.rs`, and `action.rs`; config loading touching runtime concerns; logic that has drifted into the wrong layer. This is a prerequisite analysis before larger refactoring.
 
-### #5 — main.rs: `run()` mixes multiple concerns
-
-`run()` mixes command dispatch, config loading, and runtime setup. Split into explicit sequential phases:
-1. Parse (CLI → raw args)
-2. Resolve action (args → `Action`)
-3. Load config
-4. Init runtime (Rayon pool, logger)
-5. Execute
-
-### #28 — cli.rs: flags duplicated across subcommands
-
-The same flags (`backup`, `clean`, `force`, `prune`, `legacy`) are declared independently in `Cli`, `Run`, `Build`, and `Fetch` (hidden). Consolidate via `#[command(flatten)]`:
-```rust
-#[derive(Args)]
-pub struct CommonFlags {
-    #[arg(short, long)] pub backup: bool,
-    #[arg(short, long)] pub clean:  bool,
-    #[arg(short, long)] pub force:  bool,
-    #[arg(short, long)] pub prune:  bool,
-    #[arg(short = 'l', long)] pub legacy: bool,
-}
-```
-
-### #18 — all: config paths reconstructed at every call site
-
-`Path::new(&cfg.paths.output_dir)` and `Path::new(&cfg.paths.archive_dir)` repeated everywhere. Build once after config load:
-```rust
-struct ResolvedPaths<'a> { output: &'a Path, archive: &'a Path }
-```
-
-### #62 — build.rs: file hashing loads entire file into memory
-
-`fs::read(&file_path)?` loads entire file for hashing. Stream instead:
-```rust
-let mut file = File::open(&file_path)?;
-let mut hasher = blake3::Hasher::new();
-std::io::copy(&mut file, &mut hasher)?;
-let hash = hasher.finalize().to_string();
-```
-Verify vs invariant #5 — confirm no sequential bottleneck introduced.
-
 ---
 
 ## ARCHITECTURE: build.rs RESTRUCTURING
-
-### #45 — build.rs: interrupted build leaves inconsistent state
-
-Data files, version file, and manifest are written independently. Interrupted build leaves partial inconsistent state. Apply atomic swap at the build level:
-1. Write all output to a temporary directory
-2. Write version and manifest into same temp dir last
-3. `rename()` temp dir into place (atomic on same filesystem)
-Discard temp on any failure; previous output untouched.
 
 ### #38 — build.rs: CSV parsing materialises all rows before grouping
 
@@ -204,24 +137,6 @@ Consider Rayon `.par_lines()` or `.par_iter()`. On small datasets, overhead may 
 
 ## ARCHITECTURE: action.rs / EXECUTION PLANNER
 
-### #17 — action.rs: execution order is hardcoded and implicit
-
-Execution order is hardcoded and implicit in each handler. Make it explicit:
-```rust
-enum Step { Backup, Clean, Fetch, Prune, Build }
-fn plan(action: &Action) -> Vec<Step>
-```
-`plan()` becomes single source of truth. Testable, documentable, spec-alignable.
-
-### #19 — action.rs: backup/clean pattern duplicated across handlers
-
-The `if do_backup { backup(...)? } / if do_clean { delete(...)? }` pattern is duplicated across `TopLevelBackup`, `Run`, and `Build`. Consolidate:
-```rust
-fn run_backup(cfg: &Config, enabled: bool, force: bool) -> Result<()>
-fn run_clean(cfg: &Config, enabled: bool, force: bool) -> Result<()>
-```
-Depends on #17. Each `Step` dispatches to exactly one function.
-
 ### #22 — action.rs: FetchMode semantics exist only in code
 
 `FetchMode::Remote` and `FetchMode::Local` are a clean abstraction but their semantics exist only in code. Bring into spec:
@@ -230,19 +145,6 @@ fetch:
   mode: remote | local
 ```
 Depends on #17 and spec-driven direction.
-
-### #20 + #30 — cli.rs / action.rs: semantics duplicated across two layers [merged]
-
-Semantics are duplicated across two layers. CLI validates (e.g. `--prune` requires `--backup`) but Action layer also partially re-checks. If CLI changes, Action can silently behave incorrectly.
-
-Specific example (#30): the same "prune requires backup" constraint has two different implementations:
-```rust
-// Top-level: if p && !b && !c { ... }
-// Build:     if *prune && !*backup { ... }
-```
-Same rule, two expressions, can drift independently.
-
-Pick one defensible position consistently: either trust CLI completely (Action has no re-checks) or validate defensively at Action (self-contained). Long-term: a semantics layer between CLI and Action that produces validated plans from spec constraints. Until then, at minimum consolidate into a single shared predicate.
 
 ### #29 — cli.rs: ambiguity checks have no formal basis
 
