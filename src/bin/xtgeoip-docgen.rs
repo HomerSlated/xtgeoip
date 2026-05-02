@@ -137,6 +137,15 @@ fn main() -> anyhow::Result<()> {
     let yaml_str = fs::read_to_string("docs/spec/cli.yaml")?;
     let spec: Spec = serde_yaml::from_str(&yaml_str)?;
 
+    const SUPPORTED_SCHEMA_VERSION: &str = "3.1";
+    if spec.version != SUPPORTED_SCHEMA_VERSION {
+        anyhow::bail!(
+            "Unsupported spec schema version '{}' (expected '{}')",
+            spec.version,
+            SUPPORTED_SCHEMA_VERSION
+        );
+    }
+
     validate_spec(&spec)?;
 
     let toml_str = fs::read_to_string("docs/spec/manpage-template.toml")?;
@@ -169,12 +178,14 @@ fn main() -> anyhow::Result<()> {
 
 fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
     let mut used_error_cases: BTreeSet<String> = BTreeSet::new();
+    let mut duplicate_maps_to: BTreeSet<String> = BTreeSet::new();
 
     let error_cases = spec.error_cases.as_ref();
 
     let check = |scope: &str,
                  ex: &Example,
-                 used: &mut BTreeSet<String>|
+                 used: &mut BTreeSet<String>,
+                 dupes: &mut BTreeSet<String>|
      -> anyhow::Result<()> {
         if let Some(reason) = &ex.reason
             && !spec.reason_templates.contains_key(&reason.code)
@@ -193,7 +204,9 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
                 anyhow::bail!("Unknown error case {}", maps_to);
             }
 
-            used.insert(maps_to.clone());
+            if !used.insert(maps_to.clone()) {
+                dupes.insert(maps_to.clone());
+            }
         }
 
         Ok(())
@@ -201,7 +214,8 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
 
     let visit = |name: &str,
                  cmd: &CommandSpec,
-                 used: &mut BTreeSet<String>|
+                 used: &mut BTreeSet<String>,
+                 dupes: &mut BTreeSet<String>|
      -> anyhow::Result<()> {
         let exs = match cmd {
             CommandSpec::FlagCommand { examples, .. }
@@ -209,7 +223,7 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
         };
 
         for ex in exs {
-            check(name, ex, used)?;
+            check(name, ex, used, dupes)?;
         }
 
         Ok(())
@@ -217,24 +231,31 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
 
     // IMPORTANT: top_level is a command too
     if let Some(cmd) = &spec.top_level {
-        visit("top_level", cmd, &mut used_error_cases)?;
+        visit(
+            "top_level",
+            cmd,
+            &mut used_error_cases,
+            &mut duplicate_maps_to,
+        )?;
     }
 
-    // These are ALL real commands in your YAML
-    if let Some(cmd) = spec.commands.get("fetch") {
-        visit("fetch", cmd, &mut used_error_cases)?;
+    for (name, cmd) in &spec.commands {
+        visit(name, cmd, &mut used_error_cases, &mut duplicate_maps_to)?;
     }
 
-    if let Some(cmd) = spec.commands.get("build") {
-        visit("build", cmd, &mut used_error_cases)?;
-    }
-
-    if let Some(cmd) = spec.commands.get("run") {
-        visit("run", cmd, &mut used_error_cases)?;
-    }
-
-    if let Some(cmd) = spec.commands.get("conf") {
-        visit("conf", cmd, &mut used_error_cases)?;
+    // UNIQUE MAPS_TO CHECK
+    if spec
+        .proof
+        .as_ref()
+        .and_then(|p| p.unique_maps_to)
+        .unwrap_or(false)
+        && !duplicate_maps_to.is_empty()
+    {
+        anyhow::bail!(
+            "Duplicate maps_to references (proof.unique_maps_to violated): \
+             {:?}",
+            duplicate_maps_to
+        );
     }
 
     // FULL COVERAGE CHECK
@@ -395,7 +416,7 @@ fn generate_tldr_md(spec: &Spec) -> anyhow::Result<String> {
 /* ---------------- ERROR TEXT ---------------- */
 
 fn generate_error_text_rs(spec: &Spec) -> anyhow::Result<String> {
-    let mut out = "// auto-generated\n".to_string();
+    let mut out = "// auto-generated\n#![allow(dead_code)]\n".to_string();
 
     for (k, v) in &spec.reason_templates {
         out.push_str(&format!(
@@ -412,8 +433,9 @@ fn generate_error_text_rs(spec: &Spec) -> anyhow::Result<String> {
 
 fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
     let mut out = String::from(
-        "pub struct CliExample { pub cmd: &'static str, pub valid: bool, pub \
-         outcome: &'static str }\npub const CLI_MATRIX: &[CliExample] = &[\n",
+        "// auto-generated\n#![allow(dead_code)]\npub struct CliExample { \
+         pub cmd: &'static str, pub valid: bool, pub outcome: &'static str \
+         }\npub const CLI_MATRIX: &[CliExample] = &[\n",
     );
 
     let mut add = |exs: &[Example]| {

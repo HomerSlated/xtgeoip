@@ -31,37 +31,57 @@ flags:
     summary: Enable legacy mode.
 
 reason_templates:
-  ok:
-    text: "{outcome}"
-  invalid_flag:
-    text: "unsupported option -{flag} for {command}"
-  invalid_combo:
-    text: "unsupported option combination"
-  no_prune_here:
-    text: "{command} does not support prune"
-  no_force_here:
-    text: "{command} does not support force without a target"
-  ambiguous_force_prune:
-    text: "ambiguous flags: prune and force cannot be combined in this context"
-  ambiguous_prune_target:
-    text: "ambiguous prune target between {left} and {right}"
+  no_argument:
+    text: "you must specify at least one argument"
+  no_legacy_here:
+    text: "you must specify build or run, for the --legacy option"
+  no_force_alone:
+    text: "you must specify --backup or --clean, for the --force option"
+  no_prune_alone:
+    text: "you must specify fetch or --backup, for the --prune option"
+  no_prune_clean:
+    text: "you must specify fetch or --backup, for the prune option, and --clean does not support the --prune option"
+  no_prune_clean_force:
+    text: "you must specify fetch or --backup, for the prune option, --clean does not support the --prune option, and --prune does not support the --force option"
+  no_prune_force:
+    text: "--prune does not support the --force option"
+  no_fetch_legacy:
+    text: "fetch does not support the --legacy option"
+  no_fetch_backup:
+    text: "fetch does not support the --backup option"
+  no_fetch_clean:
+    text: "fetch does not support the --clean option"
+  no_fetch_force:
+    text: "fetch does not support the --force option"
+  no_build_force:
+    text: "build does not support the --force option"
+  no_prune_backup:
+    text: "you must specify --backup, for the --prune option"
+  no_run_force:
+    text: "run does not support the --force option"
+  prune_target_ambiguous:
+    text: "you must specify fetch or build separately, for the --prune option"
   missing_required_argument:
     text: "{command} requires {argument}"
-  no_command:
-    text: "no command specified"
 
 error_cases:
-  no_command: { maps_to: no_command }
-  legacy_top_level: { maps_to: legacy_top_level }
-  top_level_invalid_combo: { maps_to: top_level_invalid_combo }
-  top_level_force_without_target: { maps_to: top_level_force_without_target }
-  top_level_clean_prune: { maps_to: top_level_clean_prune }
-  top_level_backup_prune_force: { maps_to: top_level_backup_prune_force }
-  fetch_invalid_flags: { maps_to: fetch_invalid_flags }
-  build_prune_without_backup: { maps_to: build_prune_without_backup }
-  build_ambiguous_all_flags: { maps_to: build_ambiguous_all_flags }
-  run_ambiguous_cpf: { maps_to: run_ambiguous_cpf }
-  run_ambiguous_bcp: { maps_to: run_ambiguous_bcp }
+  top_level_no_args: { maps_to: top_level_no_args }
+  top_level_legacy: { maps_to: top_level_legacy }
+  top_level_force_no_target: { maps_to: top_level_force_no_target }
+  top_level_prune_no_target: { maps_to: top_level_prune_no_target }
+  top_level_prune_with_clean: { maps_to: top_level_prune_with_clean }
+  top_level_prune_clean_force: { maps_to: top_level_prune_clean_force }
+  top_level_prune_force: { maps_to: top_level_prune_force }
+  fetch_no_legacy: { maps_to: fetch_no_legacy }
+  fetch_no_backup: { maps_to: fetch_no_backup }
+  fetch_no_clean: { maps_to: fetch_no_clean }
+  fetch_no_force: { maps_to: fetch_no_force }
+  build_force_no_target: { maps_to: build_force_no_target }
+  build_prune_no_backup: { maps_to: build_prune_no_backup }
+  build_prune_force: { maps_to: build_prune_force }
+  run_force_no_target: { maps_to: run_force_no_target }
+  run_prune_force: { maps_to: run_prune_force }
+  run_prune_ambiguous: { maps_to: run_prune_ambiguous }
   conf_missing_flag: { maps_to: conf_missing_flag }
 
 top_level:
@@ -72,8 +92,8 @@ top_level:
     - case_id: TL-001
       cmd: "xtgeoip"
       valid: false
-      reason: { code: no_command }
-      maps_to: no_command
+      reason: { code: no_argument }
+      maps_to: top_level_no_args
       exit_status: 1
     - case_id: TL-002
       cmd: "xtgeoip -h"
@@ -82,18 +102,18 @@ top_level:
     - case_id: TL-003
       cmd: "xtgeoip -l"
       valid: false
-      reason: { code: invalid_flag }
-      maps_to: legacy_top_level
+      reason: { code: no_legacy_here }
+      maps_to: top_level_legacy
     - case_id: TL-004
       cmd: "xtgeoip -f"
       valid: false
-      reason: { code: no_force_here }
-      maps_to: top_level_force_without_target
+      reason: { code: no_force_alone }
+      maps_to: top_level_force_no_target
     - case_id: TL-005
       cmd: "xtgeoip -p"
       valid: false
-      reason: { code: invalid_combo }
-      maps_to: top_level_invalid_combo
+      reason: { code: no_prune_alone }
+      maps_to: top_level_prune_no_target
     - case_id: TL-006
       cmd: "xtgeoip -b"
       valid: true
@@ -113,18 +133,26 @@ top_level:
     - case_id: TL-010
       cmd: "xtgeoip -c -p"
       valid: false
-      reason: { code: no_prune_here }
-      maps_to: top_level_clean_prune
+      reason: { code: no_prune_clean }
+      maps_to: top_level_prune_with_clean
     - case_id: TL-011
       cmd: "xtgeoip -b -p -f"
       valid: false
-      reason: { code: ambiguous_force_prune }
-      maps_to: top_level_backup_prune_force
+      reason: { code: no_prune_force }
+      maps_to: top_level_prune_force
     - case_id: TL-012
       cmd: "xtgeoip -c -p -f"
       valid: false
-      reason: { code: invalid_combo }
-      maps_to: top_level_invalid_combo
+      reason: { code: no_prune_clean_force }
+      maps_to: top_level_prune_clean_force
+    - case_id: TL-013
+      cmd: "xtgeoip -b -f"
+      valid: true
+      outcome: "force backup database"
+    - case_id: TL-014
+      cmd: "xtgeoip -b -c -f"
+      valid: true
+      outcome: "force backup then clean"
 
 commands:
 
@@ -144,23 +172,23 @@ commands:
       - case_id: F-003
         cmd: "xtgeoip fetch -l"
         valid: false
-        reason: { code: invalid_flag }
-        maps_to: fetch_invalid_flags
+        reason: { code: no_fetch_legacy }
+        maps_to: fetch_no_legacy
       - case_id: F-004
         cmd: "xtgeoip fetch -b"
         valid: false
-        reason: { code: invalid_flag }
-        maps_to: fetch_invalid_flags
+        reason: { code: no_fetch_backup }
+        maps_to: fetch_no_backup
       - case_id: F-005
         cmd: "xtgeoip fetch -c"
         valid: false
-        reason: { code: invalid_flag }
-        maps_to: fetch_invalid_flags
+        reason: { code: no_fetch_clean }
+        maps_to: fetch_no_clean
       - case_id: F-006
         cmd: "xtgeoip fetch -f"
         valid: false
-        reason: { code: invalid_flag }
-        maps_to: fetch_invalid_flags
+        reason: { code: no_fetch_force }
+        maps_to: fetch_no_force
 
   build:
     kind: FlagCommand
@@ -182,8 +210,8 @@ commands:
       - case_id: B-004
         cmd: "xtgeoip build -p"
         valid: false
-        reason: { code: no_prune_here }
-        maps_to: build_prune_without_backup
+        reason: { code: no_prune_backup }
+        maps_to: build_prune_no_backup
       - case_id: B-005
         cmd: "xtgeoip build -c -f"
         valid: true
@@ -195,8 +223,33 @@ commands:
       - case_id: B-007
         cmd: "xtgeoip build -b -c -p -f"
         valid: false
-        reason: { code: ambiguous_force_prune }
-        maps_to: build_ambiguous_all_flags
+        reason: { code: no_prune_force }
+        maps_to: build_prune_force
+      - case_id: B-008
+        cmd: "xtgeoip build -f"
+        valid: false
+        reason: { code: no_build_force }
+        maps_to: build_force_no_target
+      - case_id: B-009
+        cmd: "xtgeoip build -b"
+        valid: true
+        outcome: "backup then build"
+      - case_id: B-010
+        cmd: "xtgeoip build -c"
+        valid: true
+        outcome: "clean then build"
+      - case_id: B-011
+        cmd: "xtgeoip build -b -c"
+        valid: true
+        outcome: "backup then clean then build"
+      - case_id: B-012
+        cmd: "xtgeoip build -b -f"
+        valid: true
+        outcome: "force backup then build"
+      - case_id: B-013
+        cmd: "xtgeoip build -b -c -f"
+        valid: true
+        outcome: "force backup then clean then build"
 
   run:
     kind: FlagCommand
@@ -226,13 +279,38 @@ commands:
       - case_id: R-006
         cmd: "xtgeoip run -c -p -f"
         valid: false
-        reason: { code: ambiguous_force_prune }
-        maps_to: run_ambiguous_cpf
+        reason: { code: no_prune_force }
+        maps_to: run_prune_force
       - case_id: R-007
         cmd: "xtgeoip run -b -c -p"
         valid: false
-        reason: { code: ambiguous_prune_target }
-        maps_to: run_ambiguous_bcp
+        reason: { code: prune_target_ambiguous }
+        maps_to: run_prune_ambiguous
+      - case_id: R-008
+        cmd: "xtgeoip run -f"
+        valid: false
+        reason: { code: no_run_force }
+        maps_to: run_force_no_target
+      - case_id: R-009
+        cmd: "xtgeoip run -b"
+        valid: true
+        outcome: "backup then fetch then build"
+      - case_id: R-010
+        cmd: "xtgeoip run -b -c"
+        valid: true
+        outcome: "backup then clean then fetch then build"
+      - case_id: R-011
+        cmd: "xtgeoip run -b -f"
+        valid: true
+        outcome: "force backup then fetch then build"
+      - case_id: R-012
+        cmd: "xtgeoip run -b -p"
+        valid: true
+        outcome: "backup then fetch then prune then build"
+      - case_id: R-013
+        cmd: "xtgeoip run -b -c -f"
+        valid: true
+        outcome: "force backup then clean then fetch then build"
 
   conf:
     kind: SelectorCommand
@@ -265,4 +343,3 @@ commands:
         cmd: "xtgeoip conf -e"
         valid: true
         outcome: "edit configuration"
-

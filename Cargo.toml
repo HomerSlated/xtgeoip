@@ -31,6 +31,3 @@ time = { version = "0.3.47", features = ["macros", "local-offset"] }
 chrono = "0.4.44"
 fern = { version = "0.7.1", features = ["chrono"] }
 
-[[bin]]
-name = "xtgeoip-docgen"
-path = "src/bin/xtgeoip-docgen.rs"

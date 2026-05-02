@@ -3,7 +3,15 @@ use anyhow::{Result, anyhow};
 /// xtgeoip CLI parsing and normalization
 use clap::{Args, Parser, Subcommand};
 
-use crate::{action::Action, config::ConfAction};
+use crate::{
+    action::Action,
+    config::ConfAction,
+    generated::error_text::{
+        NO_BUILD_FORCE, NO_FORCE_ALONE, NO_LEGACY_HERE, NO_PRUNE_ALONE,
+        NO_PRUNE_BACKUP, NO_PRUNE_CLEAN, NO_PRUNE_CLEAN_FORCE, NO_PRUNE_FORCE,
+        NO_RUN_FORCE, PRUNE_TARGET_AMBIGUOUS,
+    },
+};
 
 pub enum CliOutcome {
     Action(Action),
@@ -104,10 +112,6 @@ pub enum Commands {
     },
 }
 
-fn unsupported_flags_message(flags: &[&str], context: &str) -> String {
-    format!("Unsupported: {} {}.", flags.join(" "), context)
-}
-
 fn conf_action(default: bool, show: bool) -> ConfAction {
     if default {
         ConfAction::Default
@@ -123,9 +127,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
     use Commands::*;
 
     if cli.common.legacy && cli.command.is_none() {
-        return Err(anyhow!(
-            "Unsupported: --legacy only valid with build or run"
-        ));
+        return Err(anyhow!(NO_LEGACY_HERE));
     }
 
     if let Some(cmd) = &cli.command {
@@ -139,18 +141,16 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
             )))),
 
             Run { common, prune } => {
+                if common.force && !common.backup && !common.clean {
+                    return Err(anyhow!(NO_RUN_FORCE));
+                }
+
                 if *prune && common.force && common.clean {
-                    return Err(anyhow!(unsupported_flags_message(
-                        &["-c", "-p", "-f"],
-                        "combination is ambiguous in run"
-                    )));
+                    return Err(anyhow!(NO_PRUNE_FORCE));
                 }
 
                 if common.backup && common.clean && *prune {
-                    return Err(anyhow!(unsupported_flags_message(
-                        &["-b", "-c", "-p"],
-                        "combination is ambiguous in run"
-                    )));
+                    return Err(anyhow!(PRUNE_TARGET_AMBIGUOUS));
                 }
 
                 Ok(CliOutcome::Action(Action::Run {
@@ -163,18 +163,16 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
             }
 
             Build { common, prune } => {
+                if common.force && !common.backup && !common.clean {
+                    return Err(anyhow!(NO_BUILD_FORCE));
+                }
+
                 if *prune && !common.backup {
-                    return Err(anyhow!(
-                        "Unsupported: --prune cannot be used without --backup \
-                         for build"
-                    ));
+                    return Err(anyhow!(NO_PRUNE_BACKUP));
                 }
 
                 if *prune && common.force && common.backup && common.clean {
-                    return Err(anyhow!(unsupported_flags_message(
-                        &["-b", "-c", "-p", "-f"],
-                        "combination is ambiguous for build"
-                    )));
+                    return Err(anyhow!(NO_PRUNE_FORCE));
                 }
 
                 Ok(CliOutcome::Action(Action::Build {
@@ -201,25 +199,23 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
         }
 
         if p && !b && !c {
-            return Err(anyhow!("Unsupported top-level flag combination"));
+            return Err(anyhow!(NO_PRUNE_ALONE));
         }
 
         if f && !(b || c) {
-            return Err(anyhow!("--force only applies to --backup or --clean"));
+            return Err(anyhow!(NO_FORCE_ALONE));
+        }
+
+        if c && p && f {
+            return Err(anyhow!(NO_PRUNE_CLEAN_FORCE));
         }
 
         if c && p {
-            return Err(anyhow!(unsupported_flags_message(
-                &["--clean", "--prune"],
-                "cannot be combined"
-            )));
+            return Err(anyhow!(NO_PRUNE_CLEAN));
         }
 
         if b && p && f {
-            return Err(anyhow!(unsupported_flags_message(
-                &["--backup", "--prune", "--force"],
-                "combination is ambiguous"
-            )));
+            return Err(anyhow!(NO_PRUNE_FORCE));
         }
 
         if b {
@@ -234,6 +230,6 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
             return Ok(CliOutcome::Action(Action::TopLevelClean { force: f }));
         }
 
-        Err(anyhow!("Unsupported top-level flag combination"))
+        Err(anyhow!("unsupported flag combination"))
     }
 }

@@ -61,7 +61,7 @@ CLI → parsed args
     → execution
 ```
 
-The `Action` enum is explicit, type-safe, and easy to extend — keep this shape. The Action construction blocks (e.g. `Ok(Some(Action::Build { legacy, backup, ... }))`) are the right pattern; the change needed is that they should be generated from the semantics layer rather than hand-written. The individual items in this TODO are stepping stones toward this architecture; items #22, #27/#31, #29 are the remaining structural enablers.
+The `Action` enum is explicit, type-safe, and easy to extend — keep this shape. The Action construction blocks (e.g. `Ok(Some(Action::Build { legacy, backup, ... }))`) are the right pattern; the change needed is that they should be generated from the semantics layer rather than hand-written. The individual items in this TODO are stepping stones toward this architecture; items #22, #27, #29 are the remaining structural enablers.
 
 Note [#32]: Preserve the `Action` construction pattern — the change is in the source of the construction logic, not its shape.
 
@@ -154,38 +154,14 @@ Ad hoc ambiguity checks (`if *prune && *force && *clean`, etc.) have no formal b
 
 ## SPEC-DRIVEN ARCHITECTURE: SPECIFIC TASKS
 
-### #31 — cli.rs: validation error strings are hand-written and inconsistent
-
-Error strings are hand-written and inconsistent. The spec defines `reason_templates` (e.g. `prune_requires_backup`) for exactly this purpose. Wire cli.rs validation errors to spec templates. Once the semantics layer drives validation from the spec, this follows naturally.
 
 ### #92 — docgen / tests: expand spec validation and utilise CLI matrix
 
-Expand spec validation to catch logical contradictions (declared but never used flags, undeclared mutual exclusions, unreachable valid states). Also: `pub const CLI_MATRIX: &[CliExample]` is generated but underutilised. Use for fuzzing (seed corpus), property testing (`proptest`/`quickcheck`), and exhaustive parser validation.
+`proof.unique_maps_to` is now enforced by the validator. Remaining: expand validation to catch logical contradictions (declared but never used flags, undeclared mutual exclusions, unreachable valid states). Also: `pub const CLI_MATRIX: &[CliExample]` is generated but underutilised — use for fuzzing (seed corpus), property testing (`proptest`/`quickcheck`), and exhaustive parser validation.
 
 ---
 
 ## DOCGEN (xtgeoip-docgen.rs)
-
-### #78 — docgen: schema version not checked
-
-`pub version: String` is deserialised but never checked. Add explicit compatibility check:
-```rust
-const SUPPORTED_SCHEMA_VERSION: &str = "3.1";
-if spec.version != SUPPORTED_SCHEMA_VERSION {
-    bail!("Unsupported spec schema version '{}' (expected '{}')", spec.version, SUPPORTED_SCHEMA_VERSION);
-}
-```
-
-### #73 — docgen: hardcoded command lookups defeat spec-driven model
-
-Hardcoded `spec.commands.get("fetch")`, `get("build")`, etc. defeats the spec-driven model. Adding a new command in YAML would be silently missed. Replace with generic iteration:
-```rust
-for (name, cmd) in &spec.commands { visit(name, cmd, &mut used_error_cases)?; }
-```
-
-### #74 — docgen: validators and generators cover different command sets
-
-Validators cover named commands explicitly while generators iterate `spec.commands.values()` generically. These paths don't cover the same set. A command generated into docs but not validated can have silently incomplete constraints. Fix: validation must iterate the same set as generation. Depends on #73.
 
 ### #75 — docgen: `resolve_outcome` conflates resolution and presentation
 
@@ -258,9 +234,9 @@ In runner, capture both streams and assert. Support: exact match, substring matc
 
 **In the CLI (#91)**: emit machine-readable error code prefix on stderr:
 ```
-Error [build_prune_without_backup]: --prune cannot be used without --backup
+Error [build_prune_no_backup]: you must specify --backup, for the --prune option
 ```
-The bracket token is the `reason_template` key.
+The bracket token is the `maps_to` key (error case identifier).
 
 **In the test runner (#85)**: when `maps_to` is set, parse stderr for the bracket token:
 ```rust
@@ -272,7 +248,7 @@ Turns `maps_to` from documentation annotation into a live assertion. At minimum 
 
 ### #86 — tests: `key: p/f` is too coarse
 
-`key: p/f` is too coarse. Candidates in increasing scope: expected exit codes (`key: f2` = exit exactly 2), error class (`error_class: cli`), reason template match (`maps_to: prune_requires_backup` asserts that template was triggered). `key` should evolve into a structured expectation. Depends on #90+84 and #85+91.
+`key: p/f` is too coarse. Candidates in increasing scope: expected exit codes (`key: f2` = exit exactly 2), error class (`error_class: cli`), reason template match (`maps_to: build_prune_no_backup` asserts that template was triggered). `key` should evolve into a structured expectation. Depends on #90+84 and #85+91.
 
 ---
 
