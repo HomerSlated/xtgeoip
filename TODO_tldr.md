@@ -18,7 +18,7 @@
 
 - Three sources of truth (clap struct, `normalize_cli_to_action`, `cli.yaml`) will drift; target: one data-driven semantics layer between CLI and Action
 - `Action` enum and construction blocks are the right shape — keep them; derive their content from the spec, not hand-written control flow
-- Key enablers: #5, #17, #19, #20, #22, #27/#31, #28, #29
+- Remaining structural enablers: #22, #27, #29
 - [#32] Preserve `Action` construction pattern; change the source, not the shape
 
 ---
@@ -35,27 +35,14 @@
 
 ---
 
-## TYPED ENUMS: ELIMINATING BOOLEAN TRAPS
-
-- [#39] build.rs: replace `String` country codes with `[u8; 2]` or `enum CountryCode { Iso, O1, A1, A2 }`
-  - [#40] O1 fallback logic centralised by `CountryCode::O1`; no more duplication
-  - [#44] `"O1".to_string()` allocations eliminated by enum variants
-
----
-
 ## ARCHITECTURE: ANALYSIS AND SMALL REFACTORS
 
 - [#8] all modules: audit separation of concerns before larger refactoring; prerequisite step
-- [#5] main.rs: split `run()` into five explicit phases: parse → resolve → config → init → execute
-- [#28] cli.rs: consolidate repeated flags into `CommonFlags` struct with `#[command(flatten)]`
-- [#18] all: build `ResolvedPaths` once after config load instead of reconstructing at every call site
-- [#62] build.rs: stream file hashing via `io::copy` instead of `fs::read` into memory; verify invariant #5
 
 ---
 
 ## ARCHITECTURE: build.rs RESTRUCTURING
 
-- [#45] build.rs: atomic build swap — write to temp dir, rename on success, discard on failure
 - [#38] build.rs: stream CSV rows into `DashMap` grouping instead of materialising all rows first; check invariant #5
 
 ---
@@ -70,26 +57,19 @@
 
 ## ARCHITECTURE: action.rs / EXECUTION PLANNER
 
-- [#17] action.rs: make execution order explicit via `plan(action) -> Vec<Step>`; single source of truth
-- [#19] action.rs: consolidate backup/clean if-blocks into `run_backup` / `run_clean`; depends on #17
-- [#22] action.rs: bring `FetchMode::Remote | Local` into spec YAML; depends on #17
-- [#20+30] cli.rs/action.rs: consolidate duplicated "prune requires backup" (and similar) into one shared predicate; long-term: spec-driven semantics layer
+- [#22] action.rs: bring `FetchMode::Remote | Local` into spec YAML; depends on spec-driven direction
 - [#29] cli.rs: remove ad hoc ambiguity checks; let planner inability to produce a `Vec<Step>` be the rejection signal
 
 ---
 
 ## SPEC-DRIVEN ARCHITECTURE: SPECIFIC TASKS
 
-- [#31] cli.rs: wire validation error strings to `reason_templates` from spec; follows from semantics layer
-- [#92] docgen/tests: expand spec validation to catch contradictions; use `CLI_MATRIX` for fuzzing and property tests
+- [#92] docgen/tests: `unique_maps_to` now enforced; remaining: catch logical contradictions; use `CLI_MATRIX` for fuzzing and property tests
 
 ---
 
 ## DOCGEN (xtgeoip-docgen.rs)
 
-- [#78] docgen: check `spec.version` against `SUPPORTED_SCHEMA_VERSION` at load time; bail on mismatch
-- [#73] docgen: replace hardcoded `spec.commands.get("fetch")` etc. with generic iteration
-- [#74] docgen: make validators iterate same command set as generators; depends on #73
 - [#75] docgen: split `resolve_outcome` into typed semantic resolution and format-specific rendering
 - [#76] docgen: replace silent fallbacks (`unwrap_or("OK")`) with hard errors for missing required spec fields; ties into #61
 - [#77] docgen: add stable ordering, `schema_version`, and round-trip validation to testcase YAML output; do with #2
@@ -113,8 +93,8 @@
 
 ## LOW PRIORITY / LARGE SCOPE
 
-- [#24] pipelines: no rollback on mid-pipeline failure; address via execution planner (#17) managing temp dir
+- [#24] pipelines: no rollback on mid-pipeline failure; address via execution planner managing temp dir
 - [#38] build.rs: CSV streaming — benchmark memory savings before implementing
 - [#54] fetch.rs: parallel ZIP writes — benchmark before committing
 - [#71] backup.rs: parallel manifest verification — measure before committing
-- [#88] unit tests: large undertaking; defer until architecture refactoring (#3–#34) stabilises; requires sandboxing, mock HTTP, CSV fixtures, setup/teardown
+- [#88] unit tests: large undertaking; defer until architecture refactoring stabilises; requires sandboxing, mock HTTP, CSV fixtures, setup/teardown

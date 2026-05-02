@@ -345,6 +345,12 @@ backup then clean
 .B xtgeoip -b -p
 backup then prune
 .TP
+.B xtgeoip -b -f
+force backup database
+.TP
+.B xtgeoip -b -c -f
+force backup then clean
+.TP
 .B xtgeoip build
 build database
 .TP
@@ -359,6 +365,21 @@ clean then build
 .TP
 .B xtgeoip build -b -c -p
 backup, prune, clean, build
+.TP
+.B xtgeoip build -b
+backup then build
+.TP
+.B xtgeoip build -c
+clean then build
+.TP
+.B xtgeoip build -b -c
+backup then clean then build
+.TP
+.B xtgeoip build -b -f
+force backup then build
+.TP
+.B xtgeoip build -b -c -f
+force backup then clean then build
 .TP
 .B xtgeoip conf -s
 show configuration
@@ -389,6 +410,21 @@ clean then fetch then prune then build
 .TP
 .B xtgeoip run -c -f
 force clean then fetch then build
+.TP
+.B xtgeoip run -b
+backup then fetch then build
+.TP
+.B xtgeoip run -b -c
+backup then clean then fetch then build
+.TP
+.B xtgeoip run -b -f
+force backup then fetch then build
+.TP
+.B xtgeoip run -b -p
+backup then fetch then prune then build
+.TP
+.B xtgeoip run -b -c -f
+force backup then clean then fetch then build
 .SH FILES
 .TP
 .I /etc/xtgeoip.conf

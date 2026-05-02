@@ -17,6 +17,7 @@ mod build;
 mod cli;
 mod config;
 mod fetch;
+mod generated;
 mod messages;
 mod version;
 
