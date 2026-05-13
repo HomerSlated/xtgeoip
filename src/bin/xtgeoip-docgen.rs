@@ -129,7 +129,7 @@ struct ManpageTemplate {
 struct Testcase {
     case_id: Option<String>,
     key: String,
-    cmd: String,
+    cmd: Vec<String>,
     maps_to: Option<String>,
 }
 
@@ -479,7 +479,7 @@ fn generate_testcases_yaml(spec: &Spec) -> anyhow::Result<String> {
             testcases.push(Testcase {
                 case_id: ex.case_id.clone(),
                 key: if ex.valid { "p" } else { "f" }.into(),
-                cmd: ex.cmd.clone(),
+                cmd: ex.cmd.split_whitespace().map(String::from).collect(),
                 maps_to: ex.maps_to.clone(),
             });
         }

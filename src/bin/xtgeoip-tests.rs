@@ -15,7 +15,7 @@ use serde::Deserialize;
 struct Testcase {
     case_id: Option<String>,
     key: String,
-    cmd: String,
+    cmd: Vec<String>,
     maps_to: Option<String>,
 }
 
@@ -58,8 +58,10 @@ fn main() -> anyhow::Result<()> {
         }
 
         // Skip interactive editor — no way to drive it non-interactively
-        if tc.cmd.contains("conf -e") {
-            println!("[SKIP] [{id}] {}", tc.cmd);
+        if tc.cmd.get(1).is_some_and(|s| s == "conf")
+            && tc.cmd.iter().any(|s| s == "-e")
+        {
+            println!("[SKIP] [{id}] {}", tc.cmd.join(" "));
             skipped += 1;
             continue;
         }
@@ -71,14 +73,13 @@ fn main() -> anyhow::Result<()> {
             "exit non-0"
         };
 
-        print!("[{id}] {} (expect {}) ... ", tc.cmd, expect_label);
+        print!("[{id}] {} (expect {}) ... ", tc.cmd.join(" "), expect_label);
 
-        let mut parts = tc.cmd.split_whitespace();
-        let program = parts.next().unwrap();
-        let cmd_args: Vec<&str> = parts.collect();
+        let program = tc.cmd.first().expect("cmd must not be empty");
+        let cmd_args = &tc.cmd[1..];
         let bin = format!("target/release/{}", program);
 
-        let status = Command::new("sudo").arg(&bin).args(&cmd_args).status()?;
+        let status = Command::new("sudo").arg(&bin).args(cmd_args).status()?;
         let did_succeed = status.success();
 
         if did_succeed == expected_pass {
@@ -89,7 +90,7 @@ fn main() -> anyhow::Result<()> {
             // database is left in a usable state for subsequent tests.
             if rebuild_after_clean
                 && did_succeed
-                && cmd_args.contains(&"-c")
+                && cmd_args.iter().any(|a| a == "-c")
                 && cmd_args.first().map(|a| a.starts_with('-')).unwrap_or(true)
             {
                 print!("  [rebuild] xtgeoip build ... ");

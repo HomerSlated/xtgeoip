@@ -1,200 +1,363 @@
 - case_id: TL-001
   key: f
-  cmd: xtgeoip
+  cmd:
+  - xtgeoip
   maps_to: top_level_no_args
 - case_id: TL-002
   key: p
-  cmd: xtgeoip -h
+  cmd:
+  - xtgeoip
+  - -h
   maps_to: null
 - case_id: TL-003
   key: f
-  cmd: xtgeoip -l
+  cmd:
+  - xtgeoip
+  - -l
   maps_to: top_level_legacy
 - case_id: TL-004
   key: f
-  cmd: xtgeoip -f
+  cmd:
+  - xtgeoip
+  - -f
   maps_to: top_level_force_no_target
 - case_id: TL-005
   key: f
-  cmd: xtgeoip -p
+  cmd:
+  - xtgeoip
+  - -p
   maps_to: top_level_prune_no_target
 - case_id: TL-006
   key: p
-  cmd: xtgeoip -b
+  cmd:
+  - xtgeoip
+  - -b
   maps_to: null
 - case_id: TL-007
   key: p
-  cmd: xtgeoip -c
+  cmd:
+  - xtgeoip
+  - -c
   maps_to: null
 - case_id: TL-008
   key: p
-  cmd: xtgeoip -b -c
+  cmd:
+  - xtgeoip
+  - -b
+  - -c
   maps_to: null
 - case_id: TL-009
   key: p
-  cmd: xtgeoip -b -p
+  cmd:
+  - xtgeoip
+  - -b
+  - -p
   maps_to: null
 - case_id: TL-010
   key: f
-  cmd: xtgeoip -c -p
+  cmd:
+  - xtgeoip
+  - -c
+  - -p
   maps_to: top_level_prune_with_clean
 - case_id: TL-011
   key: f
-  cmd: xtgeoip -b -p -f
+  cmd:
+  - xtgeoip
+  - -b
+  - -p
+  - -f
   maps_to: top_level_prune_force
 - case_id: TL-012
   key: f
-  cmd: xtgeoip -c -p -f
+  cmd:
+  - xtgeoip
+  - -c
+  - -p
+  - -f
   maps_to: top_level_prune_clean_force
 - case_id: TL-013
   key: p
-  cmd: xtgeoip -b -f
+  cmd:
+  - xtgeoip
+  - -b
+  - -f
   maps_to: null
 - case_id: TL-014
   key: p
-  cmd: xtgeoip -b -c -f
+  cmd:
+  - xtgeoip
+  - -b
+  - -c
+  - -f
   maps_to: null
 - case_id: B-001
   key: p
-  cmd: xtgeoip build
+  cmd:
+  - xtgeoip
+  - build
   maps_to: null
 - case_id: B-002
   key: p
-  cmd: xtgeoip build -l
+  cmd:
+  - xtgeoip
+  - build
+  - -l
   maps_to: null
 - case_id: B-003
   key: p
-  cmd: xtgeoip build -b -p
+  cmd:
+  - xtgeoip
+  - build
+  - -b
+  - -p
   maps_to: null
 - case_id: B-004
   key: f
-  cmd: xtgeoip build -p
+  cmd:
+  - xtgeoip
+  - build
+  - -p
   maps_to: build_prune_no_backup
 - case_id: B-005
   key: p
-  cmd: xtgeoip build -c -f
+  cmd:
+  - xtgeoip
+  - build
+  - -c
+  - -f
   maps_to: null
 - case_id: B-006
   key: p
-  cmd: xtgeoip build -b -c -p
+  cmd:
+  - xtgeoip
+  - build
+  - -b
+  - -c
+  - -p
   maps_to: null
 - case_id: B-007
   key: f
-  cmd: xtgeoip build -b -c -p -f
+  cmd:
+  - xtgeoip
+  - build
+  - -b
+  - -c
+  - -p
+  - -f
   maps_to: build_prune_force
 - case_id: B-008
   key: f
-  cmd: xtgeoip build -f
+  cmd:
+  - xtgeoip
+  - build
+  - -f
   maps_to: build_force_no_target
 - case_id: B-009
   key: p
-  cmd: xtgeoip build -b
+  cmd:
+  - xtgeoip
+  - build
+  - -b
   maps_to: null
 - case_id: B-010
   key: p
-  cmd: xtgeoip build -c
+  cmd:
+  - xtgeoip
+  - build
+  - -c
   maps_to: null
 - case_id: B-011
   key: p
-  cmd: xtgeoip build -b -c
+  cmd:
+  - xtgeoip
+  - build
+  - -b
+  - -c
   maps_to: null
 - case_id: B-012
   key: p
-  cmd: xtgeoip build -b -f
+  cmd:
+  - xtgeoip
+  - build
+  - -b
+  - -f
   maps_to: null
 - case_id: B-013
   key: p
-  cmd: xtgeoip build -b -c -f
+  cmd:
+  - xtgeoip
+  - build
+  - -b
+  - -c
+  - -f
   maps_to: null
 - case_id: C-001
   key: f
-  cmd: xtgeoip conf
+  cmd:
+  - xtgeoip
+  - conf
   maps_to: conf_missing_flag
 - case_id: C-002
   key: p
-  cmd: xtgeoip conf -s
+  cmd:
+  - xtgeoip
+  - conf
+  - -s
   maps_to: null
 - case_id: C-003
   key: p
-  cmd: xtgeoip conf -d
+  cmd:
+  - xtgeoip
+  - conf
+  - -d
   maps_to: null
 - case_id: C-004
   key: p
-  cmd: xtgeoip conf -e
+  cmd:
+  - xtgeoip
+  - conf
+  - -e
   maps_to: null
 - case_id: F-001
   key: p
-  cmd: xtgeoip fetch
+  cmd:
+  - xtgeoip
+  - fetch
   maps_to: null
 - case_id: F-002
   key: p
-  cmd: xtgeoip fetch -p
+  cmd:
+  - xtgeoip
+  - fetch
+  - -p
   maps_to: null
 - case_id: F-003
   key: f
-  cmd: xtgeoip fetch -l
+  cmd:
+  - xtgeoip
+  - fetch
+  - -l
   maps_to: fetch_no_legacy
 - case_id: F-004
   key: f
-  cmd: xtgeoip fetch -b
+  cmd:
+  - xtgeoip
+  - fetch
+  - -b
   maps_to: fetch_no_backup
 - case_id: F-005
   key: f
-  cmd: xtgeoip fetch -c
+  cmd:
+  - xtgeoip
+  - fetch
+  - -c
   maps_to: fetch_no_clean
 - case_id: F-006
   key: f
-  cmd: xtgeoip fetch -f
+  cmd:
+  - xtgeoip
+  - fetch
+  - -f
   maps_to: fetch_no_force
 - case_id: R-001
   key: p
-  cmd: xtgeoip run
+  cmd:
+  - xtgeoip
+  - run
   maps_to: null
 - case_id: R-002
   key: p
-  cmd: xtgeoip run -l
+  cmd:
+  - xtgeoip
+  - run
+  - -l
   maps_to: null
 - case_id: R-003
   key: p
-  cmd: xtgeoip run -p
+  cmd:
+  - xtgeoip
+  - run
+  - -p
   maps_to: null
 - case_id: R-004
   key: p
-  cmd: xtgeoip run -c -p
+  cmd:
+  - xtgeoip
+  - run
+  - -c
+  - -p
   maps_to: null
 - case_id: R-005
   key: p
-  cmd: xtgeoip run -c -f
+  cmd:
+  - xtgeoip
+  - run
+  - -c
+  - -f
   maps_to: null
 - case_id: R-006
   key: f
-  cmd: xtgeoip run -c -p -f
+  cmd:
+  - xtgeoip
+  - run
+  - -c
+  - -p
+  - -f
   maps_to: run_prune_force
 - case_id: R-007
   key: f
-  cmd: xtgeoip run -b -c -p
+  cmd:
+  - xtgeoip
+  - run
+  - -b
+  - -c
+  - -p
   maps_to: run_prune_ambiguous
 - case_id: R-008
   key: f
-  cmd: xtgeoip run -f
+  cmd:
+  - xtgeoip
+  - run
+  - -f
   maps_to: run_force_no_target
 - case_id: R-009
   key: p
-  cmd: xtgeoip run -b
+  cmd:
+  - xtgeoip
+  - run
+  - -b
   maps_to: null
 - case_id: R-010
   key: p
-  cmd: xtgeoip run -b -c
+  cmd:
+  - xtgeoip
+  - run
+  - -b
+  - -c
   maps_to: null
 - case_id: R-011
   key: p
-  cmd: xtgeoip run -b -f
+  cmd:
+  - xtgeoip
+  - run
+  - -b
+  - -f
   maps_to: null
 - case_id: R-012
   key: p
-  cmd: xtgeoip run -b -p
+  cmd:
+  - xtgeoip
+  - run
+  - -b
+  - -p
   maps_to: null
 - case_id: R-013
   key: p
-  cmd: xtgeoip run -b -c -f
+  cmd:
+  - xtgeoip
+  - run
+  - -b
+  - -c
+  - -f
   maps_to: null
