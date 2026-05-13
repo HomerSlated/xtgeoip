@@ -29,6 +29,32 @@ In progress. No further detail recorded here.
 
 ---
 
+## CI AND WORKFLOW
+
+### #93 — scripts/: replace update.fish with sync.fish
+
+Current `update.fish` has no quality gates before commit and includes a `cargo fix` legacy step. Replace with `sync.fish`:
+
+1. `cargo run --bin xtgeoip-docgen` — regenerate before any check
+2. `cargo clippy -- -D warnings` — hard gate
+3. `rustfmt --check src/` — hard gate
+4. `cargo build --release` — hard gate
+5. `git add . && git commit -m "$message" && git push`
+
+Remove `cargo fix` entirely — superseded by clippy as a hard gate. Optional: add a stale commit message guard (compare `.git/COMMIT_EDITMSG` against `.git/COMMIT_EDITMSG.old`) matching the pattern used in the cdda2img project.
+
+### #94 — .github/workflows/: add GitHub Actions CI
+
+Three parallel jobs, each provisioned with stable Rust toolchain and `Swatinem/rust-cache`:
+
+- **build**: `cargo build --all-targets`
+- **lint**: `cargo clippy -- -D warnings` + `rustfmt --check src/`
+- **docgen-check**: `cargo run --bin xtgeoip-docgen` + `git diff --exit-code src/generated/ docs/generated/`
+
+The `docgen-check` job catches spec edits where the generated files were not committed alongside them — the key correctness assertion. Integration tests (`xtgeoip-tests`) cannot run in CI: they require root, real system paths, and MaxMind credentials. Manual gate before releases only.
+
+---
+
 ## OVERVIEW: Spec-Driven Architecture [#9, #26, #27, #34]
 
 Currently there are three sources of truth for CLI semantics that will drift apart:
