@@ -203,24 +203,6 @@ Orphaned files from legacy/default mode switching are not covered by the rebuild
 
 **Scenario B (orphan cleanup)**: produce orphans → clean → run same detection → assert no orphans. Requires `requires:` dependencies and `rebuild:` annotations in YAML. Further analysis needed to establish if all state transitions are covered.
 
-### #85 + #91 — tests / cli: `maps_to` never verified [merged]
-
-`maps_to` appears in test output on failure but is never verified. Two changes needed:
-
-**In the CLI (#91)**: emit machine-readable error code prefix on stderr:
-```
-Error [build_prune_no_backup]: you must specify --backup, for the --prune option
-```
-The bracket token is the `maps_to` key (error case identifier).
-
-**In the test runner (#85)**: when `maps_to` is set, parse stderr for the bracket token:
-```rust
-if let Some(expected_code) = &tc.maps_to {
-    // assert stderr contains format!("[{}]", expected_code)
-}
-```
-Turns `maps_to` from documentation annotation into a live assertion. At minimum (before #90 is implemented), validate that `maps_to` values name real spec keys. Depends on #90+84.
-
 ### #86 — tests: `key: p/f` is too coarse
 
 `key: p/f` is too coarse. Candidates in increasing scope: expected exit codes (`key: f2` = exit exactly 2), error class (`error_class: cli`), reason template match (`maps_to: build_prune_no_backup` asserts that template was triggered). `key` should evolve into a structured expectation. Depends on #90+84 and #85+91.

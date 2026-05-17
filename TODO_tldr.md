@@ -83,7 +83,6 @@
 - [#81] tests: replace hardcoded `target/release/` path with `--bin` flag or `XTGEOIP_BIN` env var
 - [#80] tests: replace `split_whitespace` command parsing with structured YAML arrays (`cmd: [...]`)
 - [#89] tests: add Scenario A (orphan detection) and Scenario B (orphan cleanup) with `requires:` and `rebuild:` annotations
-- [#85+91] tests/cli: emit `Error [reason_template_key]: ...` on stderr from CLI; assert bracket token in runner when `maps_to` is set; depends on #90+84
 - [#86] tests: evolve `key: p/f` into structured expectation (exit code, error class, `maps_to` assertion); depends on #90+84 and #85+91
 
 ---

@@ -7,7 +7,8 @@ use crate::{
     action::Action,
     config::ConfAction,
     generated::error_text::{
-        NO_BUILD_FORCE, NO_FORCE_ALONE, NO_LEGACY_HERE, NO_PRUNE_ALONE,
+        NO_BUILD_FORCE, NO_FETCH_BACKUP, NO_FETCH_CLEAN, NO_FETCH_FORCE,
+        NO_FETCH_LEGACY, NO_FORCE_ALONE, NO_LEGACY_HERE, NO_PRUNE_ALONE,
         NO_PRUNE_BACKUP, NO_PRUNE_CLEAN, NO_PRUNE_CLEAN_FORCE, NO_PRUNE_FORCE,
         NO_RUN_FORCE, PRUNE_TARGET_AMBIGUOUS,
     },
@@ -88,13 +89,24 @@ pub enum Commands {
         /// Prune old CSV archives after fetching
         #[arg(short, long)]
         prune: bool,
+
+        // These flags are not supported for fetch; accepted here to emit
+        // proper keyed errors rather than generic clap parse errors.
+        #[arg(short = 'l', long, hide = true)]
+        legacy: bool,
+        #[arg(short = 'b', long, hide = true)]
+        backup: bool,
+        #[arg(short = 'c', long, hide = true)]
+        clean: bool,
+        #[arg(short = 'f', long, hide = true)]
+        force: bool,
     },
 
     /// Manage system configuration
+    // required(true) is intentionally omitted — the missing-flag case is
+    // handled in normalize_cli_to_action to emit a keyed error.
     #[command(group(
-        clap::ArgGroup::new("conf_action")
-            .required(true)
-            .multiple(false)
+        clap::ArgGroup::new("conf_action").multiple(false)
     ))]
     #[command(disable_version_flag = true)]
     Conf {
@@ -122,12 +134,16 @@ fn conf_action(default: bool, show: bool) -> ConfAction {
     }
 }
 
+fn keyed_err(key: &str, msg: &str) -> anyhow::Error {
+    anyhow!("[{key}]: {msg}")
+}
+
 /// Normalize CLI input into a CliOutcome
 pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
     use Commands::*;
 
     if cli.common.legacy && cli.command.is_none() {
-        return Err(anyhow!(NO_LEGACY_HERE));
+        return Err(keyed_err("top_level_legacy", NO_LEGACY_HERE));
     }
 
     if let Some(cmd) = &cli.command {
@@ -135,22 +151,34 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
             Conf {
                 default,
                 show,
-                edit: _,
-            } => Ok(CliOutcome::Action(Action::Conf(conf_action(
-                *default, *show,
-            )))),
+                edit,
+            } => {
+                if !default && !show && !edit {
+                    return Err(keyed_err(
+                        "conf_missing_flag",
+                        "conf requires one of: --default (-d), --show (-s), \
+                         --edit (-e)",
+                    ));
+                }
+                Ok(CliOutcome::Action(Action::Conf(conf_action(
+                    *default, *show,
+                ))))
+            }
 
             Run { common, prune } => {
                 if common.force && !common.backup && !common.clean {
-                    return Err(anyhow!(NO_RUN_FORCE));
+                    return Err(keyed_err("run_force_no_target", NO_RUN_FORCE));
                 }
 
                 if *prune && common.force && common.clean {
-                    return Err(anyhow!(NO_PRUNE_FORCE));
+                    return Err(keyed_err("run_prune_force", NO_PRUNE_FORCE));
                 }
 
                 if common.backup && common.clean && *prune {
-                    return Err(anyhow!(PRUNE_TARGET_AMBIGUOUS));
+                    return Err(keyed_err(
+                        "run_prune_ambiguous",
+                        PRUNE_TARGET_AMBIGUOUS,
+                    ));
                 }
 
                 Ok(CliOutcome::Action(Action::Run {
@@ -164,15 +192,21 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
 
             Build { common, prune } => {
                 if common.force && !common.backup && !common.clean {
-                    return Err(anyhow!(NO_BUILD_FORCE));
+                    return Err(keyed_err(
+                        "build_force_no_target",
+                        NO_BUILD_FORCE,
+                    ));
                 }
 
                 if *prune && !common.backup {
-                    return Err(anyhow!(NO_PRUNE_BACKUP));
+                    return Err(keyed_err(
+                        "build_prune_no_backup",
+                        NO_PRUNE_BACKUP,
+                    ));
                 }
 
                 if *prune && common.force && common.backup && common.clean {
-                    return Err(anyhow!(NO_PRUNE_FORCE));
+                    return Err(keyed_err("build_prune_force", NO_PRUNE_FORCE));
                 }
 
                 Ok(CliOutcome::Action(Action::Build {
@@ -184,7 +218,25 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
                 }))
             }
 
-            Fetch { prune } => {
+            Fetch {
+                prune,
+                legacy,
+                backup,
+                clean,
+                force,
+            } => {
+                if *legacy {
+                    return Err(keyed_err("fetch_no_legacy", NO_FETCH_LEGACY));
+                }
+                if *backup {
+                    return Err(keyed_err("fetch_no_backup", NO_FETCH_BACKUP));
+                }
+                if *clean {
+                    return Err(keyed_err("fetch_no_clean", NO_FETCH_CLEAN));
+                }
+                if *force {
+                    return Err(keyed_err("fetch_no_force", NO_FETCH_FORCE));
+                }
                 Ok(CliOutcome::Action(Action::Fetch { prune: *prune }))
             }
         }
@@ -199,23 +251,29 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
         }
 
         if p && !b && !c {
-            return Err(anyhow!(NO_PRUNE_ALONE));
+            return Err(keyed_err("top_level_prune_no_target", NO_PRUNE_ALONE));
         }
 
         if f && !(b || c) {
-            return Err(anyhow!(NO_FORCE_ALONE));
+            return Err(keyed_err("top_level_force_no_target", NO_FORCE_ALONE));
         }
 
         if c && p && f {
-            return Err(anyhow!(NO_PRUNE_CLEAN_FORCE));
+            return Err(keyed_err(
+                "top_level_prune_clean_force",
+                NO_PRUNE_CLEAN_FORCE,
+            ));
         }
 
         if c && p {
-            return Err(anyhow!(NO_PRUNE_CLEAN));
+            return Err(keyed_err(
+                "top_level_prune_with_clean",
+                NO_PRUNE_CLEAN,
+            ));
         }
 
         if b && p && f {
-            return Err(anyhow!(NO_PRUNE_FORCE));
+            return Err(keyed_err("top_level_prune_force", NO_PRUNE_FORCE));
         }
 
         if b {
