@@ -27,6 +27,7 @@ struct Testcase {
     key: String,
     cmd: Vec<String>,
     maps_to: Option<String>,
+    exit_status: Option<i32>,
     rebuild: Option<bool>,
     timeout_secs: Option<u64>,
     expected_stdout: Option<String>,
@@ -132,10 +133,12 @@ fn main() -> anyhow::Result<()> {
         }
 
         let expected_pass = tc.key == "p";
-        let expect_label = if expected_pass {
-            "exit 0"
+        let expect_label = if let Some(n) = tc.exit_status {
+            format!("exit {n}")
+        } else if expected_pass {
+            "exit 0".to_string()
         } else {
-            "exit non-0"
+            "exit non-0".to_string()
         };
 
         print!("[{id}] {} (expect {}) ... ", tc.cmd.join(" "), expect_label);
@@ -160,7 +163,8 @@ fn main() -> anyhow::Result<()> {
             timed_out += 1;
             continue;
         }
-        let did_succeed = result.status.unwrap().success();
+        let status = result.status.unwrap();
+        let did_succeed = status.success();
 
         let mut output_failures: Vec<String> = Vec::new();
         if let Some(ref expected) = tc.expected_stdout
@@ -180,7 +184,20 @@ fn main() -> anyhow::Result<()> {
         }) {
             output_failures.push(detail);
         }
+        if let Some(expected_code) = tc.exit_status
+            && status.code() != Some(expected_code)
+        {
+            output_failures.push(format!(
+                "[exit_status] expected exit {expected_code}, got {}",
+                status
+                    .code()
+                    .map_or_else(|| "(signal)".to_string(), |c| c.to_string(),),
+            ));
+        }
 
+        let got = status
+            .code()
+            .map_or_else(|| "(signal)".to_string(), |c| format!("exit {c}"));
         let maps = tc
             .maps_to
             .as_deref()
@@ -212,13 +229,11 @@ fn main() -> anyhow::Result<()> {
                 println!("{label}");
             }
         } else if !exit_ok && output_failures.is_empty() {
-            let got = if did_succeed { "exit 0" } else { "exit non-0" };
             println!("FAIL — expected {expect_label}, got {got}{maps}");
             failed += 1;
         } else {
             println!("FAIL");
             if !exit_ok {
-                let got = if did_succeed { "exit 0" } else { "exit non-0" };
                 println!("  exit: expected {expect_label}, got {got}{maps}");
             }
             for detail in &output_failures {

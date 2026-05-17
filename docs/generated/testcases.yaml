@@ -3,6 +3,7 @@
   cmd:
   - xtgeoip
   maps_to: top_level_no_args
+  exit_status: 1
 - case_id: TL-002
   key: p
   cmd:
@@ -15,18 +16,21 @@
   - xtgeoip
   - -l
   maps_to: top_level_legacy
+  exit_status: 1
 - case_id: TL-004
   key: f
   cmd:
   - xtgeoip
   - -f
   maps_to: top_level_force_no_target
+  exit_status: 1
 - case_id: TL-005
   key: f
   cmd:
   - xtgeoip
   - -p
   maps_to: top_level_prune_no_target
+  exit_status: 1
 - case_id: TL-006
   key: p
   cmd:
@@ -62,6 +66,7 @@
   - -c
   - -p
   maps_to: top_level_prune_with_clean
+  exit_status: 1
 - case_id: TL-011
   key: f
   cmd:
@@ -70,6 +75,7 @@
   - -p
   - -f
   maps_to: top_level_prune_force
+  exit_status: 1
 - case_id: TL-012
   key: f
   cmd:
@@ -78,6 +84,7 @@
   - -p
   - -f
   maps_to: top_level_prune_clean_force
+  exit_status: 1
 - case_id: TL-013
   key: p
   cmd:
@@ -122,6 +129,7 @@
   - build
   - -p
   maps_to: build_prune_no_backup
+  exit_status: 1
 - case_id: B-005
   key: p
   cmd:
@@ -149,6 +157,7 @@
   - -p
   - -f
   maps_to: build_prune_force
+  exit_status: 1
 - case_id: B-008
   key: f
   cmd:
@@ -156,6 +165,7 @@
   - build
   - -f
   maps_to: build_force_no_target
+  exit_status: 1
 - case_id: B-009
   key: p
   cmd:
@@ -201,6 +211,7 @@
   - xtgeoip
   - conf
   maps_to: conf_missing_flag
+  exit_status: 1
 - case_id: C-002
   key: p
   cmd:
@@ -242,6 +253,7 @@
   - fetch
   - -l
   maps_to: fetch_no_legacy
+  exit_status: 1
 - case_id: F-004
   key: f
   cmd:
@@ -249,6 +261,7 @@
   - fetch
   - -b
   maps_to: fetch_no_backup
+  exit_status: 1
 - case_id: F-005
   key: f
   cmd:
@@ -256,6 +269,7 @@
   - fetch
   - -c
   maps_to: fetch_no_clean
+  exit_status: 1
 - case_id: F-006
   key: f
   cmd:
@@ -263,6 +277,7 @@
   - fetch
   - -f
   maps_to: fetch_no_force
+  exit_status: 1
 - case_id: R-001
   key: p
   cmd:
@@ -308,6 +323,7 @@
   - -p
   - -f
   maps_to: run_prune_force
+  exit_status: 1
 - case_id: R-007
   key: f
   cmd:
@@ -317,6 +333,7 @@
   - -c
   - -p
   maps_to: run_prune_ambiguous
+  exit_status: 1
 - case_id: R-008
   key: f
   cmd:
@@ -324,6 +341,7 @@
   - run
   - -f
   maps_to: run_force_no_target
+  exit_status: 1
 - case_id: R-009
   key: p
   cmd:

@@ -104,16 +104,19 @@ top_level:
       valid: false
       reason: { code: no_legacy_here }
       maps_to: top_level_legacy
+      exit_status: 1
     - case_id: TL-004
       cmd: "xtgeoip -f"
       valid: false
       reason: { code: no_force_alone }
       maps_to: top_level_force_no_target
+      exit_status: 1
     - case_id: TL-005
       cmd: "xtgeoip -p"
       valid: false
       reason: { code: no_prune_alone }
       maps_to: top_level_prune_no_target
+      exit_status: 1
     - case_id: TL-006
       cmd: "xtgeoip -b"
       valid: true
@@ -137,16 +140,19 @@ top_level:
       valid: false
       reason: { code: no_prune_clean }
       maps_to: top_level_prune_with_clean
+      exit_status: 1
     - case_id: TL-011
       cmd: "xtgeoip -b -p -f"
       valid: false
       reason: { code: no_prune_force }
       maps_to: top_level_prune_force
+      exit_status: 1
     - case_id: TL-012
       cmd: "xtgeoip -c -p -f"
       valid: false
       reason: { code: no_prune_clean_force }
       maps_to: top_level_prune_clean_force
+      exit_status: 1
     - case_id: TL-013
       cmd: "xtgeoip -b -f"
       valid: true
@@ -177,21 +183,25 @@ commands:
         valid: false
         reason: { code: no_fetch_legacy }
         maps_to: fetch_no_legacy
+        exit_status: 1
       - case_id: F-004
         cmd: "xtgeoip fetch -b"
         valid: false
         reason: { code: no_fetch_backup }
         maps_to: fetch_no_backup
+        exit_status: 1
       - case_id: F-005
         cmd: "xtgeoip fetch -c"
         valid: false
         reason: { code: no_fetch_clean }
         maps_to: fetch_no_clean
+        exit_status: 1
       - case_id: F-006
         cmd: "xtgeoip fetch -f"
         valid: false
         reason: { code: no_fetch_force }
         maps_to: fetch_no_force
+        exit_status: 1
 
   build:
     kind: FlagCommand
@@ -215,6 +225,7 @@ commands:
         valid: false
         reason: { code: no_prune_backup }
         maps_to: build_prune_no_backup
+        exit_status: 1
       - case_id: B-005
         cmd: "xtgeoip build -c -f"
         valid: true
@@ -228,11 +239,13 @@ commands:
         valid: false
         reason: { code: no_prune_force }
         maps_to: build_prune_force
+        exit_status: 1
       - case_id: B-008
         cmd: "xtgeoip build -f"
         valid: false
         reason: { code: no_build_force }
         maps_to: build_force_no_target
+        exit_status: 1
       - case_id: B-009
         cmd: "xtgeoip build -b"
         valid: true
@@ -284,16 +297,19 @@ commands:
         valid: false
         reason: { code: no_prune_force }
         maps_to: run_prune_force
+        exit_status: 1
       - case_id: R-007
         cmd: "xtgeoip run -b -c -p"
         valid: false
         reason: { code: prune_target_ambiguous }
         maps_to: run_prune_ambiguous
+        exit_status: 1
       - case_id: R-008
         cmd: "xtgeoip run -f"
         valid: false
         reason: { code: no_run_force }
         maps_to: run_force_no_target
+        exit_status: 1
       - case_id: R-009
         cmd: "xtgeoip run -b"
         valid: true
@@ -334,6 +350,7 @@ commands:
         valid: false
         reason: { code: missing_required_argument }
         maps_to: conf_missing_flag
+        exit_status: 1
       - case_id: C-002
         cmd: "xtgeoip conf -s"
         valid: true
