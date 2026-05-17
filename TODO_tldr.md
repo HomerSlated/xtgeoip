@@ -81,7 +81,6 @@
 
 - [#87] tests: document integration test nature (root required, order-dependent, release build); add setup/teardown phase
 - [#81] tests: replace hardcoded `target/release/` path with `--bin` flag or `XTGEOIP_BIN` env var
-- [#82] tests: replace string-scraped rebuild condition with `rebuild: true` field in testcase YAML
 - [#83] tests: add per-test timeout (60s default); kill on timeout, mark TIMED OUT, continue suite
 - [#80] tests: replace `split_whitespace` command parsing with structured YAML arrays (`cmd: [...]`)
 - [#89] tests: add Scenario A (orphan detection) and Scenario B (orphan cleanup) with `requires:` and `rebuild:` annotations
