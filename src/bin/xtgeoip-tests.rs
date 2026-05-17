@@ -7,9 +7,13 @@
 use std::{
     env, fs,
     process::{self, Command},
+    thread,
+    time::{Duration, Instant},
 };
 
 use serde::Deserialize;
+
+const DEFAULT_TEST_TIMEOUT_SECS: u64 = 60;
 
 #[derive(Debug, Deserialize)]
 struct Testcase {
@@ -18,6 +22,25 @@ struct Testcase {
     cmd: Vec<String>,
     maps_to: Option<String>,
     rebuild: Option<bool>,
+    timeout_secs: Option<u64>,
+}
+
+fn run_with_timeout(
+    mut child: process::Child,
+    timeout: Duration,
+) -> anyhow::Result<Option<process::ExitStatus>> {
+    let start = Instant::now();
+    loop {
+        match child.try_wait()? {
+            Some(status) => return Ok(Some(status)),
+            None if start.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Ok(None);
+            }
+            None => thread::sleep(Duration::from_millis(100)),
+        }
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -41,6 +64,7 @@ fn main() -> anyhow::Result<()> {
 
     let mut passed = 0usize;
     let mut failed = 0usize;
+    let mut timed_out = 0usize;
     let mut skipped = 0usize;
 
     for tc in &testcases {
@@ -79,43 +103,64 @@ fn main() -> anyhow::Result<()> {
         let program = tc.cmd.first().expect("cmd must not be empty");
         let cmd_args = &tc.cmd[1..];
         let bin = format!("target/release/{}", program);
+        let timeout = Duration::from_secs(
+            tc.timeout_secs.unwrap_or(DEFAULT_TEST_TIMEOUT_SECS),
+        );
 
-        let status = Command::new("sudo").arg(&bin).args(cmd_args).status()?;
-        let did_succeed = status.success();
-
-        if did_succeed == expected_pass {
-            println!("PASS");
-            passed += 1;
-
-            if rebuild_after_clean && did_succeed && tc.rebuild.unwrap_or(false)
-            {
-                print!("  [rebuild] xtgeoip build ... ");
-                let ok = Command::new("sudo")
-                    .arg(&bin)
-                    .arg("build")
-                    .status()?
-                    .success();
-                println!("{}", if ok { "PASS" } else { "FAIL" });
+        let child = Command::new("sudo").arg(&bin).args(cmd_args).spawn()?;
+        match run_with_timeout(child, timeout)? {
+            None => {
+                println!("TIMED OUT");
+                timed_out += 1;
             }
-        } else {
-            let got = if did_succeed { "exit 0" } else { "exit non-0" };
-            let maps = tc
-                .maps_to
-                .as_deref()
-                .map(|m| format!(" (maps_to: {})", m))
-                .unwrap_or_default();
-            println!("FAIL — expected {}, got {}{}", expect_label, got, maps);
-            failed += 1;
+            Some(status) => {
+                let did_succeed = status.success();
+                if did_succeed == expected_pass {
+                    println!("PASS");
+                    passed += 1;
+                    if rebuild_after_clean
+                        && did_succeed
+                        && tc.rebuild.unwrap_or(false)
+                    {
+                        print!("  [rebuild] xtgeoip build ... ");
+                        let rebuild_child = Command::new("sudo")
+                            .arg(&bin)
+                            .arg("build")
+                            .spawn()?;
+                        let label = match run_with_timeout(
+                            rebuild_child,
+                            Duration::from_secs(DEFAULT_TEST_TIMEOUT_SECS),
+                        )? {
+                            Some(s) if s.success() => "PASS",
+                            Some(_) => "FAIL",
+                            None => "TIMED OUT",
+                        };
+                        println!("{label}");
+                    }
+                } else {
+                    let got = if did_succeed { "exit 0" } else { "exit non-0" };
+                    let maps = tc
+                        .maps_to
+                        .as_deref()
+                        .map(|m| format!(" (maps_to: {})", m))
+                        .unwrap_or_default();
+                    println!(
+                        "FAIL — expected {}, got {}{}",
+                        expect_label, got, maps
+                    );
+                    failed += 1;
+                }
+            }
         }
     }
 
     println!();
     println!(
-        "Results: {} passed, {} failed, {} skipped",
-        passed, failed, skipped
+        "Results: {} passed, {} failed, {} timed out, {} skipped",
+        passed, failed, timed_out, skipped
     );
 
-    if failed > 0 {
+    if failed > 0 || timed_out > 0 {
         process::exit(1);
     }
 

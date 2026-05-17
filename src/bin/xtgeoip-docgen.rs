@@ -100,6 +100,7 @@ pub struct Example {
     pub note: Option<String>,
     pub maps_to: Option<String>,
     pub rebuild: Option<bool>,
+    pub timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -134,6 +135,8 @@ struct Testcase {
     maps_to: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     rebuild: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    timeout_secs: Option<u64>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -489,6 +492,7 @@ fn generate_testcases_yaml(spec: &Spec) -> anyhow::Result<String> {
                 cmd: ex.cmd.split_whitespace().map(String::from).collect(),
                 maps_to: ex.maps_to.clone(),
                 rebuild: ex.rebuild,
+                timeout_secs: ex.timeout_secs,
             });
         }
     };

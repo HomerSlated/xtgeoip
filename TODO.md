@@ -191,10 +191,6 @@ Explicitly document that `xtgeoip-tests` is a system integration test suite (not
 
 `format!("target/release/{}", program)` hardcodes release build path. Two options: (1) `env!("CARGO_BIN_EXE_xtgeoip")` if restructured to Cargo integration tests, (2) accept `--bin <path>` flag or `XTGEOIP_BIN` env var. Option 2 is the simpler near-term fix.
 
-### #83 — tests: no timeout on test commands
-
-No timeout. One hanging command freezes the entire suite. Add per-test timeout (`DEFAULT_TEST_TIMEOUT: Duration = Duration::from_secs(60)`). On timeout: kill child, mark TIMED OUT, continue. Allow `timeout_secs` override in testcase YAML.
-
 ### #80 — tests: command parsing breaks on spaces in args
 
 `tc.cmd.split_whitespace()` breaks on quoted args, paths with spaces. Preferred fix: store commands as structured YAML arrays (`cmd: [xtgeoip, build, ...]`) — no parsing ambiguity, more machine-readable. Avoids new crate dependency.
