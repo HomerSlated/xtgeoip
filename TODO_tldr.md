@@ -14,12 +14,6 @@
 
 ---
 
-## CI AND WORKFLOW
-
-- [#94] .github/workflows/: 3 parallel jobs with rust-cache: build / lint (clippy + fmt) / docgen-check (run docgen + diff generated files); integration tests stay manual
-
----
-
 ## OVERVIEW: Spec-Driven Architecture [#9, #26, #27, #34]
 
 - Three sources of truth (clap struct, `normalize_cli_to_action`, `cli.yaml`) will drift; target: one data-driven semantics layer between CLI and Action

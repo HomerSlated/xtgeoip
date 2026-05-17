@@ -29,20 +29,6 @@ In progress. No further detail recorded here.
 
 ---
 
-## CI AND WORKFLOW
-
-### #94 — .github/workflows/: add GitHub Actions CI
-
-Three parallel jobs, each provisioned with stable Rust toolchain and `Swatinem/rust-cache`:
-
-- **build**: `cargo build --all-targets`
-- **lint**: `cargo clippy -- -D warnings` + `rustfmt --check src/`
-- **docgen-check**: `cargo run --bin xtgeoip-docgen` + `git diff --exit-code src/generated/ docs/generated/`
-
-The `docgen-check` job catches spec edits where the generated files were not committed alongside them — the key correctness assertion. Integration tests (`xtgeoip-tests`) cannot run in CI: they require root, real system paths, and MaxMind credentials. Manual gate before releases only.
-
----
-
 ## OVERVIEW: Spec-Driven Architecture [#9, #26, #27, #34]
 
 Currently there are three sources of truth for CLI semantics that will drift apart:
