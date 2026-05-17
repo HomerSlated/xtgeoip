@@ -158,6 +158,10 @@ fn main() -> anyhow::Result<()> {
     fs::write("docs/generated/tldr.md", generate_tldr_md(&spec)?)?;
     fs::write("docs/generated/xtgeoip.1", generate_manpage(&spec, &tmpl)?)?;
     fs::write(
+        "src/generated/mod.rs",
+        "pub mod cli_matrix;\npub mod error_text;\n",
+    )?;
+    fs::write(
         "src/generated/error_text.rs",
         generate_error_text_rs(&spec)?,
     )?;
