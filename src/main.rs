@@ -93,7 +93,7 @@ fn run(cli: Cli) -> Result<()> {
             Cli::command().print_help()?;
             println!();
             let e = anyhow::anyhow!("No command or top-level action specified");
-            eprintln!("Error: {e}");
+            eprintln!("Error [top_level_no_args]: {e}");
             return Err(e);
         }
     }

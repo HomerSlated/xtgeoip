@@ -175,6 +175,11 @@ fn main() -> anyhow::Result<()> {
         {
             output_failures.push(detail);
         }
+        if let Some(detail) = tc.maps_to.as_deref().and_then(|key| {
+            check_output("maps_to", &format!("[{key}]"), &result.stderr)
+        }) {
+            output_failures.push(detail);
+        }
 
         let maps = tc
             .maps_to
