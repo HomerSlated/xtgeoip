@@ -17,6 +17,7 @@ struct Testcase {
     key: String,
     cmd: Vec<String>,
     maps_to: Option<String>,
+    rebuild: Option<bool>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -86,12 +87,7 @@ fn main() -> anyhow::Result<()> {
             println!("PASS");
             passed += 1;
 
-            // After a successful top-level clean, optionally rebuild so the
-            // database is left in a usable state for subsequent tests.
-            if rebuild_after_clean
-                && did_succeed
-                && cmd_args.iter().any(|a| a == "-c")
-                && cmd_args.first().map(|a| a.starts_with('-')).unwrap_or(true)
+            if rebuild_after_clean && did_succeed && tc.rebuild.unwrap_or(false)
             {
                 print!("  [rebuild] xtgeoip build ... ");
                 let ok = Command::new("sudo")

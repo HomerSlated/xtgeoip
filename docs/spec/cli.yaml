@@ -122,10 +122,12 @@ top_level:
       cmd: "xtgeoip -c"
       valid: true
       outcome: "clean database"
+      rebuild: true
     - case_id: TL-008
       cmd: "xtgeoip -b -c"
       valid: true
       outcome: "backup then clean"
+      rebuild: true
     - case_id: TL-009
       cmd: "xtgeoip -b -p"
       valid: true
@@ -153,6 +155,7 @@ top_level:
       cmd: "xtgeoip -b -c -f"
       valid: true
       outcome: "force backup then clean"
+      rebuild: true
 
 commands:
 

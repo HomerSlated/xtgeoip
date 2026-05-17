@@ -99,6 +99,7 @@ pub struct Example {
     pub exit_status: Option<i32>,
     pub note: Option<String>,
     pub maps_to: Option<String>,
+    pub rebuild: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -131,6 +132,8 @@ struct Testcase {
     key: String,
     cmd: Vec<String>,
     maps_to: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rebuild: Option<bool>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -485,6 +488,7 @@ fn generate_testcases_yaml(spec: &Spec) -> anyhow::Result<String> {
                 key: if ex.valid { "p" } else { "f" }.into(),
                 cmd: ex.cmd.split_whitespace().map(String::from).collect(),
                 maps_to: ex.maps_to.clone(),
+                rebuild: ex.rebuild,
             });
         }
     };

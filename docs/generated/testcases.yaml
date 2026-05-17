@@ -39,6 +39,7 @@
   - xtgeoip
   - -c
   maps_to: null
+  rebuild: true
 - case_id: TL-008
   key: p
   cmd:
@@ -46,6 +47,7 @@
   - -b
   - -c
   maps_to: null
+  rebuild: true
 - case_id: TL-009
   key: p
   cmd:
@@ -91,6 +93,7 @@
   - -c
   - -f
   maps_to: null
+  rebuild: true
 - case_id: B-001
   key: p
   cmd:

@@ -191,15 +191,6 @@ Explicitly document that `xtgeoip-tests` is a system integration test suite (not
 
 `format!("target/release/{}", program)` hardcodes release build path. Two options: (1) `env!("CARGO_BIN_EXE_xtgeoip")` if restructured to Cargo integration tests, (2) accept `--bin <path>` flag or `XTGEOIP_BIN` env var. Option 2 is the simpler near-term fix.
 
-### #82 — tests: rebuild condition uses weak string scraping
-
-Rebuild condition `cmd_args.contains(&"-c") && cmd_args.first().map(|a| a.starts_with('-'))...` is logically weak. Intent is "after a test that cleans, rebuild for subsequent tests." Express in spec:
-```yaml
-case_id: TL-007
-rebuild: true
-```
-Test runner reads `tc.rebuild` directly — no string-scraping.
-
 ### #83 — tests: no timeout on test commands
 
 No timeout. One hanging command freezes the entire suite. Add per-test timeout (`DEFAULT_TEST_TIMEOUT: Duration = Duration::from_secs(60)`). On timeout: kill child, mark TIMED OUT, continue. Allow `timeout_secs` override in testcase YAML.
