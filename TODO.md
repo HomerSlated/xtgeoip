@@ -203,18 +203,6 @@ Orphaned files from legacy/default mode switching are not covered by the rebuild
 
 **Scenario B (orphan cleanup)**: produce orphans → clean → run same detection → assert no orphans. Requires `requires:` dependencies and `rebuild:` annotations in YAML. Further analysis needed to establish if all state transitions are covered.
 
-### #90 + #84 — tests: add output assertions to testcase YAML [merged]
-
-Exit code only tests success vs failure — a smoke test, not spec compliance. A build that exits 0 but does nothing still passes. Add optional output assertions to testcase YAML:
-```yaml
-case_id: B-001
-key: p
-cmd: xtgeoip build
-expected_stdout: "build"   # substring or regex
-expected_stderr: ""        # must be empty
-```
-In runner, capture both streams and assert. Support: exact match, substring match, regex match. Omitted field = not checked (backwards compatible). This is the concrete mechanism that #85+91, #86 all depend on.
-
 ### #85 + #91 — tests / cli: `maps_to` never verified [merged]
 
 `maps_to` appears in test output on failure but is never verified. Two changes needed:

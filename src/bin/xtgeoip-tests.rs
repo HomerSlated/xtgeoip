@@ -3,10 +3,16 @@
 //! that each exits with the status expected by its spec key:
 //!   key: p  → must exit 0
 //!   key: f  → must exit non-zero
+//!
+//! Optional output assertions:
+//!   expected_stdout: ""        → stdout must be empty
+//!   expected_stdout: "text"    → stdout must contain "text"
+//!   expected_stderr: (same)
 
 use std::{
     env, fs,
-    process::{self, Command},
+    io::Read,
+    process::{self, Command, Stdio},
     thread,
     time::{Duration, Instant},
 };
@@ -23,24 +29,58 @@ struct Testcase {
     maps_to: Option<String>,
     rebuild: Option<bool>,
     timeout_secs: Option<u64>,
+    expected_stdout: Option<String>,
+    expected_stderr: Option<String>,
+}
+
+struct RunResult {
+    status: Option<process::ExitStatus>,
+    stdout: String,
+    stderr: String,
 }
 
 fn run_with_timeout(
     mut child: process::Child,
     timeout: Duration,
-) -> anyhow::Result<Option<process::ExitStatus>> {
+) -> anyhow::Result<RunResult> {
     let start = Instant::now();
-    loop {
+    let status = loop {
         match child.try_wait()? {
-            Some(status) => return Ok(Some(status)),
+            Some(status) => break Some(status),
             None if start.elapsed() >= timeout => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Ok(None);
+                break None;
             }
             None => thread::sleep(Duration::from_millis(100)),
         }
+    };
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    if let Some(ref mut out) = child.stdout {
+        let _ = out.read_to_string(&mut stdout);
     }
+    if let Some(ref mut err) = child.stderr {
+        let _ = err.read_to_string(&mut stderr);
+    }
+    Ok(RunResult {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+// Returns Some(failure message) if the assertion fails, None if it passes.
+// Empty expected string means "must be empty".
+fn check_output(label: &str, expected: &str, actual: &str) -> Option<String> {
+    if expected.is_empty() {
+        if !actual.is_empty() {
+            return Some(format!("[{label}] expected empty, got: {actual:?}"));
+        }
+    } else if !actual.contains(expected) {
+        return Some(format!("[{label}] expected {expected:?} in: {actual:?}"));
+    }
+    None
 }
 
 fn main() -> anyhow::Result<()> {
@@ -107,50 +147,79 @@ fn main() -> anyhow::Result<()> {
             tc.timeout_secs.unwrap_or(DEFAULT_TEST_TIMEOUT_SECS),
         );
 
-        let child = Command::new("sudo").arg(&bin).args(cmd_args).spawn()?;
-        match run_with_timeout(child, timeout)? {
-            None => {
-                println!("TIMED OUT");
-                timed_out += 1;
+        let child = Command::new("sudo")
+            .arg(&bin)
+            .args(cmd_args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        let result = run_with_timeout(child, timeout)?;
+
+        if result.status.is_none() {
+            println!("TIMED OUT");
+            timed_out += 1;
+            continue;
+        }
+        let did_succeed = result.status.unwrap().success();
+
+        let mut output_failures: Vec<String> = Vec::new();
+        if let Some(ref expected) = tc.expected_stdout
+            && let Some(detail) =
+                check_output("stdout", expected, &result.stdout)
+        {
+            output_failures.push(detail);
+        }
+        if let Some(ref expected) = tc.expected_stderr
+            && let Some(detail) =
+                check_output("stderr", expected, &result.stderr)
+        {
+            output_failures.push(detail);
+        }
+
+        let maps = tc
+            .maps_to
+            .as_deref()
+            .map(|m| format!(" (maps_to: {})", m))
+            .unwrap_or_default();
+        let exit_ok = did_succeed == expected_pass;
+
+        if exit_ok && output_failures.is_empty() {
+            println!("PASS");
+            passed += 1;
+            if rebuild_after_clean && did_succeed && tc.rebuild.unwrap_or(false)
+            {
+                print!("  [rebuild] xtgeoip build ... ");
+                let rebuild_child = Command::new("sudo")
+                    .arg(&bin)
+                    .arg("build")
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .spawn()?;
+                let rebuild_result = run_with_timeout(
+                    rebuild_child,
+                    Duration::from_secs(DEFAULT_TEST_TIMEOUT_SECS),
+                )?;
+                let label = match rebuild_result.status {
+                    Some(s) if s.success() => "PASS",
+                    Some(_) => "FAIL",
+                    None => "TIMED OUT",
+                };
+                println!("{label}");
             }
-            Some(status) => {
-                let did_succeed = status.success();
-                if did_succeed == expected_pass {
-                    println!("PASS");
-                    passed += 1;
-                    if rebuild_after_clean
-                        && did_succeed
-                        && tc.rebuild.unwrap_or(false)
-                    {
-                        print!("  [rebuild] xtgeoip build ... ");
-                        let rebuild_child = Command::new("sudo")
-                            .arg(&bin)
-                            .arg("build")
-                            .spawn()?;
-                        let label = match run_with_timeout(
-                            rebuild_child,
-                            Duration::from_secs(DEFAULT_TEST_TIMEOUT_SECS),
-                        )? {
-                            Some(s) if s.success() => "PASS",
-                            Some(_) => "FAIL",
-                            None => "TIMED OUT",
-                        };
-                        println!("{label}");
-                    }
-                } else {
-                    let got = if did_succeed { "exit 0" } else { "exit non-0" };
-                    let maps = tc
-                        .maps_to
-                        .as_deref()
-                        .map(|m| format!(" (maps_to: {})", m))
-                        .unwrap_or_default();
-                    println!(
-                        "FAIL — expected {}, got {}{}",
-                        expect_label, got, maps
-                    );
-                    failed += 1;
-                }
+        } else if !exit_ok && output_failures.is_empty() {
+            let got = if did_succeed { "exit 0" } else { "exit non-0" };
+            println!("FAIL — expected {expect_label}, got {got}{maps}");
+            failed += 1;
+        } else {
+            println!("FAIL");
+            if !exit_ok {
+                let got = if did_succeed { "exit 0" } else { "exit non-0" };
+                println!("  exit: expected {expect_label}, got {got}{maps}");
             }
+            for detail in &output_failures {
+                println!("  {detail}");
+            }
+            failed += 1;
         }
     }
 

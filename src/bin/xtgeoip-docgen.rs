@@ -101,6 +101,8 @@ pub struct Example {
     pub maps_to: Option<String>,
     pub rebuild: Option<bool>,
     pub timeout_secs: Option<u64>,
+    pub expected_stdout: Option<String>,
+    pub expected_stderr: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -137,6 +139,10 @@ struct Testcase {
     rebuild: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     timeout_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expected_stdout: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expected_stderr: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -493,6 +499,8 @@ fn generate_testcases_yaml(spec: &Spec) -> anyhow::Result<String> {
                 maps_to: ex.maps_to.clone(),
                 rebuild: ex.rebuild,
                 timeout_secs: ex.timeout_secs,
+                expected_stdout: ex.expected_stdout.clone(),
+                expected_stderr: ex.expected_stderr.clone(),
             });
         }
     };
