@@ -1,0 +1,12 @@
+/bak
+/scripts
+/target
+/backups
+*.bak
+*.old
+*.new
+*.fish
+*.lock
+*.debug
+*.manifest
+.claude
