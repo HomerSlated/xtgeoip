@@ -433,9 +433,9 @@ fn generate_error_text_rs(spec: &Spec) -> anyhow::Result<String> {
 
 fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
     let mut out = String::from(
-        "// auto-generated\n#![allow(dead_code)]\npub struct CliExample { \
-         pub cmd: &'static str, pub valid: bool, pub outcome: &'static str \
-         }\npub const CLI_MATRIX: &[CliExample] = &[\n",
+        "// auto-generated\n#![allow(dead_code)]\npub struct CliExample { pub \
+         cmd: &'static str, pub valid: bool, pub outcome: &'static str }\npub \
+         const CLI_MATRIX: &[CliExample] = &[\n",
     );
 
     let mut add = |exs: &[Example]| {

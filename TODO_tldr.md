@@ -16,7 +16,6 @@
 
 ## CI AND WORKFLOW
 
-- [#93] scripts/: replace update.fish with sync.fish; hard gates: docgen → clippy -D warnings → rustfmt --check → release build → commit/push; remove cargo fix
 - [#94] .github/workflows/: 3 parallel jobs with rust-cache: build / lint (clippy + fmt) / docgen-check (run docgen + diff generated files); integration tests stay manual
 
 ---

@@ -31,18 +31,6 @@ In progress. No further detail recorded here.
 
 ## CI AND WORKFLOW
 
-### #93 — scripts/: replace update.fish with sync.fish
-
-Current `update.fish` has no quality gates before commit and includes a `cargo fix` legacy step. Replace with `sync.fish`:
-
-1. `cargo run --bin xtgeoip-docgen` — regenerate before any check
-2. `cargo clippy -- -D warnings` — hard gate
-3. `rustfmt --check src/` — hard gate
-4. `cargo build --release` — hard gate
-5. `git add . && git commit -m "$message" && git push`
-
-Remove `cargo fix` entirely — superseded by clippy as a hard gate. Optional: add a stale commit message guard (compare `.git/COMMIT_EDITMSG` against `.git/COMMIT_EDITMSG.old`) matching the pattern used in the cdda2img project.
-
 ### #94 — .github/workflows/: add GitHub Actions CI
 
 Three parallel jobs, each provisioned with stable Rust toolchain and `Swatinem/rust-cache`:
