@@ -203,10 +203,6 @@ Orphaned files from legacy/default mode switching are not covered by the rebuild
 
 **Scenario B (orphan cleanup)**: produce orphans → clean → run same detection → assert no orphans. Requires `requires:` dependencies and `rebuild:` annotations in YAML. Further analysis needed to establish if all state transitions are covered.
 
-### #86 — tests: `key: p/f` is too coarse
-
-`key: p/f` is too coarse. Candidates in increasing scope: expected exit codes (`key: f2` = exit exactly 2), error class (`error_class: cli`), reason template match (`maps_to: build_prune_no_backup` asserts that template was triggered). `key` should evolve into a structured expectation. Depends on #90+84 and #85+91.
-
 ---
 
 ## LOW PRIORITY / LARGE SCOPE

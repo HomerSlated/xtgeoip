@@ -136,6 +136,8 @@ struct Testcase {
     cmd: Vec<String>,
     maps_to: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    exit_status: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     rebuild: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     timeout_secs: Option<u64>,
@@ -497,6 +499,7 @@ fn generate_testcases_yaml(spec: &Spec) -> anyhow::Result<String> {
                 key: if ex.valid { "p" } else { "f" }.into(),
                 cmd: ex.cmd.split_whitespace().map(String::from).collect(),
                 maps_to: ex.maps_to.clone(),
+                exit_status: ex.exit_status,
                 rebuild: ex.rebuild,
                 timeout_secs: ex.timeout_secs,
                 expected_stdout: ex.expected_stdout.clone(),
