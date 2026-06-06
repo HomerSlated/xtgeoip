@@ -1,12 +1,79 @@
-/bak
-/scripts
+# xtgeoip .gitignore
+# Rust project. Merged from a general-purpose template; Python-ecosystem and
+# audio-project (cdda2img) entries trimmed as not applicable here.
+
+# Rust build artifacts
 /target
-/backups
+**/*.rs.bk
+
+# Cargo.lock: xtgeoip is a binary crate — keep it TRACKED for reproducible
+# builds, overriding the broad *.lock rule below.
+*.lock
+!Cargo.lock
+
+# Editor swap / backup files
+*.swp
+*.swo
+*~
 *.bak
 *.old
 *.new
-*.fish
-*.lock
+*.orig
+
+# Compiled / binary objects
+*.o
+*.so
+*.exe
+*.dll
+
+# Archives (unpack and commit raw sources instead)
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+# Logs and databases
+*.log
+*.sql
+*.sqlite
+
+# Build / run debug + packaging leftovers
 *.debug
 *.manifest
-.claude
+
+# Private / personal documentation
+*.pdf
+
+# Personal local config (not project-relevant)
+*.fish
+*.vimrc
+
+# Local working directories (not for sharing).
+# /backups holds the tarball archives created by scripts/backup.py.
+# NOTE: /extra is NOT ignored — it holds tracked packaging assets (dkms, ufw).
+/bak
+/backups
+/private
+/scripts
+
+# Machine-local Claude Code context (committed CLAUDE.md is NOT ignored)
+.claude/
+CLAUDE.local.md
+claude-prompt-*.md
+
+# OS-generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Exceptions: /extra holds curated, tracked packaging assets. Protect them from
+# the broad archive/extension globs above (e.g. the committed dkms tarball).
+!/extra/**
