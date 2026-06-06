@@ -18,7 +18,7 @@
 
 - Three sources of truth (clap struct, `normalize_cli_to_action`, `cli.yaml`) will drift; target: one data-driven semantics layer between CLI and Action
 - `Action` enum and construction blocks are the right shape — keep them; derive their content from the spec, not hand-written control flow
-- Remaining structural enablers: #22, #27, #29
+- Remaining structural enablers: #22, #27, #29, #93
 - [#32] Preserve `Action` construction pattern; change the source, not the shape
 
 ---
@@ -37,7 +37,8 @@
 
 ## ARCHITECTURE: ANALYSIS AND SMALL REFACTORS
 
-- [#8] all modules: audit separation of concerns before larger refactoring; prerequisite step
+- [#93] config.rs: split into config.rs (data/load) and conf.rs (ConfAction, run_conf, prompts); prerequisite for spec-driven direction
+- [#94] backup.rs/fetch.rs: remove double-error reporting (error() + bail! with same message)
 
 ---
 
@@ -81,7 +82,6 @@
 
 - [#87] tests: document integration test nature (root required, order-dependent, release build); add setup/teardown phase
 - [#81] tests: replace hardcoded `target/release/` path with `--bin` flag or `XTGEOIP_BIN` env var
-- [#80] tests: replace `split_whitespace` command parsing with structured YAML arrays (`cmd: [...]`)
 - [#89] tests: add Scenario A (orphan detection) and Scenario B (orphan cleanup) with `requires:` and `rebuild:` annotations
 
 ---

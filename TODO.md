@@ -61,7 +61,7 @@ CLI → parsed args
     → execution
 ```
 
-The `Action` enum is explicit, type-safe, and easy to extend — keep this shape. The Action construction blocks (e.g. `Ok(Some(Action::Build { legacy, backup, ... }))`) are the right pattern; the change needed is that they should be generated from the semantics layer rather than hand-written. The individual items in this TODO are stepping stones toward this architecture; items #22, #27, #29 are the remaining structural enablers.
+The `Action` enum is explicit, type-safe, and easy to extend — keep this shape. The Action construction blocks (e.g. `Ok(Some(Action::Build { legacy, backup, ... }))`) are the right pattern; the change needed is that they should be generated from the semantics layer rather than hand-written. The individual items in this TODO are stepping stones toward this architecture; items #22, #27, #29, #93 are the remaining structural enablers.
 
 Note [#32]: Preserve the `Action` construction pattern — the change is in the source of the construction logic, not its shape.
 
@@ -87,9 +87,20 @@ Logging to file should be optional. Configurable via `[logging]` in TOML config,
 
 ## ARCHITECTURE: ANALYSIS AND SMALL REFACTORS
 
-### #8 — all modules: re-analyse separation of concerns
+### #93 — config.rs: split into config.rs (data/load) and conf.rs (command handler)
 
-Re-analyse the distribution of responsibilities across all modules (including `main.rs`) to verify clean separation of concerns. Likely problem areas: overlap between `main.rs`, `cli.rs`, and `action.rs`; config loading touching runtime concerns; logic that has drifted into the wrong layer. This is a prerequisite analysis before larger refactoring.
+`config.rs` currently hosts three distinct concerns: (1) `Config` struct + `load_config()` — pure data/loading, (2) `ConfAction` enum — a CLI-originated user choice, not a config concept, and (3) `run_conf()` + precondition checks + interactive prompting (`prompt_create_config()`). Split into:
+
+- `config.rs` — `Config` struct, `load_config()`, `validate()`; no output, no subprocesses, no prompts
+- `conf.rs` — `ConfAction`, `run_conf()`, precondition checks, `prompt_create_config()`
+
+This removes the backwards dependency `cli.rs → config.rs` for a CLI type. After the split, `cli.rs` only imports action-layer types. **Prerequisite for spec-driven architecture (#9/#26/#27/#34).**
+
+### #94 — backup.rs / fetch.rs: remove double-error reporting
+
+Several error paths call `error(&msg); bail!(msg)` — the error is logged via `messages::error()` AND returned as an `anyhow::Error`. When the logger is initialized, `main.rs` prints it again on propagation, so the same message appears twice.
+
+Remove the `error()` calls that immediately precede `bail!()` with the same message; let propagation handle reporting. Affected: `backup.rs:gather_files()` (Verified branch), `backup.rs:verify_manifest_files()`, `fetch.rs:fetch()` (credentials check).
 
 ---
 
@@ -190,10 +201,6 @@ Explicitly document that `xtgeoip-tests` is a system integration test suite (not
 ### #81 — tests: binary path hardcoded
 
 `format!("target/release/{}", program)` hardcodes release build path. Two options: (1) `env!("CARGO_BIN_EXE_xtgeoip")` if restructured to Cargo integration tests, (2) accept `--bin <path>` flag or `XTGEOIP_BIN` env var. Option 2 is the simpler near-term fix.
-
-### #80 — tests: command parsing breaks on spaces in args
-
-`tc.cmd.split_whitespace()` breaks on quoted args, paths with spaces. Preferred fix: store commands as structured YAML arrays (`cmd: [xtgeoip, build, ...]`) — no parsing ambiguity, more machine-readable. Avoids new crate dependency.
 
 ### #89 — tests: orphaned file scenarios not covered
 
