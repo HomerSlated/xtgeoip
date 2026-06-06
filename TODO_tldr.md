@@ -86,6 +86,12 @@
 
 ---
 
+## TOOLING / AGENTS
+
+- [#95] import the 7 generic agents in private/agents-out/ as xtgeoip agents (fill placeholders); docs-auditor first (WORKFLOW.md delegates to it); guardian-security key already provisioned
+
+---
+
 ## LOW PRIORITY / LARGE SCOPE
 
 - [#24] pipelines: no rollback on mid-pipeline failure; address via execution planner managing temp dir
