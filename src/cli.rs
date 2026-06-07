@@ -5,7 +5,7 @@ use clap::{Args, Parser, Subcommand};
 
 use crate::{
     action::Action,
-    config::ConfAction,
+    conf::ConfAction,
     generated::error_text::{
         NO_BUILD_FORCE, NO_FETCH_BACKUP, NO_FETCH_CLEAN, NO_FETCH_FORCE,
         NO_FETCH_LEGACY, NO_FORCE_ALONE, NO_LEGACY_HERE, NO_PRUNE_ALONE,

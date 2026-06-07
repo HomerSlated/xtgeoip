@@ -8,7 +8,8 @@ use tempfile::TempDir;
 use crate::{
     backup::{BackupMode, PruneMode, backup, delete, prune_archives},
     build::build,
-    config::{ConfAction, Config},
+    conf::ConfAction,
+    config::Config,
     fetch::{FetchMode, fetch},
     messages,
     version::Version,

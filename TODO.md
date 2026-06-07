@@ -98,14 +98,15 @@ precedence). Not yet implemented.
 
 ## ARCHITECTURE: ANALYSIS AND SMALL REFACTORS
 
-### #93 — config.rs: split into config.rs (data/load) and conf.rs (command handler)
+### #93 — config.rs: split into config.rs (data/load) and conf.rs (command handler) ✅ DONE
 
-`config.rs` currently hosts three distinct concerns: (1) `Config` struct + `load_config()` — pure data/loading, (2) `ConfAction` enum — a CLI-originated user choice, not a config concept, and (3) `run_conf()` + precondition checks + interactive prompting (`prompt_create_config()`). Split into:
-
-- `config.rs` — `Config` struct, `load_config()`, `validate()`; no output, no subprocesses, no prompts
-- `conf.rs` — `ConfAction`, `run_conf()`, precondition checks, `prompt_create_config()`
-
-This removes the backwards dependency `cli.rs → config.rs` for a CLI type. After the split, `cli.rs` only imports action-layer types. **Prerequisite for spec-driven architecture (#9/#26/#27/#34).**
+Done 2026-06-07. `config.rs` is now the pure data/load leaf (`Config` + structs,
+`validate()`, `load_config()`; the shared `SYSTEM_CONFIG` / `system_config_path()`
+are `pub(crate)`). `conf.rs` holds the CLI-originated `ConfAction`, `run_conf()`,
+preconditions, interactive `prompt_create_config()`, and the conf-only
+`DEFAULT_CONFIG`; it depends on `config` for the path seam (never the reverse).
+`cli.rs` and `action.rs` now import `ConfAction` from `conf`, not the data layer.
+Behavior-preserving — the CLI-semantics snapshot stayed green byte-for-byte.
 
 ### #94 — backup.rs / fetch.rs: remove double-error reporting ✅ DONE
 

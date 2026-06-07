@@ -15,6 +15,7 @@ mod action;
 mod backup;
 mod build;
 mod cli;
+mod conf;
 mod config;
 mod fetch;
 mod generated;
@@ -73,7 +74,7 @@ fn run(cli: Cli) -> Result<()> {
             // conf runs before config load, so it has no log-file path;
             // install a terminal-only logger so its errors still report.
             init_logger(None)?;
-            config::run_conf(conf_action)?;
+            conf::run_conf(conf_action)?;
         }
 
         CliOutcome::Action(action) => {
