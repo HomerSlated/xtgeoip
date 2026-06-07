@@ -191,6 +191,16 @@ Ad hoc ambiguity checks (`if *prune && *force && *clean`, etc.) have no formal b
 
 `proof.unique_maps_to` is now enforced by the validator. Remaining: expand validation to catch logical contradictions (declared but never used flags, undeclared mutual exclusions, unreachable valid states). Also: `pub const CLI_MATRIX: &[CliExample]` is generated but underutilised — use for fuzzing (seed corpus), property testing (`proptest`/`quickcheck`), and exhaustive parser validation.
 
+**Proof-model blind spot (found 2026-06-07 via exhaustive enumeration).** The
+`unique_maps_to` model — one canonical example per error case — *cannot* verify
+behavior exhaustively: it can't distinguish `prune+force+clean` from `prune+force`
+because both collapse to the same `maps_to`. This is exactly why the `p⊕f` leak
+(`build/run -b -p -f` accepted) survived undetected. An exhaustive run of all ~136
+flag combinations through `normalize_cli_to_action` is the real oracle. Target model:
+declare rules (`p conflicts f`, `prune requires backup|fetch-context`) once and check
+*every* combination against them — examples then prove the rules rather than stand in
+for coverage. A committed enumeration harness should back this (overlaps #88).
+
 ---
 
 ## DOCGEN (xtgeoip-docgen.rs)
@@ -264,6 +274,18 @@ Parallel ZIP writes; benchmark before committing.
 
 Parallel manifest verification; measure before committing.
 
-### #88 — unit testing: no unit tests exist
+### #88 — unit testing: no unit tests exist  ⚑ HIGH PRIORITY (next after spec-driven architecture)
 
-No unit tests exist — intentional at this stage. When implemented: sandboxed (no sudo, no network, no interaction), full logging, CI/CD compatible (GitHub Actions, distro buildsystems), virtualise all external dependencies (CSV fixtures, mock HTTP, temp paths), setup/teardown lifecycle. All production paths configurable via #12 and #18. Large undertaking — schedule separately after architecture refactoring (#3–#34) stabilises.
+**Priority raised by the user 2026-06-07.** No unit tests exist — a major gap. The
+project's only automated tests are the user-owned integration suite (`xtgeoip-tests`,
+root-only), which is NOT a substitute for unit coverage and is outside the dev
+workflow. To be tackled immediately after the spec-driven architecture work lands
+(the deliberate ordering: architecture is still in flux, so unit tests written now
+would be rewritten — see the spec-driven overview).
+
+When implemented: sandboxed (no sudo, no network, no interaction), full logging,
+CI/CD compatible (GitHub Actions, distro buildsystems), virtualise all external
+dependencies (CSV fixtures, mock HTTP, temp paths), setup/teardown lifecycle. All
+production paths configurable via #12 and #18. The generated CLI matrix
+(`CLI_MATRIX` / `testcases.yaml`) is a ready-made, root-free oracle for unit-testing
+the semantics layer (see #92).

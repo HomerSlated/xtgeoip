@@ -170,7 +170,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
                     return Err(keyed_err("run_force_no_target", NO_RUN_FORCE));
                 }
 
-                if *prune && common.force && common.clean {
+                if *prune && common.force {
                     return Err(keyed_err("run_prune_force", NO_PRUNE_FORCE));
                 }
 
@@ -205,7 +205,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
                     ));
                 }
 
-                if *prune && common.force && common.backup && common.clean {
+                if *prune && common.force {
                     return Err(keyed_err("build_prune_force", NO_PRUNE_FORCE));
                 }
 
@@ -258,14 +258,16 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
             return Err(keyed_err("top_level_force_no_target", NO_FORCE_ALONE));
         }
 
-        if c && p && f {
+        // clean+prune is only a conflict without a backup target; with -b,
+        // prune targets the bin archive and clean is a separate step.
+        if c && p && f && !b {
             return Err(keyed_err(
                 "top_level_prune_clean_force",
                 NO_PRUNE_CLEAN_FORCE,
             ));
         }
 
-        if c && p {
+        if c && p && !b {
             return Err(keyed_err(
                 "top_level_prune_with_clean",
                 NO_PRUNE_CLEAN,

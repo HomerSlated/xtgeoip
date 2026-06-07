@@ -162,6 +162,11 @@ top_level:
       valid: true
       outcome: "force backup then clean"
       rebuild: true
+    - case_id: TL-015
+      cmd: "xtgeoip -b -c -p"
+      valid: true
+      outcome: "backup then prune then clean"
+      rebuild: true
 
 commands:
 
@@ -235,7 +240,7 @@ commands:
         valid: true
         outcome: "backup, prune, clean, build"
       - case_id: B-007
-        cmd: "xtgeoip build -b -c -p -f"
+        cmd: "xtgeoip build -b -p -f"
         valid: false
         reason: { code: no_prune_force }
         maps_to: build_prune_force
@@ -293,7 +298,7 @@ commands:
         valid: true
         outcome: "force clean then fetch then build"
       - case_id: R-006
-        cmd: "xtgeoip run -c -p -f"
+        cmd: "xtgeoip run -b -p -f"
         valid: false
         reason: { code: no_prune_force }
         maps_to: run_prune_force
