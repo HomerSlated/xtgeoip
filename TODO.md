@@ -241,6 +241,10 @@ Orphaned files from legacy/default mode switching are not covered by the rebuild
 
 **Scenario B (orphan cleanup)**: produce orphans → clean → run same detection → assert no orphans. Requires `requires:` dependencies and `rebuild:` annotations in YAML. Further analysis needed to establish if all state transitions are covered.
 
+### #96 — CI / sync: run `cargo test` so the snapshot guard is enforced
+
+`scripts/sync.py` runs docgen → clippy → `+nightly fmt --check` → `build --release`, but **not** `cargo test`. The CLI-semantics snapshot (`cli::snapshot::cli_semantics_snapshot`, golden at `src/cli_snapshot.golden`, commit `33ddeaa`) — and any future `#[cfg(test)]` unit tests (#88) — therefore aren't enforced automatically. Wire `cargo test` (sandboxed, root-free) into the GitHub Actions workflow and/or as a pre-sync step in `sync.py`, so a behavior change that isn't reflected in a regenerated snapshot fails the build. Pairs with #88.
+
 ---
 
 ## TOOLING / AGENTS
