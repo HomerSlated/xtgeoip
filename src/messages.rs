@@ -3,9 +3,11 @@ use chrono::{Local, SecondsFormat};
 use log::Level;
 use syslog::{Facility, Formatter3164};
 
-/// Initialize logging
-/// `log_file` is mandatory; logs to stdout/stderr and optionally to file
-pub fn init_logger(log_file: &str) -> Result<()> {
+/// Initialize logging.
+///
+/// stdout/stderr output is always installed so the tool is never silent on
+/// the terminal; file logging is added only when `log_file` is `Some`.
+pub fn init_logger(log_file: Option<&str>) -> Result<()> {
     let base_dispatch = fern::Dispatch::new().level(log::LevelFilter::Info);
 
     // stdout/stderr logging with custom formatting
@@ -29,24 +31,26 @@ pub fn init_logger(log_file: &str) -> Result<()> {
         })
         .chain(std::io::stdout());
 
-    // file logging with timestamp + level
-    let file_dispatch = fern::Dispatch::new()
-        .format(|out, message, record| {
-            out.finish(format_args!(
-                "{} [{}] {}",
-                Local::now().to_rfc3339_opts(SecondsFormat::Micros, false),
-                record.level(),
-                message
-            ))
-        })
-        .chain(fern::log_file(log_file)?);
+    // terminal output is unconditional
+    let mut dispatch =
+        base_dispatch.chain(stdout_dispatch).chain(stderr_dispatch);
 
-    // combine stdout, stderr, file
-    base_dispatch
-        .chain(stdout_dispatch)
-        .chain(stderr_dispatch)
-        .chain(file_dispatch)
-        .apply()?;
+    // file logging with timestamp + level — only when configured
+    if let Some(log_file) = log_file {
+        let file_dispatch = fern::Dispatch::new()
+            .format(|out, message, record| {
+                out.finish(format_args!(
+                    "{} [{}] {}",
+                    Local::now().to_rfc3339_opts(SecondsFormat::Micros, false),
+                    record.level(),
+                    message
+                ))
+            })
+            .chain(fern::log_file(log_file)?);
+        dispatch = dispatch.chain(file_dispatch);
+    }
+
+    dispatch.apply()?;
 
     Ok(())
 }

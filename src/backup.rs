@@ -102,9 +102,7 @@ fn verify_manifest_files(
         let file_name = file_name.trim();
 
         if file_name.is_empty() {
-            let msg = format!("Malformed manifest at line {}", idx + 1);
-            error(&msg);
-            bail!(msg);
+            bail!("Malformed manifest at line {}", idx + 1);
         }
 
         if file_name.contains('/')
@@ -112,37 +110,31 @@ fn verify_manifest_files(
             || file_name == ".."
             || file_name == "."
         {
-            let msg = format!(
+            bail!(
                 "Manifest contains unsafe file name {:?} at line {}",
                 file_name,
                 idx + 1
             );
-            error(&msg);
-            bail!(msg);
         }
 
         let file_path = data_dir.join(file_name);
         if !file_path.exists() {
-            let msg = format!(
+            bail!(
                 "Manifest mismatch\n{}: file not found\nOperation aborted, no \
                  files have been modified",
                 file_name
             );
-            error(&msg);
-            bail!(msg);
         }
 
         let data = fs::read(&file_path)?;
         let actual_hash = blake3::hash(&data).to_string();
 
         if actual_hash != expected_hash {
-            let msg = format!(
+            bail!(
                 "Manifest mismatch\n{}: checksum failed\nOperation aborted, \
                  no files have been modified",
                 file_name
             );
-            error(&msg);
-            bail!(msg);
         }
 
         verified_files.push(file_path);
@@ -223,12 +215,10 @@ fn gather_files(
             let version = fs::read_to_string(version_path(data_dir))
                 .map(|s| s.trim().to_string())
                 .map_err(|_| {
-                    let msg = format!(
+                    anyhow!(
                         "Version file missing: {}. Use -f to force operation",
                         version_path(data_dir).display()
-                    );
-                    error(&msg);
-                    anyhow!(msg)
+                    )
                 })?;
 
             if version.contains('/') || version.contains('\\') {
@@ -240,13 +230,11 @@ fn gather_files(
 
             let manifest_path = manifest_path_for_version(data_dir, &version);
             if !manifest_path.exists() {
-                let msg = format!(
+                bail!(
                     "Manifest missing: {}\nExpected manifest not found. Use \
                      -f to force",
                     manifest_path.display()
                 );
-                error(&msg);
-                bail!(msg);
             }
 
             let files = verify_manifest_files(data_dir, &manifest_path)?;
@@ -267,9 +255,7 @@ pub fn backup(
 
     let (mut files, version, manifest) = gather_files(data_dir, mode)?;
     if files.is_empty() {
-        let msg = "Nothing to back up";
-        error(msg);
-        bail!(msg);
+        bail!("Nothing to back up");
     }
 
     let output_path = match mode {
@@ -332,9 +318,7 @@ fn delete_all(data_dir: &Path, files: &[PathBuf]) -> Result<()> {
 pub fn delete(data_dir: &Path, mode: BackupMode) -> Result<()> {
     let (files, _version, manifest) = gather_files(data_dir, mode)?;
     if files.is_empty() {
-        let msg = "Nothing to delete";
-        error(msg);
-        bail!(msg);
+        bail!("Nothing to delete");
     }
 
     let all_files: Vec<PathBuf> = match mode {
@@ -385,18 +369,14 @@ pub fn prune_archives(cfg: &Config, mode: PruneMode) -> Result<()> {
     let keep = cfg.paths.archive_prune;
 
     if keep < 1 {
-        let msg = "Invalid configuration: paths.archive_prune must be >= 1";
-        error(msg);
-        bail!(msg);
+        bail!("Invalid configuration: paths.archive_prune must be >= 1");
     }
 
     if !archive_dir.exists() || !archive_dir.is_dir() {
-        let msg = format!(
+        bail!(
             "Archive directory {} is missing or invalid",
             archive_dir.display()
         );
-        error(&msg);
-        bail!(msg);
     }
 
     let mut summary = PruneSummary {

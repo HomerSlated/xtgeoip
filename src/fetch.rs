@@ -58,8 +58,7 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, Version)> {
         || license_key.is_empty()
         || license_key == "CHANGE ME"
     {
-        messages::error("MaxMind account ID or license key not set in config.");
-        bail!("MaxMind credentials not configured");
+        bail!("MaxMind account ID or license key not set in config.");
     }
 
     fs::create_dir_all(archive_dir)?;
