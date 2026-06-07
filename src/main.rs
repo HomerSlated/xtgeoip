@@ -57,9 +57,7 @@ fn init_runtime(cfg: &config::Config) -> Result<()> {
         messages::warn(&format!("Rayon thread pool init failed: {e}"));
     }
 
-    if let Some(log_file) = cfg.logging.as_ref().map(|l| l.log_file.as_str()) {
-        init_logger(log_file)?;
-    }
+    init_logger(cfg.logging.as_ref().map(|l| l.log_file.as_str()))?;
 
     Ok(())
 }
@@ -72,6 +70,9 @@ fn run(cli: Cli) -> Result<()> {
 
     match outcome {
         CliOutcome::Action(Action::Conf(conf_action)) => {
+            // conf runs before config load, so it has no log-file path;
+            // install a terminal-only logger so its errors still report.
+            init_logger(None)?;
             config::run_conf(conf_action)?;
         }
 
@@ -120,7 +121,8 @@ fn main() -> Result<()> {
         },
     };
 
-    if run(cli).is_err() {
+    if let Err(e) = run(cli) {
+        messages::error(&format!("{e:#}"));
         process::exit(EXIT_RUNTIME_ERROR);
     }
 

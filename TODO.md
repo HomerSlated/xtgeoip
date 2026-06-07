@@ -69,9 +69,20 @@ Note [#32]: Preserve the `Action` construction pattern — the change is in the 
 
 ## CONFIG AND CONF SUBCOMMAND
 
-### #1 — messages.rs / config.rs: file logging not optional
+### #1 — messages.rs / config.rs: file logging not optional ✅ CORE DONE
 
-Logging to file should be optional. Configurable via `[logging]` in TOML config, overridable with a CLI flag (flag takes precedence). When disabled, log output goes to stderr only (or is suppressed, TBD).
+**Root cause found:** terminal output was welded to file logging. `init_logger` built
+the stdout/stderr *and* file dispatches together and was only called when `[logging]`
+provided a log-file path — so with no `[logging]` section, no logger was installed at
+all, and the `log` facade silently no-op'd *every* message (not just file output).
+
+Fixed: `init_logger` now always installs stdout+stderr; the file sink is added only
+when a path is configured. `main` calls `init_logger(cfg.logging…map(log_file))`
+unconditionally (and `init_logger(None)` on the `conf` path). Resolves the "TBD":
+when file logging is disabled, output still goes to stdout/stderr. Done with #94.
+
+**Remaining (smaller follow-up):** CLI flag to override `[logging]` (flag takes
+precedence). Not yet implemented.
 
 ---
 
@@ -96,11 +107,21 @@ Logging to file should be optional. Configurable via `[logging]` in TOML config,
 
 This removes the backwards dependency `cli.rs → config.rs` for a CLI type. After the split, `cli.rs` only imports action-layer types. **Prerequisite for spec-driven architecture (#9/#26/#27/#34).**
 
-### #94 — backup.rs / fetch.rs: remove double-error reporting
+### #94 — backup.rs / fetch.rs: remove double-error reporting ✅ DONE
 
-Several error paths call `error(&msg); bail!(msg)` — the error is logged via `messages::error()` AND returned as an `anyhow::Error`. When the logger is initialized, `main.rs` prints it again on propagation, so the same message appears twice.
+**Original premise was stale and the fix inverted it.** The double-print the entry
+described only existed when `main` did `eprintln!("Error: {e}")`; that print was
+removed in commit `926a335`, after which the `error()`+`bail!()` pairs were *not*
+redundant — `error()` was the only thing reporting (it logs via the custom handler;
+the propagated `bail!()` was dropped silently by `main`'s `process::exit`). Deleting
+the `error()` calls verbatim would have made those errors silent.
 
-Remove the `error()` calls that immediately precede `bail!()` with the same message; let propagation handle reporting. Affected: `backup.rs:gather_files()` (Verified branch), `backup.rs:verify_manifest_files()`, `fetch.rs:fetch()` (credentials check).
+Resolution: centralised reporting in `main` instead — `messages::error(&format!("{e:#}"))`
+on the propagated error before exit — then removed the now-redundant inline `error()`
+calls across `backup.rs` (verify_manifest_files, gather_files, backup, delete,
+prune_archives) and `fetch.rs` (credentials). Kept `delete_all`'s per-file `error()`
+calls (distinct detail, not duplicates). Every propagated error now reports exactly
+once, via the custom handler (stderr + file, never stdout). Done together with #1.
 
 ---
 

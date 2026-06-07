@@ -119,11 +119,11 @@ fn create_default_config() -> Result<()> {
 /// Returns `true` if the user confirmed creation, `false` if they declined.
 fn prompt_create_config() -> Result<bool> {
     if !io::stdin().is_terminal() {
-        eprintln!(
-            "Error: {SYSTEM_CONFIG} does not exist. Run `xtgeoip conf -d` to \
-             view the default config, then create {SYSTEM_CONFIG} manually."
+        bail!(
+            "{SYSTEM_CONFIG} does not exist and stdin is not a terminal. Run \
+             `xtgeoip conf -d` to view the default config, then create \
+             {SYSTEM_CONFIG} manually."
         );
-        bail!("{SYSTEM_CONFIG} missing and stdin is not a terminal");
     }
 
     println!("Configuration file not found at {SYSTEM_CONFIG}.");
