@@ -30,6 +30,10 @@
 
 `xtgeoip -b -c -f`
 
+- backup then prune then clean:
+
+`xtgeoip -b -c -p`
+
 - build database:
 
 `xtgeoip build`

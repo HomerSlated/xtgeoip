@@ -101,6 +101,15 @@
   - -f
   maps_to: null
   rebuild: true
+- case_id: TL-015
+  key: p
+  cmd:
+  - xtgeoip
+  - -b
+  - -c
+  - -p
+  maps_to: null
+  rebuild: true
 - case_id: B-001
   key: p
   cmd:
@@ -153,7 +162,6 @@
   - xtgeoip
   - build
   - -b
-  - -c
   - -p
   - -f
   maps_to: build_prune_force
@@ -319,7 +327,7 @@
   cmd:
   - xtgeoip
   - run
-  - -c
+  - -b
   - -p
   - -f
   maps_to: run_prune_force
