@@ -293,3 +293,102 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
         Err(anyhow!("unsupported flag combination"))
     }
 }
+
+/// Exhaustive behavior snapshot of the CLI semantics layer.
+///
+/// Enumerates every flag combination per context, parses it the way `main` does
+/// (`Cli::try_parse_from`), runs `normalize_cli_to_action` (pure — no root, no
+/// filesystem, no execution), and locks the outcome against a golden file. This
+/// is the regression net for the spec-driven validator rewrite: the new
+/// evaluator must reproduce this snapshot byte-for-byte. The spec examples
+/// cannot serve this role (one canonical example per error case — see TODO
+/// #92).
+///
+/// Regenerate after an *intended* behavior change:
+///   cargo test regenerate_snapshot -- --ignored
+#[cfg(test)]
+mod snapshot {
+    use clap::Parser;
+
+    use super::*;
+
+    /// All invocations as the args following the program name, per context.
+    fn all_invocations() -> Vec<Vec<&'static str>> {
+        let contexts: &[(&[&str], &[&str])] = &[
+            (&[], &["-b", "-c", "-p", "-f", "-l"]),
+            (&["fetch"], &["-p", "-b", "-c", "-f", "-l"]),
+            (&["build"], &["-b", "-c", "-p", "-f", "-l"]),
+            (&["run"], &["-b", "-c", "-p", "-f", "-l"]),
+            (&["conf"], &["-d", "-s", "-e"]),
+        ];
+        let mut out = Vec::new();
+        for (prefix, flags) in contexts {
+            for mask in 0..(1u32 << flags.len()) {
+                let mut argv = vec!["xtgeoip"];
+                argv.extend_from_slice(prefix);
+                for (i, flag) in flags.iter().enumerate() {
+                    if mask & (1 << i) != 0 {
+                        argv.push(flag);
+                    }
+                }
+                out.push(argv);
+            }
+        }
+        out
+    }
+
+    /// Canonical outcome string for one invocation.
+    fn outcome(argv: &[&str]) -> String {
+        match Cli::try_parse_from(argv) {
+            Err(_) => "PARSE_ERR".to_string(),
+            Ok(cli) => match normalize_cli_to_action(&cli) {
+                Ok(CliOutcome::ShowHelp) => "ShowHelp".to_string(),
+                Ok(CliOutcome::Action(action)) => format!("{action:?}"),
+                Err(e) => {
+                    let s = e.to_string();
+                    let key = s
+                        .strip_prefix('[')
+                        .and_then(|r| r.split_once(']'))
+                        .map(|(k, _)| k)
+                        .unwrap_or(s.as_str());
+                    format!("Err({key})")
+                }
+            },
+        }
+    }
+
+    fn snapshot() -> String {
+        let mut lines: Vec<String> = all_invocations()
+            .iter()
+            .map(|argv| format!("{} => {}", argv.join(" "), outcome(argv)))
+            .collect();
+        lines.sort();
+        lines.join("\n") + "\n"
+    }
+
+    #[test]
+    fn cli_semantics_snapshot() {
+        let actual = snapshot();
+        let golden = include_str!("cli_snapshot.golden");
+        for (i, (a, g)) in actual.lines().zip(golden.lines()).enumerate() {
+            assert_eq!(
+                a, g,
+                "CLI semantics changed at line {i} — if intended, regenerate \
+                 the snapshot (see module docs)"
+            );
+        }
+        assert_eq!(
+            actual.lines().count(),
+            golden.lines().count(),
+            "CLI invocation count changed — regenerate the snapshot"
+        );
+    }
+
+    #[test]
+    #[ignore = "writes the golden file; run explicitly after intended changes"]
+    fn regenerate_snapshot() {
+        let path =
+            concat!(env!("CARGO_MANIFEST_DIR"), "/src/cli_snapshot.golden");
+        std::fs::write(path, snapshot()).unwrap();
+    }
+}
