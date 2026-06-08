@@ -17,35 +17,39 @@ This applies globally. Every item in this TODO must be assessed against these co
 
 ---
 
-## ⏭ NEXT SESSION — Design the spec-driven validator (DESIGN FIRST)
+## ⏭ IN PROGRESS — Spec-driven validator (DESIGN APPROVED → implementing)
 
-The next step in the spec-driven arc (overview below: #9/#26/#27/#34). Prereqs are
-done: #93 (config/conf split, `d85f972`), CLI semantics bugs fixed (`a6db27b`), and
-the 136-combo behavior snapshot is in place (`33ddeaa`, `cli::snapshot`). **Measure
-twice, cut once: produce and review a written design before writing any code.**
+**Design of record: `docs/design/spec-driven-validator.md`** (APPROVED 2026-06-08,
+advisor + user). Implement per its §7.
 
 **Goal:** replace the hand-written guard chains in `cli.rs::normalize_cli_to_action`
 with a data-driven validator derived from `cli.yaml`, so the rules have one source
 of truth and cannot drift (this is what let the p⊕f / top -b-c-p bugs exist).
 
-**Design to draft & review (bring in the advisor — rule vocabulary & precedence are
-the risky parts):**
-- **Rule vocabulary** in `cli.yaml`: `requires` / `conflicts` / `rejects`, including
-  disjunctions (e.g. `force requires (backup | clean)`, `prune requires
-  (backup | fetch-context)`) and the global `p conflicts f`.
-- **Precedence model:** current behavior is first-match (e.g. fetch checks
-  legacy→backup→clean→force; build force-no-target before prune rules). Must be made
-  explicit — the snapshot captures the de-facto order.
-- **Codegen vs runtime:** how much docgen emits (rule tables in `src/generated/`)
-  vs. a generic evaluator in `cli.rs`. Watch that the evaluator doesn't become as
-  complex as the if-chain it replaces.
-- **Cross-check:** docgen must verify the declared rules reproduce BOTH the spec
-  examples AND the 136-combo snapshot (closes the proof-model blind spot, #92).
+**Decisions locked (see doc):**
+- **Vocabulary:** ordered conjunction guards (`require`/`forbid` flag-sets,
+  first-match = precedence). Every current guard is a pure conjunction — no
+  disjunctions / boolean DSL needed. (NOT the relational requires/conflicts once
+  anticipated here — compound top-level errors defeat it.)
+- **`reject:` map** per context (flag → error_case) for flag-not-allowed errors;
+  docgen asserts its keys == complement of `allowed_flags` (no intra-spec dup),
+  lowered to leading guards. conf scoped out (clap ArgGroup + required positional
+  own its rules).
+- **Codegen vs runtime:** docgen emits a const guard table to `src/generated/`;
+  `cli.rs` has a ~3-line first-match evaluator; Action construction stays
+  hand-written. Duplicate the evaluator in docgen (no `[lib]` yet — decide on #88).
+- **Cross-check:** docgen verifies rules reproduce the examples (keeps examples
+  honest); the **exhaustive 136-combo snapshot** is what closes #92.
 
 **Hard constraints:** preserve the `Action` construction shape (#32); the
 `cli_semantics_snapshot` test must stay green byte-for-byte (any intended change is
 a reviewed snapshot regeneration, never silent). Related: #22 (FetchMode→spec),
 #29 (ambiguity = planner can't produce a deterministic plan).
+
+**Follow-up filed (out of scope here):** conf surface-syntax mismatch — spec
+models conf as a positional `SelectorCommand`, but `cli.rs` parses `-d/-s/-e` as
+flags and the spec's own `usage:` is flag-style. Reconcile separately (the
+run_conf special-case).
 
 ---
 
