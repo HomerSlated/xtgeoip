@@ -61,6 +61,10 @@ pub enum CommandSpec {
     FlagCommand {
         summary: String,
         allowed_flags: Vec<String>,
+        #[serde(default)]
+        reject: Vec<RejectSpec>,
+        #[serde(default)]
+        guards: Vec<GuardSpec>,
         examples: Vec<Example>,
     },
     SelectorCommand {
@@ -70,6 +74,27 @@ pub enum CommandSpec {
         constraints: Option<Constraints>,
         examples: Vec<Example>,
     },
+}
+
+/// A single combination guard: fires when every flag in `require` is present
+/// AND every flag in `forbid` is absent. First firing guard (in declared order,
+/// after lowered `reject` entries) wins → its `error` case is emitted.
+#[derive(Debug, Deserialize)]
+pub struct GuardSpec {
+    #[serde(default)]
+    pub require: Vec<String>,
+    #[serde(default)]
+    pub forbid: Vec<String>,
+    pub error: String,
+}
+
+/// A "flag not allowed in this context" rejection. Its `flag` set (across the
+/// list) MUST equal the complement of `allowed_flags`; order is precedence and
+/// is preserved. Lowered to a leading single-flag guard (`require:[flag]`).
+#[derive(Debug, Deserialize)]
+pub struct RejectSpec {
+    pub flag: String,
+    pub error: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -161,6 +186,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     validate_spec(&spec)?;
+    validate_rules(&spec)?;
 
     let toml_str = fs::read_to_string("docs/spec/manpage-template.toml")?;
     let tmpl: ManpageTemplate = toml::from_str(&toml_str)?;
@@ -299,6 +325,207 @@ fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
                  {:?}",
                 unused
             );
+        }
+    }
+
+    Ok(())
+}
+
+/* ---------------- RULE VALIDATION & CROSS-CHECK ---------------- */
+
+/// A lowered guard (reject entry or combination guard) in evaluation order.
+struct LoweredGuard {
+    require: Vec<String>,
+    forbid: Vec<String>,
+    error: String,
+}
+
+/// Lower `reject` + `guards` into one ordered list: reject entries first (each
+/// a single-flag `require`), then combination guards. This is the canonical
+/// lowering the runtime evaluator must mirror.
+fn lower_guards(
+    reject: &[RejectSpec],
+    guards: &[GuardSpec],
+) -> Vec<LoweredGuard> {
+    let mut out: Vec<LoweredGuard> = reject
+        .iter()
+        .map(|r| LoweredGuard {
+            require: vec![r.flag.clone()],
+            forbid: Vec::new(),
+            error: r.error.clone(),
+        })
+        .collect();
+    out.extend(guards.iter().map(|g| LoweredGuard {
+        require: g.require.clone(),
+        forbid: g.forbid.clone(),
+        error: g.error.clone(),
+    }));
+    out
+}
+
+/// First guard that fires for `flags` (all `require` present, all `forbid`
+/// absent). First-match = precedence.
+fn first_guard<'a>(
+    flags: &BTreeSet<String>,
+    guards: &'a [LoweredGuard],
+) -> Option<&'a str> {
+    guards
+        .iter()
+        .find(|g| {
+            g.require.iter().all(|r| flags.contains(r))
+                && g.forbid.iter().all(|f| !flags.contains(f))
+        })
+        .map(|g| g.error.as_str())
+}
+
+/// Extract the flag set from an example `cmd` for `context`. Returns None when
+/// the example is outside the guard model (uses `-h`, long flags, or any token
+/// not a single short flag in `universe`).
+fn example_flags(
+    context: &str,
+    cmd: &str,
+    universe: &BTreeSet<String>,
+) -> Option<BTreeSet<String>> {
+    let mut toks = cmd.split_whitespace();
+    toks.next()?; // program name
+    let mut rest: Vec<&str> = toks.collect();
+    if context != "top_level" {
+        match rest.first() {
+            Some(&t) if t == context => {
+                rest.remove(0);
+            }
+            _ => return None,
+        }
+    }
+    let mut flags = BTreeSet::new();
+    for t in rest {
+        let f = t.strip_prefix('-')?;
+        if f.len() != 1 || !universe.contains(f) {
+            return None; // -h, long flags, etc.
+        }
+        flags.insert(f.to_string());
+    }
+    Some(flags)
+}
+
+/// Validate the `reject`/`guards` rules and cross-check that they reproduce
+/// every example's documented outcome. This keeps the rules and the examples
+/// provably consistent (the exhaustive snapshot test pins the full input space;
+/// #92).
+fn validate_rules(spec: &Spec) -> anyhow::Result<()> {
+    let universe: BTreeSet<String> = spec.flags.keys().cloned().collect();
+    let error_cases = spec.error_cases.as_ref();
+
+    if let Some(cmd) = &spec.top_level {
+        check_context("top_level", cmd, &universe, error_cases)?;
+    }
+    for (name, cmd) in &spec.commands {
+        check_context(name, cmd, &universe, error_cases)?;
+    }
+    Ok(())
+}
+
+fn check_context(
+    name: &str,
+    cmd: &CommandSpec,
+    universe: &BTreeSet<String>,
+    error_cases: Option<&BTreeMap<String, ErrorCase>>,
+) -> anyhow::Result<()> {
+    // conf (SelectorCommand) is out of the guard model by design: clap's
+    // ArgGroup + the required positional already own its rules.
+    let CommandSpec::FlagCommand {
+        allowed_flags,
+        reject,
+        guards,
+        examples,
+        ..
+    } = cmd
+    else {
+        return Ok(());
+    };
+
+    let allowed: BTreeSet<String> = allowed_flags.iter().cloned().collect();
+    for f in &allowed {
+        if !universe.contains(f) {
+            anyhow::bail!("{name}: allowed_flags references unknown flag {f}");
+        }
+    }
+
+    // reject's flag-set MUST equal the complement of allowed_flags (no
+    // intra-spec duplication; allowed_flags stays the sole owner of the set).
+    let complement: BTreeSet<String> =
+        universe.difference(&allowed).cloned().collect();
+    let reject_set: BTreeSet<String> =
+        reject.iter().map(|r| r.flag.clone()).collect();
+    if reject_set.len() != reject.len() {
+        anyhow::bail!("{name}: duplicate flag in reject");
+    }
+    if reject_set != complement {
+        anyhow::bail!(
+            "{name}: reject set {reject_set:?} != complement of allowed_flags \
+             {complement:?}"
+        );
+    }
+
+    let valid_ec =
+        |key: &str| error_cases.is_none_or(|ec| ec.contains_key(key));
+    for r in reject {
+        if !valid_ec(&r.error) {
+            anyhow::bail!("{name}: unknown error case {} in reject", r.error);
+        }
+    }
+    for g in guards {
+        if !valid_ec(&g.error) {
+            anyhow::bail!("{name}: unknown error case {} in guard", g.error);
+        }
+        for f in g.require.iter().chain(g.forbid.iter()) {
+            if !allowed.contains(f) {
+                anyhow::bail!(
+                    "{name}: guard references flag {f} not in allowed_flags \
+                     (use reject for disallowed flags)"
+                );
+            }
+        }
+    }
+
+    // CROSS-CHECK: evaluate the lowered rules against every example.
+    let lowered = lower_guards(reject, guards);
+    for ex in examples {
+        let Some(flags) = example_flags(name, &ex.cmd, universe) else {
+            continue;
+        };
+
+        // Expected error from the rules, plus the top-level empty special case
+        // (bare invocation -> ShowHelp, rendered by main as top_level_no_args).
+        let expected: Option<&str> = match first_guard(&flags, &lowered) {
+            Some(e) => Some(e),
+            None if name == "top_level" && flags.is_empty() => {
+                Some("top_level_no_args")
+            }
+            None => None,
+        };
+
+        match (ex.valid, expected) {
+            (true, None) => {}
+            (true, Some(e)) => anyhow::bail!(
+                "{name}: example `{}` is valid but rules reject it ({e})",
+                ex.cmd
+            ),
+            (false, Some(e)) => {
+                let want = ex.maps_to.as_deref().unwrap_or("");
+                if e != want {
+                    anyhow::bail!(
+                        "{name}: example `{}` maps_to {want} but rules \
+                         produce {e}",
+                        ex.cmd
+                    );
+                }
+            }
+            (false, None) => anyhow::bail!(
+                "{name}: example `{}` is invalid ({:?}) but rules accept it",
+                ex.cmd,
+                ex.maps_to
+            ),
         }
     }
 

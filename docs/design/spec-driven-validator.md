@@ -87,8 +87,8 @@ key decision to confirm with the reviewer.
 top_level:
   kind: FlagCommand
   allowed_flags: [b, c, p, f]
-  reject:                         # flag-not-allowed-here; see §3.1
-    l: top_level_legacy           # keys MUST == complement of allowed_flags
+  reject:                         # ordered list; flag-set MUST == complement
+    - { flag: l, error: top_level_legacy }   #   of allowed_flags (see §3.1)
   guards:                         # ordered; first match wins (= precedence)
     - require: [p]   forbid: [b, c]      error: top_level_prune_no_target
     - require: [f]   forbid: [b, c]      error: top_level_force_no_target
@@ -143,9 +143,14 @@ complement of `allowed_flags: [p]`), top-level rejects `{l}` (complement of
 now moved *inside the spec*.
 
 Resolution: split the two guard kinds.
-- **`reject:`** — a per-context map `flag → error_case`, ONLY for flags outside
-  `allowed_flags`. It carries solely the *message identity* (which can't be
-  derived: `fetch_no_legacy` ≠ `top_level_legacy` for the same flag `l`).
+- **`reject:`** — a per-context *ordered list* of `{flag, error_case}`, ONLY for
+  flags outside `allowed_flags`. It carries solely the *message identity* (which
+  can't be derived: `fetch_no_legacy` ≠ `top_level_legacy` for the same flag
+  `l`). It is an ordered list, not a map, because precedence among
+  simultaneously-present disallowed flags is load-bearing: the snapshot locks
+  `fetch -b -l → fetch_no_legacy` (legacy checked first), which alphabetical map
+  iteration would break. docgen validates that the *set* of `flag`s equals the
+  complement of `allowed_flags`; order is preserved as precedence.
 - **`guards:`** — genuine combination constraints over *allowed* flags only.
 
 docgen then:
@@ -286,8 +291,13 @@ and treat the lib as an independent #88 decision.
    — run it manually; #96).
 
 ## 8. Outside the guard model (owned by the construction tail)
-- **ShowHelp**: top-level with zero flags fires no guard and is not an Action —
-  the construction tail returns `CliOutcome::ShowHelp` explicitly.
+- **ShowHelp is two-layer.** At the `normalize` layer, bare `xtgeoip` returns
+  `Ok(CliOutcome::ShowHelp)` (what the snapshot records). At the `main` layer it
+  prints help, emits `Error [top_level_no_args]`, and exits 1 — which is what
+  example `TL-001` (`maps_to: top_level_no_args`) documents. So `top_level_no_args`
+  is NOT a guard; it is the empty-top-level case the construction tail owns. The
+  docgen cross-check special-cases it: at top_level, empty flag set →
+  `top_level_no_args`; empty flag set in any other context → valid.
 - The current `"unsupported flag combination"` else is unreachable given the
   guards; keep it as a defensive `unreachable!`-style fallback, not a guard.
 - The guard `Flag` bitset spans only **b, c, p, f, l**. conf's d/s/e are NOT in

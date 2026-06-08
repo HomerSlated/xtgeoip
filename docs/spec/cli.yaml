@@ -88,6 +88,14 @@ top_level:
   kind: FlagCommand
   summary: Top level xtgeoip command
   allowed_flags: [b, c, p, f]
+  reject:
+    - { flag: l, error: top_level_legacy }
+  guards:
+    - { require: [p], forbid: [b, c], error: top_level_prune_no_target }
+    - { require: [f], forbid: [b, c], error: top_level_force_no_target }
+    - { require: [c, p, f], forbid: [b], error: top_level_prune_clean_force }
+    - { require: [c, p], forbid: [b], error: top_level_prune_with_clean }
+    - { require: [b, p, f], error: top_level_prune_force }
   examples:
     - case_id: TL-001
       cmd: "xtgeoip"
@@ -174,6 +182,11 @@ commands:
     kind: FlagCommand
     summary: Fetch GeoLite2 data files
     allowed_flags: [p]
+    reject:
+      - { flag: l, error: fetch_no_legacy }
+      - { flag: b, error: fetch_no_backup }
+      - { flag: c, error: fetch_no_clean }
+      - { flag: f, error: fetch_no_force }
     examples:
       - case_id: F-001
         cmd: "xtgeoip fetch"
@@ -212,6 +225,10 @@ commands:
     kind: FlagCommand
     summary: Build xt_geoip database
     allowed_flags: [b, c, p, f, l]
+    guards:
+      - { require: [f], forbid: [b, c], error: build_force_no_target }
+      - { require: [p], forbid: [b], error: build_prune_no_backup }
+      - { require: [p, f], error: build_prune_force }
     examples:
       - case_id: B-001
         cmd: "xtgeoip build"
@@ -276,6 +293,10 @@ commands:
     kind: FlagCommand
     summary: Run full pipeline
     allowed_flags: [b, c, p, f, l]
+    guards:
+      - { require: [f], forbid: [b, c], error: run_force_no_target }
+      - { require: [p, f], error: run_prune_force }
+      - { require: [b, c, p], error: run_prune_ambiguous }
     examples:
       - case_id: R-001
         cmd: "xtgeoip run"
