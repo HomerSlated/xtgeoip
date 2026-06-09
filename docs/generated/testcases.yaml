@@ -93,13 +93,14 @@
   - -f
   maps_to: null
 - case_id: TL-014
-  key: p
+  key: f
   cmd:
   - xtgeoip
   - -b
   - -c
   - -f
-  maps_to: null
+  maps_to: top_level_force_ambiguous
+  exit_status: 1
   rebuild: true
 - case_id: TL-015
   key: p
@@ -205,14 +206,15 @@
   - -f
   maps_to: null
 - case_id: B-013
-  key: p
+  key: f
   cmd:
   - xtgeoip
   - build
   - -b
   - -c
   - -f
-  maps_to: null
+  maps_to: build_force_ambiguous
+  exit_status: 1
 - case_id: C-001
   key: f
   cmd:
@@ -382,11 +384,12 @@
   - -p
   maps_to: null
 - case_id: R-013
-  key: p
+  key: f
   cmd:
   - xtgeoip
   - run
   - -b
   - -c
   - -f
-  maps_to: null
+  maps_to: run_force_ambiguous
+  exit_status: 1

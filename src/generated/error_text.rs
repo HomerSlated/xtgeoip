@@ -1,5 +1,6 @@
 // auto-generated
 #![allow(dead_code)]
+pub const FORCE_AMBIGUOUS: &str = r#"the --force option is ambiguous, you must specify exactly one of --backup or --clean"#;
 pub const MISSING_REQUIRED_ARGUMENT: &str = r#"{command} requires {argument}"#;
 pub const NO_ARGUMENT: &str = r#"you must specify at least one argument"#;
 pub const NO_BUILD_FORCE: &str = r#"build does not support the --force option"#;

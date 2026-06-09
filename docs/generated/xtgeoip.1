@@ -1,4 +1,4 @@
-.TH XTGEOIP 1 "" "xtgeoip 0.1.2" "User Commands"
+.TH XTGEOIP 1 "" "xtgeoip 0.2.0" "User Commands"
 .SH NAME
 xtgeoip \- Build and manage xt_geoip data from MaxMind GeoLite2 CSVs.
 .SH SYNOPSIS
@@ -348,9 +348,6 @@ backup then prune
 .B xtgeoip -b -f
 force backup database
 .TP
-.B xtgeoip -b -c -f
-force backup then clean
-.TP
 .B xtgeoip -b -c -p
 backup then prune then clean
 .TP
@@ -380,9 +377,6 @@ backup then clean then build
 .TP
 .B xtgeoip build -b -f
 force backup then build
-.TP
-.B xtgeoip build -b -c -f
-force backup then clean then build
 .TP
 .B xtgeoip conf -s
 show configuration
@@ -425,9 +419,6 @@ force backup then fetch then build
 .TP
 .B xtgeoip run -b -p
 backup then fetch then prune then build
-.TP
-.B xtgeoip run -b -c -f
-force backup then clean then fetch then build
 .SH FILES
 .TP
 .I /etc/xtgeoip.conf

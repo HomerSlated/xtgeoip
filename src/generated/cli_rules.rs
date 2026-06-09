@@ -25,12 +25,14 @@ pub const TOP_LEVEL_GUARDS: &[Guard] = &[
     Guard { require: C | P | F, forbid: B, key: "top_level_prune_clean_force", message: error_text::NO_PRUNE_CLEAN_FORCE },
     Guard { require: C | P, forbid: B, key: "top_level_prune_with_clean", message: error_text::NO_PRUNE_CLEAN },
     Guard { require: B | P | F, forbid: 0, key: "top_level_prune_force", message: error_text::NO_PRUNE_FORCE },
+    Guard { require: B | C | F, forbid: 0, key: "top_level_force_ambiguous", message: error_text::FORCE_AMBIGUOUS },
 ];
 
 pub const BUILD_GUARDS: &[Guard] = &[
     Guard { require: F, forbid: B | C, key: "build_force_no_target", message: error_text::NO_BUILD_FORCE },
     Guard { require: P, forbid: B, key: "build_prune_no_backup", message: error_text::NO_PRUNE_BACKUP },
     Guard { require: P | F, forbid: 0, key: "build_prune_force", message: error_text::NO_PRUNE_FORCE },
+    Guard { require: B | C | F, forbid: 0, key: "build_force_ambiguous", message: error_text::FORCE_AMBIGUOUS },
 ];
 
 pub const FETCH_GUARDS: &[Guard] = &[
@@ -44,5 +46,6 @@ pub const RUN_GUARDS: &[Guard] = &[
     Guard { require: F, forbid: B | C, key: "run_force_no_target", message: error_text::NO_RUN_FORCE },
     Guard { require: P | F, forbid: 0, key: "run_prune_force", message: error_text::NO_PRUNE_FORCE },
     Guard { require: B | C | P, forbid: 0, key: "run_prune_ambiguous", message: error_text::PRUNE_TARGET_AMBIGUOUS },
+    Guard { require: B | C | F, forbid: 0, key: "run_force_ambiguous", message: error_text::FORCE_AMBIGUOUS },
 ];
 
