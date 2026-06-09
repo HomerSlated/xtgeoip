@@ -37,6 +37,8 @@ reason_templates:
     text: "you must specify build or run, for the --legacy option"
   no_force_alone:
     text: "you must specify --backup or --clean, for the --force option"
+  force_ambiguous:
+    text: "the --force option is ambiguous, you must specify exactly one of --backup or --clean"
   no_prune_alone:
     text: "you must specify fetch or --backup, for the --prune option"
   no_prune_clean:
@@ -68,6 +70,7 @@ error_cases:
   top_level_no_args: { maps_to: top_level_no_args }
   top_level_legacy: { maps_to: top_level_legacy }
   top_level_force_no_target: { maps_to: top_level_force_no_target }
+  top_level_force_ambiguous: { maps_to: top_level_force_ambiguous }
   top_level_prune_no_target: { maps_to: top_level_prune_no_target }
   top_level_prune_with_clean: { maps_to: top_level_prune_with_clean }
   top_level_prune_clean_force: { maps_to: top_level_prune_clean_force }
@@ -77,9 +80,11 @@ error_cases:
   fetch_no_clean: { maps_to: fetch_no_clean }
   fetch_no_force: { maps_to: fetch_no_force }
   build_force_no_target: { maps_to: build_force_no_target }
+  build_force_ambiguous: { maps_to: build_force_ambiguous }
   build_prune_no_backup: { maps_to: build_prune_no_backup }
   build_prune_force: { maps_to: build_prune_force }
   run_force_no_target: { maps_to: run_force_no_target }
+  run_force_ambiguous: { maps_to: run_force_ambiguous }
   run_prune_force: { maps_to: run_prune_force }
   run_prune_ambiguous: { maps_to: run_prune_ambiguous }
   conf_missing_flag: { maps_to: conf_missing_flag }
@@ -96,6 +101,7 @@ top_level:
     - { require: [c, p, f], forbid: [b], error: top_level_prune_clean_force }
     - { require: [c, p], forbid: [b], error: top_level_prune_with_clean }
     - { require: [b, p, f], error: top_level_prune_force }
+    - { require: [b, c, f], error: top_level_force_ambiguous }
   examples:
     - case_id: TL-001
       cmd: "xtgeoip"
@@ -167,8 +173,10 @@ top_level:
       outcome: "force backup database"
     - case_id: TL-014
       cmd: "xtgeoip -b -c -f"
-      valid: true
-      outcome: "force backup then clean"
+      valid: false
+      reason: { code: force_ambiguous }
+      maps_to: top_level_force_ambiguous
+      exit_status: 1
       rebuild: true
     - case_id: TL-015
       cmd: "xtgeoip -b -c -p"
@@ -229,6 +237,7 @@ commands:
       - { require: [f], forbid: [b, c], error: build_force_no_target }
       - { require: [p], forbid: [b], error: build_prune_no_backup }
       - { require: [p, f], error: build_prune_force }
+      - { require: [b, c, f], error: build_force_ambiguous }
     examples:
       - case_id: B-001
         cmd: "xtgeoip build"
@@ -286,8 +295,10 @@ commands:
         outcome: "force backup then build"
       - case_id: B-013
         cmd: "xtgeoip build -b -c -f"
-        valid: true
-        outcome: "force backup then clean then build"
+        valid: false
+        reason: { code: force_ambiguous }
+        maps_to: build_force_ambiguous
+        exit_status: 1
 
   run:
     kind: FlagCommand
@@ -297,6 +308,7 @@ commands:
       - { require: [f], forbid: [b, c], error: run_force_no_target }
       - { require: [p, f], error: run_prune_force }
       - { require: [b, c, p], error: run_prune_ambiguous }
+      - { require: [b, c, f], error: run_force_ambiguous }
     examples:
       - case_id: R-001
         cmd: "xtgeoip run"
@@ -354,8 +366,10 @@ commands:
         outcome: "backup then fetch then prune then build"
       - case_id: R-013
         cmd: "xtgeoip run -b -c -f"
-        valid: true
-        outcome: "force backup then clean then fetch then build"
+        valid: false
+        reason: { code: force_ambiguous }
+        maps_to: run_force_ambiguous
+        exit_status: 1
 
   conf:
     kind: SelectorCommand

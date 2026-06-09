@@ -26,10 +26,6 @@
 
 `xtgeoip -b -f`
 
-- force backup then clean:
-
-`xtgeoip -b -c -f`
-
 - backup then prune then clean:
 
 `xtgeoip -b -c -p`
@@ -69,10 +65,6 @@
 - force backup then build:
 
 `xtgeoip build -b -f`
-
-- force backup then clean then build:
-
-`xtgeoip build -b -c -f`
 
 - show configuration:
 
@@ -129,8 +121,4 @@
 - backup then fetch then prune then build:
 
 `xtgeoip run -b -p`
-
-- force backup then clean then fetch then build:
-
-`xtgeoip run -b -c -f`
 

@@ -17,7 +17,7 @@ Top level xtgeoip command
 - `xtgeoip -b -p -f` → --prune does not support the --force option (exit 1)
 - `xtgeoip -c -p -f` → you must specify fetch or --backup, for the prune option, --clean does not support the --prune option, and --prune does not support the --force option (exit 1)
 - `xtgeoip -b -f` → force backup database
-- `xtgeoip -b -c -f` → force backup then clean
+- `xtgeoip -b -c -f` → the --force option is ambiguous, you must specify exactly one of --backup or --clean (exit 1)
 - `xtgeoip -b -c -p` → backup then prune then clean
 
 ## build
@@ -34,7 +34,7 @@ Build xt_geoip database
 - `xtgeoip build -c` → clean then build
 - `xtgeoip build -b -c` → backup then clean then build
 - `xtgeoip build -b -f` → force backup then build
-- `xtgeoip build -b -c -f` → force backup then clean then build
+- `xtgeoip build -b -c -f` → the --force option is ambiguous, you must specify exactly one of --backup or --clean (exit 1)
 
 ## conf
 xtgeoip conf <-s|-d|-e>
@@ -66,5 +66,5 @@ Run full pipeline
 - `xtgeoip run -b -c` → backup then clean then fetch then build
 - `xtgeoip run -b -f` → force backup then fetch then build
 - `xtgeoip run -b -p` → backup then fetch then prune then build
-- `xtgeoip run -b -c -f` → force backup then clean then fetch then build
+- `xtgeoip run -b -c -f` → the --force option is ambiguous, you must specify exactly one of --backup or --clean (exit 1)
 
