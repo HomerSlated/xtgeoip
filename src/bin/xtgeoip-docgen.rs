@@ -199,7 +199,7 @@ fn main() -> anyhow::Result<()> {
     fs::write("docs/generated/xtgeoip.1", generate_manpage(&spec, &tmpl)?)?;
     fs::write(
         "src/generated/mod.rs",
-        "pub mod cli_matrix;\npub mod error_text;\n",
+        "pub mod cli_matrix;\npub mod cli_rules;\npub mod error_text;\n",
     )?;
     fs::write(
         "src/generated/error_text.rs",
@@ -209,6 +209,7 @@ fn main() -> anyhow::Result<()> {
         "src/generated/cli_matrix.rs",
         generate_cli_matrix_rs(&spec)?,
     )?;
+    fs::write("src/generated/cli_rules.rs", generate_cli_rules_rs(&spec)?)?;
     fs::write(
         "docs/generated/testcases.yaml",
         generate_testcases_yaml(&spec)?,
@@ -530,6 +531,120 @@ fn check_context(
     }
 
     Ok(())
+}
+
+/* ---------------- CLI RULES (runtime guard table) ---------------- */
+
+fn examples_of(cmd: &CommandSpec) -> &[Example] {
+    match cmd {
+        CommandSpec::FlagCommand { examples, .. }
+        | CommandSpec::SelectorCommand { examples, .. } => examples,
+    }
+}
+
+/// Render a flag-name list as an OR of generated bit constants (`B | C`), or
+/// `0` for the empty set.
+fn flag_bits(flags: &[String]) -> String {
+    if flags.is_empty() {
+        "0".to_string()
+    } else {
+        flags
+            .iter()
+            .map(|f| f.to_uppercase())
+            .collect::<Vec<_>>()
+            .join(" | ")
+    }
+}
+
+/// Emit `src/generated/cli_rules.rs`: the per-context guard tables that the
+/// runtime (`normalize_cli_to_action`) evaluates. Flags are encoded as a `u8`
+/// bitmask in sorted flag-universe order; each `Guard` mirrors a `LoweredGuard`
+/// (reject entries first as single-flag requires, then combination guards), so
+/// the runtime evaluates the exact lowering this docgen cross-checks. Messages
+/// are referenced from `error_text::NO_*` (resolved via the canonical example's
+/// reason code) so each message literal lives in exactly one generated place.
+fn generate_cli_rules_rs(spec: &Spec) -> anyhow::Result<String> {
+    // Sorted flag universe (BTreeMap keys): the bit index is the position.
+    let universe: Vec<&String> = spec.flags.keys().collect();
+
+    // error_case key -> reason code, from the unique invalid example
+    // (proof.unique_maps_to guarantees one; full_branch_coverage guarantees
+    // every case is present). This is the only declared link between an error
+    // key and its message text.
+    let mut all_examples: Vec<&Example> = Vec::new();
+    if let Some(cmd) = &spec.top_level {
+        all_examples.extend(examples_of(cmd));
+    }
+    for cmd in spec.commands.values() {
+        all_examples.extend(examples_of(cmd));
+    }
+    let mut reason_of: BTreeMap<&str, &str> = BTreeMap::new();
+    for ex in all_examples {
+        if !ex.valid
+            && let (Some(mt), Some(r)) = (ex.maps_to.as_deref(), &ex.reason)
+        {
+            reason_of.insert(mt, r.code.as_str());
+        }
+    }
+
+    let mut out = String::from(
+        "// auto-generated\n#![allow(dead_code)]\nuse \
+         crate::generated::error_text;\n\n",
+    );
+
+    out.push_str("// Flag bits, in sorted flag-universe order.\n");
+    for (i, f) in universe.iter().enumerate() {
+        out.push_str(&format!(
+            "pub const {}: u8 = 1 << {i};\n",
+            f.to_uppercase()
+        ));
+    }
+    out.push_str(
+        "\n/// One combination guard: fires when every `require` bit is \
+         present and\n/// no `forbid` bit is. First firing guard per context \
+         wins (= precedence).\npub struct Guard {\n    pub require: u8,\n    \
+         pub forbid: u8,\n    pub key: &'static str,\n    pub message: \
+         &'static str,\n}\n\n",
+    );
+
+    // One const array per FlagCommand context, in source order (top_level
+    // first, then commands alphabetically). SelectorCommand (conf) is excluded.
+    let mut contexts: Vec<(String, &Vec<RejectSpec>, &Vec<GuardSpec>)> =
+        Vec::new();
+    if let Some(CommandSpec::FlagCommand { reject, guards, .. }) =
+        &spec.top_level
+    {
+        contexts.push(("TOP_LEVEL_GUARDS".to_string(), reject, guards));
+    }
+    for (name, cmd) in &spec.commands {
+        if let CommandSpec::FlagCommand { reject, guards, .. } = cmd {
+            contexts.push((
+                format!("{}_GUARDS", name.to_uppercase()),
+                reject,
+                guards,
+            ));
+        }
+    }
+
+    for (const_name, reject, guards) in contexts {
+        out.push_str(&format!("pub const {const_name}: &[Guard] = &[\n"));
+        for g in lower_guards(reject, guards) {
+            let code = reason_of.get(g.error.as_str()).ok_or_else(|| {
+                anyhow::anyhow!("no example reason for error case {}", g.error)
+            })?;
+            out.push_str(&format!(
+                "    Guard {{ require: {}, forbid: {}, key: \"{}\", message: \
+                 error_text::{} }},\n",
+                flag_bits(&g.require),
+                flag_bits(&g.forbid),
+                g.error,
+                code.to_uppercase(),
+            ));
+        }
+        out.push_str("];\n\n");
+    }
+
+    Ok(out)
 }
 
 /* ---------------- OUTCOME ---------------- */

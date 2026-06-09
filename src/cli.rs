@@ -6,12 +6,7 @@ use clap::{Args, Parser, Subcommand};
 use crate::{
     action::Action,
     conf::ConfAction,
-    generated::error_text::{
-        NO_BUILD_FORCE, NO_FETCH_BACKUP, NO_FETCH_CLEAN, NO_FETCH_FORCE,
-        NO_FETCH_LEGACY, NO_FORCE_ALONE, NO_LEGACY_HERE, NO_PRUNE_ALONE,
-        NO_PRUNE_BACKUP, NO_PRUNE_CLEAN, NO_PRUNE_CLEAN_FORCE, NO_PRUNE_FORCE,
-        NO_RUN_FORCE, PRUNE_TARGET_AMBIGUOUS,
-    },
+    generated::cli_rules::{self, Guard},
 };
 
 pub enum CliOutcome {
@@ -138,13 +133,48 @@ fn keyed_err(key: &str, msg: &str) -> anyhow::Error {
     anyhow!("[{key}]: {msg}")
 }
 
-/// Normalize CLI input into a CliOutcome
+/// Pack the flag universe into the `u8` bitmask the generated guard tables use.
+/// Bit positions are defined by `cli_rules` (sorted flag-universe order).
+fn flag_mask(b: bool, c: bool, f: bool, l: bool, p: bool) -> u8 {
+    use cli_rules::{B, C, F, L, P};
+    let mut m = 0;
+    if b {
+        m |= B;
+    }
+    if c {
+        m |= C;
+    }
+    if f {
+        m |= F;
+    }
+    if l {
+        m |= L;
+    }
+    if p {
+        m |= P;
+    }
+    m
+}
+
+/// First guard whose `require` bits are all set and `forbid` bits all clear.
+/// First match wins — table order encodes precedence (see `cli_rules`).
+fn first_guard(flags: u8, guards: &'static [Guard]) -> Option<&'static Guard> {
+    guards
+        .iter()
+        .find(|g| flags & g.require == g.require && flags & g.forbid == 0)
+}
+
+/// Normalize CLI input into a CliOutcome.
+///
+/// The combination rules live in `docs/spec/cli.yaml` and are compiled by
+/// `xtgeoip-docgen` into the per-context guard tables in
+/// `crate::generated::cli_rules`. This function only packs the parsed flags
+/// into a bitmask, evaluates the first matching guard, and otherwise constructs
+/// the `Action`. `conf` is outside the guard model (its rules are owned by
+/// clap's `ArgGroup` + the required positional; only the missing-flag case is
+/// keyed here).
 pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
     use Commands::*;
-
-    if cli.common.legacy && cli.command.is_none() {
-        return Err(keyed_err("top_level_legacy", NO_LEGACY_HERE));
-    }
 
     if let Some(cmd) = &cli.command {
         match cmd {
@@ -166,21 +196,16 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
             }
 
             Run { common, prune } => {
-                if common.force && !common.backup && !common.clean {
-                    return Err(keyed_err("run_force_no_target", NO_RUN_FORCE));
+                let flags = flag_mask(
+                    common.backup,
+                    common.clean,
+                    common.force,
+                    common.legacy,
+                    *prune,
+                );
+                if let Some(g) = first_guard(flags, cli_rules::RUN_GUARDS) {
+                    return Err(keyed_err(g.key, g.message));
                 }
-
-                if *prune && common.force {
-                    return Err(keyed_err("run_prune_force", NO_PRUNE_FORCE));
-                }
-
-                if common.backup && common.clean && *prune {
-                    return Err(keyed_err(
-                        "run_prune_ambiguous",
-                        PRUNE_TARGET_AMBIGUOUS,
-                    ));
-                }
-
                 Ok(CliOutcome::Action(Action::Run {
                     prune: *prune,
                     legacy: common.legacy,
@@ -191,24 +216,16 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
             }
 
             Build { common, prune } => {
-                if common.force && !common.backup && !common.clean {
-                    return Err(keyed_err(
-                        "build_force_no_target",
-                        NO_BUILD_FORCE,
-                    ));
+                let flags = flag_mask(
+                    common.backup,
+                    common.clean,
+                    common.force,
+                    common.legacy,
+                    *prune,
+                );
+                if let Some(g) = first_guard(flags, cli_rules::BUILD_GUARDS) {
+                    return Err(keyed_err(g.key, g.message));
                 }
-
-                if *prune && !common.backup {
-                    return Err(keyed_err(
-                        "build_prune_no_backup",
-                        NO_PRUNE_BACKUP,
-                    ));
-                }
-
-                if *prune && common.force {
-                    return Err(keyed_err("build_prune_force", NO_PRUNE_FORCE));
-                }
-
                 Ok(CliOutcome::Action(Action::Build {
                     legacy: common.legacy,
                     backup: common.backup,
@@ -225,17 +242,9 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
                 clean,
                 force,
             } => {
-                if *legacy {
-                    return Err(keyed_err("fetch_no_legacy", NO_FETCH_LEGACY));
-                }
-                if *backup {
-                    return Err(keyed_err("fetch_no_backup", NO_FETCH_BACKUP));
-                }
-                if *clean {
-                    return Err(keyed_err("fetch_no_clean", NO_FETCH_CLEAN));
-                }
-                if *force {
-                    return Err(keyed_err("fetch_no_force", NO_FETCH_FORCE));
+                let flags = flag_mask(*backup, *clean, *force, *legacy, *prune);
+                if let Some(g) = first_guard(flags, cli_rules::FETCH_GUARDS) {
+                    return Err(keyed_err(g.key, g.message));
                 }
                 Ok(CliOutcome::Action(Action::Fetch { prune: *prune }))
             }
@@ -245,39 +254,18 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
         let c = cli.common.clean;
         let p = cli.prune;
         let f = cli.common.force;
+        let l = cli.common.legacy;
 
-        if !b && !c && !p && !f {
+        let flags = flag_mask(b, c, f, l, p);
+        if let Some(g) = first_guard(flags, cli_rules::TOP_LEVEL_GUARDS) {
+            return Err(keyed_err(g.key, g.message));
+        }
+
+        // No guard fired. Bare invocation shows help (main renders this as
+        // top_level_no_args); otherwise -b/-c select the top-level action.
+        if flags == 0 {
             return Ok(CliOutcome::ShowHelp);
         }
-
-        if p && !b && !c {
-            return Err(keyed_err("top_level_prune_no_target", NO_PRUNE_ALONE));
-        }
-
-        if f && !(b || c) {
-            return Err(keyed_err("top_level_force_no_target", NO_FORCE_ALONE));
-        }
-
-        // clean+prune is only a conflict without a backup target; with -b,
-        // prune targets the bin archive and clean is a separate step.
-        if c && p && f && !b {
-            return Err(keyed_err(
-                "top_level_prune_clean_force",
-                NO_PRUNE_CLEAN_FORCE,
-            ));
-        }
-
-        if c && p && !b {
-            return Err(keyed_err(
-                "top_level_prune_with_clean",
-                NO_PRUNE_CLEAN,
-            ));
-        }
-
-        if b && p && f {
-            return Err(keyed_err("top_level_prune_force", NO_PRUNE_FORCE));
-        }
-
         if b {
             return Ok(CliOutcome::Action(Action::TopLevelBackup {
                 clean: c,
@@ -285,11 +273,9 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
                 prune: p,
             }));
         }
-
         if c {
             return Ok(CliOutcome::Action(Action::TopLevelClean { force: f }));
         }
-
         Err(anyhow!("unsupported flag combination"))
     }
 }
