@@ -26,7 +26,7 @@ impl ConfAction {
     /// Check that the invariants this action requires hold before running.
     pub fn check_preconditions(&self) -> Result<()> {
         match self {
-            ConfAction::Default => Ok(()),
+            ConfAction::Default => ensure_default_config_exists(),
             ConfAction::Show => ensure_system_config_exists(),
             ConfAction::Edit => {
                 ensure_system_config_exists()?;
@@ -47,13 +47,21 @@ fn config_exists() -> bool {
     system_config_path().exists()
 }
 
-fn create_default_config() -> Result<()> {
+/// Verify the packaged default-config example exists. Both `conf -d` (which
+/// reads it) and `create_default_config` (which copies it) require it; a bare
+/// IO error on the missing file is unactionable, so point at a reinstall.
+fn ensure_default_config_exists() -> Result<()> {
     if !Path::new(DEFAULT_CONFIG).exists() {
         bail!(
             "Default config example not found at {DEFAULT_CONFIG}. You may \
              need to reinstall xtgeoip."
         );
     }
+    Ok(())
+}
+
+fn create_default_config() -> Result<()> {
+    ensure_default_config_exists()?;
     fs::copy(DEFAULT_CONFIG, SYSTEM_CONFIG).with_context(|| {
         format!("Failed to copy {DEFAULT_CONFIG} to {SYSTEM_CONFIG}")
     })?;
@@ -105,7 +113,8 @@ pub fn run_conf(action: ConfAction) -> Result<()> {
     action.check_preconditions()?;
     match action {
         ConfAction::Default => {
-            let contents = fs::read_to_string(DEFAULT_CONFIG)?;
+            let contents = fs::read_to_string(DEFAULT_CONFIG)
+                .with_context(|| format!("Failed to read {DEFAULT_CONFIG}"))?;
             println!("{contents}");
         }
         ConfAction::Show => {
