@@ -31,31 +31,36 @@ data-driven evaluator — so the rules cannot drift from the code, and docgen ca
 
 ## 2. Key finding: every guard is a pure conjunction
 
-I extracted all 17 guards from the current `normalize_cli_to_action`. **Every one
-is a conjunction of flag literals** — a set of flags that must be PRESENT and a
-set that must be ABSENT. No disjunction is needed in predicate position (the one
-apparent "or", `f ∧ ¬(b∨c)`, is `f ∧ ¬b ∧ ¬c` by De Morgan — still a
-conjunction).
+I extracted all 17 guards from `normalize_cli_to_action` at design time. Three
+`force_ambiguous` guards were added post-approval (`2c090bd`), bringing the
+total to **20 table rows** (19 implemented; the conf row leaves the guard model,
+§3.2). **Every one is a conjunction of flag literals** — a set of flags that
+must be PRESENT and a set that must be ABSENT. No disjunction is needed in
+predicate position (the one apparent "or", `f ∧ ¬(b∨c)`, is `f ∧ ¬b ∧ ¬c`
+by De Morgan — still a conjunction).
 
-| Context | Guard predicate | → error case |
-|---|---|---|
-| top_level | `l` | top_level_legacy |
-| top_level | `p ∧ ¬b ∧ ¬c` | top_level_prune_no_target |
-| top_level | `f ∧ ¬b ∧ ¬c` | top_level_force_no_target |
-| top_level | `c ∧ p ∧ f ∧ ¬b` | top_level_prune_clean_force |
-| top_level | `c ∧ p ∧ ¬b` | top_level_prune_with_clean |
-| top_level | `b ∧ p ∧ f` | top_level_prune_force |
-| fetch | `l` | fetch_no_legacy |
-| fetch | `b` | fetch_no_backup |
-| fetch | `c` | fetch_no_clean |
-| fetch | `f` | fetch_no_force |
-| build | `f ∧ ¬b ∧ ¬c` | build_force_no_target |
-| build | `p ∧ ¬b` | build_prune_no_backup |
-| build | `p ∧ f` | build_prune_force |
-| run | `f ∧ ¬b ∧ ¬c` | run_force_no_target |
-| run | `p ∧ f` | run_prune_force |
-| run | `b ∧ c ∧ p` | run_prune_ambiguous |
-| conf | `¬d ∧ ¬s ∧ ¬e` | conf_missing_flag |
+| Context | Guard predicate | → error case | |
+|---|---|---|---|
+| top_level | `l` | top_level_legacy | |
+| top_level | `p ∧ ¬b ∧ ¬c` | top_level_prune_no_target | |
+| top_level | `f ∧ ¬b ∧ ¬c` | top_level_force_no_target | |
+| top_level | `c ∧ p ∧ f ∧ ¬b` | top_level_prune_clean_force | |
+| top_level | `c ∧ p ∧ ¬b` | top_level_prune_with_clean | |
+| top_level | `b ∧ p ∧ f` | top_level_prune_force | |
+| top_level | `b ∧ c ∧ f` | top_level_force_ambiguous | added `2c090bd` |
+| fetch | `l` | fetch_no_legacy | |
+| fetch | `b` | fetch_no_backup | |
+| fetch | `c` | fetch_no_clean | |
+| fetch | `f` | fetch_no_force | |
+| build | `f ∧ ¬b ∧ ¬c` | build_force_no_target | |
+| build | `p ∧ ¬b` | build_prune_no_backup | |
+| build | `p ∧ f` | build_prune_force | |
+| build | `b ∧ c ∧ f` | build_force_ambiguous | added `2c090bd` |
+| run | `f ∧ ¬b ∧ ¬c` | run_force_no_target | |
+| run | `p ∧ f` | run_prune_force | |
+| run | `b ∧ c ∧ p` | run_prune_ambiguous | |
+| run | `b ∧ c ∧ f` | run_force_ambiguous | added `2c090bd` |
+| conf | `¬d ∧ ¬s ∧ ¬e` | conf_missing_flag | |
 
 Consequence: the entire validator reduces to **per-context ordered lists of
 (require-set, forbid-set, error-key)**, evaluated first-match. The evaluator is
@@ -287,8 +292,8 @@ and treat the lib as an independent #88 decision.
    byte-for-byte. Any intended diff = reviewed `regenerate_snapshot`, never
    silent.
 5. Delete the now-dead `NO_*` imports / if-branches. Re-run snapshot + docgen.
-6. `cargo +nightly fmt`, clippy, then sync (note: sync.py does NOT run cargo test
-   — run it manually; #96).
+6. `cargo +nightly fmt`, clippy, then sync (`cargo test` is wired into sync.py
+   and CI as of `3f768be`; #96 done).
 
 ## 8. Outside the guard model (owned by the construction tail)
 - **ShowHelp is two-layer.** At the `normalize` layer, bare `xtgeoip` returns
