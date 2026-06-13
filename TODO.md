@@ -17,95 +17,25 @@ This applies globally. Every item in this TODO must be assessed against these co
 
 ---
 
-## 🔴 #1 PRIORITY — Revert the atomic build swap; reinstate original manifest-owned delete behaviour verbatim
+## ✅ build: reverted atomic swap ✅ DONE (2026-06-13, `4909da4`)
 
-**Filed 2026-06-09 (user), proven by live repro.** `build` deletes files it did
-not create. With the default `output_dir = /usr/share/xt_geoip`, a plain
-`sudo xtgeoip build` (no `-c`) destroyed `/usr/share/xt_geoip/xtgeoip.conf.example`
-(freshly installed). This violates a core engineering principle — **"do not pop
-what you didn't push"**: never delete a directory/file you did not create. It is
-a correctness/data-loss failure (INVARIANTS #2), not a style issue.
-
-**Root cause.** `build.rs::atomic_swap` (build.rs:194) treats `output_dir` as
-exclusively build-owned: it builds into a `TempDir` in the parent, `rename`s the
-whole `output_dir` to `…xt_geoip.old`, swaps the temp dir into place, then
-`fs::remove_dir_all(old)` — wiping every file build didn't just write, including
-foreign files. Runs unconditionally on every build (build.rs:129), regardless of
-`-c`. Moving `DEFAULT_CONFIG` out of `output_dir` would only *hide* the violation;
-the behaviour itself is wrong.
-
-**Required behaviour (reinstate the ORIGINAL, verbatim):**
-- The **manifest tracks owned files** (the `.iv4`/`.iv6` + version/manifest build
-  produces). Build manages only those.
-- Files **not owned** are left alone — **ignore or warn** (original behaviour),
-  never delete.
-- Untracked files are deleted **only** when `--force` is specified, **and even
-  then only files of the specific types build creates** (`.iv4`/`.iv6`). Never a
-  blanket `remove_dir_all`.
-
-**How.** Revert the atomic-swap implementation and restore the prior manifest-based
-build/clean logic verbatim. The original is recoverable from **`b4ec1db^:src/build.rs`**
-— the swap (`atomic_swap`/`TempDir`) was introduced in commit `b4ec1db`
-("Consolidate duplicate flag declarations"), an unrelated message under which it
-landed untested. Diff `b4ec1db^` vs current `build.rs` to scope the revert; keep
-any *unrelated* later improvements that aren't part of the swap.
-
-**Tension to resolve, do NOT silently reintroduce:** TODO #24 proposes exactly
-"write to temp output directory, atomic swap on success" as a rollback improvement.
-That idea is fine *only* if it never deletes unowned files. If #24 is ever pursued,
-it must respect manifest ownership (swap/delete only build-created types), or it
-recreates this bug. Cross-link #24 ⇄ this item.
-
-**Check against INVARIANTS** (esp. #1/#2 correctness, #5 preserve Rayon parallel
-writes — the revert must keep the parallel `write_outputs`).
+`build.rs::atomic_swap` removed; write-in-place + `detect_orphans` reinstated.
+`CountryCode` enum and incremental hasher retained (behaviour-neutral). Proven:
+`sudo xtgeoip build` no longer touches foreign files in `output_dir`. See #24
+for the constraint that must hold if an atomic swap is ever revisited.
 
 ---
 
-## ⏭ IN PROGRESS — Spec-driven validator (DESIGN APPROVED → implementing)
+## ✅ Spec-driven validator — COMPLETE (v0.2.0, 2026-06-09)
 
-**Design of record: `docs/design/spec-driven-validator.md`** (APPROVED 2026-06-08,
-advisor + user). Implement per its §7.
+Design of record: `docs/design/spec-driven-validator.md` (approved 2026-06-08).
+Gate 1 (`23c4375`): CLI rules declared in `cli.yaml`; docgen validates + cross-checks.
+Gate 2 (`dfc14a9`): `cli.rs` drives generated `cli_rules.rs` guard tables (u8 bitmask,
+`first_guard` evaluator); snapshot green byte-for-byte across all 136 combos.
+Proven live (`2c090bd`): `-b -c -f` → `force_ambiguous` added purely through `cli.yaml`.
 
-**Goal:** replace the hand-written guard chains in `cli.rs::normalize_cli_to_action`
-with a data-driven validator derived from `cli.yaml`, so the rules have one source
-of truth and cannot drift (this is what let the p⊕f / top -b-c-p bugs exist).
-
-**Decisions locked (see doc):**
-- **Vocabulary:** ordered conjunction guards (`require`/`forbid` flag-sets,
-  first-match = precedence). Every current guard is a pure conjunction — no
-  disjunctions / boolean DSL needed. (NOT the relational requires/conflicts once
-  anticipated here — compound top-level errors defeat it.)
-- **`reject:` map** per context (flag → error_case) for flag-not-allowed errors;
-  docgen asserts its keys == complement of `allowed_flags` (no intra-spec dup),
-  lowered to leading guards. conf scoped out (clap ArgGroup + required positional
-  own its rules).
-- **Codegen vs runtime:** docgen emits a const guard table to `src/generated/`;
-  `cli.rs` has a ~3-line first-match evaluator; Action construction stays
-  hand-written. Duplicate the evaluator in docgen (no `[lib]` yet — decide on #88).
-- **Cross-check:** docgen verifies rules reproduce the examples (keeps examples
-  honest); the **exhaustive 136-combo snapshot** is what closes #92.
-
-**Hard constraints:** preserve the `Action` construction shape (#32); the
-`cli_semantics_snapshot` test must stay green byte-for-byte (any intended change is
-a reviewed snapshot regeneration, never silent). Related: #22 (FetchMode→spec),
-#29 (ambiguity = planner can't produce a deterministic plan).
-
-**Follow-up filed (out of scope here):** conf surface-syntax mismatch — spec
-models conf as a positional `SelectorCommand`, but `cli.rs` parses `-d/-s/-e` as
-flags and the spec's own `usage:` is flag-style. Reconcile separately (the
-run_conf special-case).
-
----
-
-## WIP
-
-### Packaging and deployment
-
-In progress. No further detail recorded here.
-
-### CLI codegen from spec / structure-errors
-
-In progress. No further detail recorded here.
+Open follow-up: conf surface-syntax mismatch — spec models conf as a positional
+`SelectorCommand`, but `cli.rs` parses `-d/-s/-e` as flags. Reconcile separately.
 
 ---
 
