@@ -624,6 +624,327 @@ fn merge_ranges<T: IpInt>(ranges: &[(T, T)]) -> Vec<(T, T)> {
 // -------------------------
 // mmap helper
 // -------------------------
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::HashMap,
+        fs,
+        path::{Path, PathBuf},
+    };
+
+    use tempfile::TempDir;
+
+    use super::*;
+
+    fn touch(dir: &Path, name: &str) -> PathBuf {
+        let p = dir.join(name);
+        fs::write(&p, b"").unwrap();
+        p
+    }
+
+    // ── CountryCode ───────────────────────────────────────
+
+    #[test]
+    fn country_code_parse_iso_uppercase() {
+        assert_eq!(
+            CountryCode::parse("US"),
+            Some(CountryCode::Iso([b'U', b'S']))
+        );
+    }
+
+    #[test]
+    fn country_code_parse_iso_lowercase_normalised() {
+        assert_eq!(
+            CountryCode::parse("us"),
+            Some(CountryCode::Iso([b'U', b'S']))
+        );
+    }
+
+    #[test]
+    fn country_code_parse_special_a1() {
+        assert_eq!(CountryCode::parse("A1"), Some(CountryCode::A1));
+    }
+
+    #[test]
+    fn country_code_parse_special_a2() {
+        assert_eq!(CountryCode::parse("A2"), Some(CountryCode::A2));
+    }
+
+    #[test]
+    fn country_code_parse_special_o1() {
+        assert_eq!(CountryCode::parse("O1"), Some(CountryCode::O1));
+    }
+
+    #[test]
+    fn country_code_parse_rejects_empty() {
+        assert!(CountryCode::parse("").is_none());
+    }
+
+    #[test]
+    fn country_code_parse_rejects_single_char() {
+        assert!(CountryCode::parse("U").is_none());
+    }
+
+    #[test]
+    fn country_code_parse_rejects_digit_prefix() {
+        assert!(CountryCode::parse("1S").is_none());
+    }
+
+    #[test]
+    fn country_code_display_iso() {
+        assert_eq!(CountryCode::Iso([b'G', b'B']).to_string(), "GB");
+    }
+
+    #[test]
+    fn country_code_display_specials() {
+        assert_eq!(CountryCode::A1.to_string(), "A1");
+        assert_eq!(CountryCode::A2.to_string(), "A2");
+        assert_eq!(CountryCode::O1.to_string(), "O1");
+    }
+
+    // ── merge_ranges ──────────────────────────────────────
+
+    #[test]
+    fn merge_ranges_empty() {
+        let out: Vec<(u32, u32)> = merge_ranges(&[]);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn merge_ranges_single() {
+        assert_eq!(merge_ranges(&[(10u32, 20u32)]), vec![(10, 20)]);
+    }
+
+    #[test]
+    fn merge_ranges_adjacent_merged() {
+        // 5.saturating_inc() == 6 == start of next range → single span
+        assert_eq!(merge_ranges(&[(0u32, 5u32), (6u32, 10u32)]), vec![(0, 10)]);
+    }
+
+    #[test]
+    fn merge_ranges_overlapping_merged() {
+        assert_eq!(
+            merge_ranges(&[(0u32, 10u32), (5u32, 15u32)]),
+            vec![(0, 15)]
+        );
+    }
+
+    #[test]
+    fn merge_ranges_disjoint_preserved() {
+        // 5.saturating_inc() == 6 < 7 → gap, no merge
+        assert_eq!(
+            merge_ranges(&[(0u32, 5u32), (7u32, 10u32)]),
+            vec![(0, 5), (7, 10)]
+        );
+    }
+
+    #[test]
+    fn merge_ranges_unsorted_input() {
+        assert_eq!(
+            merge_ranges(&[(7u32, 10u32), (0u32, 5u32)]),
+            vec![(0, 5), (7, 10)]
+        );
+    }
+
+    #[test]
+    fn merge_ranges_u32_max_no_overflow() {
+        let hi = u32::MAX;
+        assert_eq!(merge_ranges(&[(hi - 1, hi)]), vec![(hi - 1, hi)]);
+    }
+
+    // ── cidr_to_range_ipv4 ────────────────────────────────
+
+    #[test]
+    fn cidr_ipv4_slash24() {
+        let net = u32::from(std::net::Ipv4Addr::new(192, 168, 1, 0));
+        let bcast = u32::from(std::net::Ipv4Addr::new(192, 168, 1, 255));
+        assert_eq!(cidr_to_range_ipv4("192.168.1.0/24"), Some((net, bcast)));
+    }
+
+    #[test]
+    fn cidr_ipv4_slash32_host() {
+        let addr = u32::from(std::net::Ipv4Addr::new(10, 0, 0, 1));
+        assert_eq!(cidr_to_range_ipv4("10.0.0.1/32"), Some((addr, addr)));
+    }
+
+    #[test]
+    fn cidr_ipv4_invalid_returns_none() {
+        assert!(cidr_to_range_ipv4("not-a-cidr").is_none());
+    }
+
+    #[test]
+    fn cidr_ipv4_rejects_v6_cidr() {
+        assert!(cidr_to_range_ipv4("::1/128").is_none());
+    }
+
+    // ── cidr_to_range_ipv6 ────────────────────────────────
+
+    #[test]
+    fn cidr_ipv6_slash128_host() {
+        let addr = u128::from(std::net::Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1));
+        assert_eq!(cidr_to_range_ipv6("::1/128"), Some((addr, addr)));
+    }
+
+    #[test]
+    fn cidr_ipv6_slash64() {
+        let net = u128::from(std::net::Ipv6Addr::new(
+            0x2001, 0x0db8, 0, 0, 0, 0, 0, 0,
+        ));
+        let bcast = u128::from(std::net::Ipv6Addr::new(
+            0x2001, 0x0db8, 0, 0, 0xffff, 0xffff, 0xffff, 0xffff,
+        ));
+        assert_eq!(cidr_to_range_ipv6("2001:db8::/64"), Some((net, bcast)));
+    }
+
+    #[test]
+    fn cidr_ipv6_invalid_returns_none() {
+        assert!(cidr_to_range_ipv6("garbage").is_none());
+    }
+
+    #[test]
+    fn cidr_ipv6_rejects_v4_cidr() {
+        assert!(cidr_to_range_ipv6("1.2.3.4/8").is_none());
+    }
+
+    // ── resolve_country_code ──────────────────────────────
+
+    fn make_map(pairs: &[(&str, CountryCode)]) -> HashMap<String, CountryCode> {
+        pairs.iter().map(|(k, v)| (k.to_string(), *v)).collect()
+    }
+
+    #[test]
+    fn resolve_proxy_returns_a1() {
+        let m = make_map(&[("1", CountryCode::Iso([b'U', b'S']))]);
+        assert_eq!(
+            resolve_country_code(true, false, "1", "", &m),
+            CountryCode::A1
+        );
+    }
+
+    #[test]
+    fn resolve_sat_returns_a2() {
+        let m = make_map(&[]);
+        assert_eq!(
+            resolve_country_code(false, true, "", "", &m),
+            CountryCode::A2
+        );
+    }
+
+    #[test]
+    fn resolve_proxy_beats_sat() {
+        let m = make_map(&[]);
+        assert_eq!(
+            resolve_country_code(true, true, "", "", &m),
+            CountryCode::A1
+        );
+    }
+
+    #[test]
+    fn resolve_id_lookup() {
+        let de = CountryCode::Iso([b'D', b'E']);
+        let m = make_map(&[("42", de)]);
+        assert_eq!(resolve_country_code(false, false, "42", "", &m), de);
+    }
+
+    #[test]
+    fn resolve_rid_fallback_when_id_empty() {
+        let fr = CountryCode::Iso([b'F', b'R']);
+        let m = make_map(&[("99", fr)]);
+        assert_eq!(resolve_country_code(false, false, "", "99", &m), fr);
+    }
+
+    #[test]
+    fn resolve_empty_geoname_returns_o1() {
+        let m = make_map(&[]);
+        assert_eq!(
+            resolve_country_code(false, false, "", "", &m),
+            CountryCode::O1
+        );
+    }
+
+    #[test]
+    fn resolve_unknown_id_returns_o1() {
+        let m = make_map(&[]);
+        assert_eq!(
+            resolve_country_code(false, false, "999", "", &m),
+            CountryCode::O1
+        );
+    }
+
+    // ── detect_orphans ────────────────────────────────────
+
+    #[test]
+    fn detect_orphans_clean_run() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        let iv4 = touch(p, "US.iv4");
+        let iv6 = touch(p, "US.iv6");
+        let manifest = touch(p, "GeoLite2-Country-bin_20260101.blake3");
+        detect_orphans(p, &[iv4, iv6], &manifest).unwrap();
+        assert!(!p.join("orphaned").exists());
+    }
+
+    #[test]
+    fn detect_orphans_foreign_file_untouched() {
+        // Regression: files with extensions outside iv4/iv6/blake3/sha256
+        // must be structurally invisible to detect_orphans.
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        let conf = touch(p, "xtgeoip.conf.example");
+        let manifest = touch(p, "GeoLite2-Country-bin_20260101.blake3");
+        detect_orphans(p, &[], &manifest).unwrap();
+        assert!(conf.exists(), "foreign file must survive detect_orphans");
+    }
+
+    #[test]
+    fn detect_orphans_version_file_untouched() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        let ver = touch(p, "version");
+        let manifest = touch(p, "GeoLite2-Country-bin_20260101.blake3");
+        detect_orphans(p, &[], &manifest).unwrap();
+        assert!(
+            ver.exists(),
+            "version file must not be touched by detect_orphans"
+        );
+    }
+
+    #[test]
+    fn detect_orphans_stale_blake3_deleted() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        let old = touch(p, "GeoLite2-Country-bin_20260101.blake3");
+        let new_manifest = touch(p, "GeoLite2-Country-bin_20260606.blake3");
+        detect_orphans(p, &[], &new_manifest).unwrap();
+        assert!(!old.exists(), "stale blake3 manifest must be deleted");
+        assert!(new_manifest.exists());
+    }
+
+    #[test]
+    fn detect_orphans_stale_sha256_deleted() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        let old = touch(p, "GeoLite2-Country-bin_20260101.sha256");
+        let manifest = touch(p, "GeoLite2-Country-bin_20260606.blake3");
+        detect_orphans(p, &[], &manifest).unwrap();
+        assert!(!old.exists(), "stale sha256 manifest must be deleted");
+    }
+
+    #[test]
+    fn detect_orphans_orphaned_iv_listed_not_deleted() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        let stale = touch(p, "EU.iv4");
+        let manifest = touch(p, "GeoLite2-Country-bin_20260606.blake3");
+        detect_orphans(p, &[], &manifest).unwrap();
+        assert!(stale.exists(), "orphaned iv4 must not be deleted");
+        assert!(
+            p.join("orphaned").exists(),
+            "orphaned list file must be created"
+        );
+    }
+}
+
 fn mmap_file(file: &File) -> anyhow::Result<Mmap> {
     // Safety: caller must not mutate the file while the mapping is live
     Ok(unsafe { Mmap::map(file)? })

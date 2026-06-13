@@ -42,3 +42,88 @@ impl std::fmt::Display for Version {
         self.0.fmt(f)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_csv_zip() {
+        assert_eq!(
+            Version::parse("GeoLite2-Country-CSV_20260324.zip")
+                .unwrap()
+                .as_str(),
+            "20260324"
+        );
+    }
+
+    #[test]
+    fn parse_csv_sha256() {
+        assert_eq!(
+            Version::parse("GeoLite2-Country-CSV_20260324.zip.sha256")
+                .unwrap()
+                .as_str(),
+            "20260324"
+        );
+    }
+
+    #[test]
+    fn parse_bin_tar() {
+        assert_eq!(
+            Version::parse("GeoLite2-Country-bin_20260324.tar.gz")
+                .unwrap()
+                .as_str(),
+            "20260324"
+        );
+    }
+
+    #[test]
+    fn parse_bin_unverified() {
+        assert_eq!(
+            Version::parse("GeoLite2-Country-bin_unverified_20260324.tar.gz")
+                .unwrap()
+                .as_str(),
+            "20260324"
+        );
+    }
+
+    #[test]
+    fn parse_rejects_empty_token() {
+        assert!(Version::parse("GeoLite2-Country-CSV_.zip").is_none());
+    }
+
+    #[test]
+    fn parse_rejects_no_underscore() {
+        assert!(Version::parse("nogoodname.zip").is_none());
+    }
+
+    #[test]
+    fn parse_rejects_path_separator() {
+        assert!(Version::parse("foo_bar/baz.zip").is_none());
+        assert!(Version::parse("foo_bar\\baz.zip").is_none());
+    }
+
+    #[test]
+    fn bin_manifest_name_format() {
+        let v = Version::parse("GeoLite2-Country-CSV_20260324.zip").unwrap();
+        assert_eq!(
+            v.bin_manifest_name(),
+            "GeoLite2-Country-bin_20260324.blake3"
+        );
+    }
+
+    #[test]
+    fn display_yields_token() {
+        let v = Version::parse("GeoLite2-Country-CSV_20260324.zip").unwrap();
+        assert_eq!(v.to_string(), "20260324");
+    }
+
+    #[test]
+    fn ordering_by_token() {
+        let older =
+            Version::parse("GeoLite2-Country-CSV_20260101.zip").unwrap();
+        let newer =
+            Version::parse("GeoLite2-Country-CSV_20260606.zip").unwrap();
+        assert!(older < newer);
+    }
+}
