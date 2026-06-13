@@ -1,6 +1,7 @@
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
+    ffi::OsStr,
     fs::{self, File},
     path::{Path, PathBuf},
     sync::atomic::{AtomicUsize, Ordering},
@@ -11,7 +12,6 @@ use csv::ReaderBuilder;
 use ipnetwork::IpNetwork;
 use memmap2::Mmap;
 use rayon::prelude::*;
-use tempfile::TempDir;
 
 use crate::{messages, version::Version};
 
@@ -117,16 +117,10 @@ pub fn build(
         country_ranges.entry(cc).or_default().pool_v6 = pool;
     }
 
-    let parent = target_dir.parent().unwrap_or(Path::new("."));
-    let temp_dir = TempDir::new_in(parent)?;
-
-    if target_dir.exists() {
-        messages::warn("Replacing existing database.");
-    }
-
-    let checksums = write_outputs(&country_ranges, temp_dir.path())?;
-    generate_manifest(temp_dir.path(), version, checksums)?;
-    atomic_swap(temp_dir, target_dir)?;
+    let (written_paths, checksums) =
+        write_outputs(&country_ranges, target_dir)?;
+    let manifest_path = generate_manifest(target_dir, version, checksums)?;
+    detect_orphans(target_dir, &written_paths, &manifest_path)?;
 
     messages::info(&format!("Countries processed: {}", country_count));
     let ipv4_count: usize =
@@ -139,14 +133,34 @@ pub fn build(
     Ok(())
 }
 
+type WriteOutputs = (Vec<PathBuf>, Vec<(String, String)>);
+
 fn write_outputs(
     country_ranges: &BTreeMap<CountryCode, CountryRanges>,
-    out_dir: &Path,
-) -> anyhow::Result<Vec<(String, String)>> {
+    target_dir: &Path,
+) -> anyhow::Result<WriteOutputs> {
+    fs::create_dir_all(target_dir)?;
+
+    let files_to_write: Vec<_> = country_ranges
+        .keys()
+        .flat_map(|cc| {
+            let base = target_dir.join(cc.to_string());
+            vec![base.with_extension("iv4"), base.with_extension("iv6")]
+        })
+        .collect();
+
+    let overwrite_count = files_to_write.iter().filter(|f| f.exists()).count();
+    if overwrite_count > 0 {
+        messages::warn(&format!(
+            "{} country files (iv4/iv6) will be overwritten.",
+            overwrite_count
+        ));
+    }
+
     let write_results: Vec<anyhow::Result<(String, String)>> = country_ranges
         .par_iter()
         .flat_map(|(cc, cr)| {
-            let base = out_dir.join(cc.to_string());
+            let base = target_dir.join(cc.to_string());
             vec![
                 write_country_v4(&base, &cr.pool_v4),
                 write_country_v6(&base, &cr.pool_v6),
@@ -171,68 +185,107 @@ fn write_outputs(
     }
     checksums.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
-    Ok(checksums)
+    Ok((files_to_write, checksums))
 }
 
 fn generate_manifest(
-    out_dir: &Path,
+    target_dir: &Path,
     version: &Version,
     checksums: Vec<(String, String)>,
-) -> anyhow::Result<()> {
-    fs::write(out_dir.join("version"), format!("{version}\n"))?;
+) -> anyhow::Result<PathBuf> {
+    fs::write(target_dir.join("version"), format!("{version}\n"))?;
 
     let manifest_name = version.bin_manifest_name();
+    let manifest_path = target_dir.join(&manifest_name);
     let manifest_content: String = checksums
         .iter()
         .map(|(fname, hash)| format!("{hash}  {fname}\n"))
         .collect();
-    fs::write(out_dir.join(&manifest_name), manifest_content.as_bytes())?;
+    fs::write(&manifest_path, manifest_content.as_bytes())?;
 
-    Ok(())
+    Ok(manifest_path)
 }
 
-fn atomic_swap(temp_dir: TempDir, target_dir: &Path) -> anyhow::Result<()> {
-    if !target_dir.exists() {
-        fs::rename(temp_dir.path(), target_dir)?;
+fn detect_orphans(
+    target_dir: &Path,
+    written: &[PathBuf],
+    manifest_path: &Path,
+) -> anyhow::Result<()> {
+    let all_existing: Vec<_> = fs::read_dir(target_dir)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            let ext = p.extension().and_then(OsStr::to_str).unwrap_or("");
+            let fname = p.file_name().and_then(OsStr::to_str).unwrap_or("");
+            fname != "version"
+                && (ext == "iv4"
+                    || ext == "iv6"
+                    || ext == "blake3"
+                    || ext == "sha256")
+        })
+        .collect();
+
+    let mut written_set: HashSet<PathBuf> =
+        HashSet::with_capacity(written.len() + 1);
+    written_set.extend(written.iter().cloned());
+    written_set.insert(manifest_path.to_path_buf());
+
+    let orphaned: Vec<_> = all_existing
+        .into_iter()
+        .filter(|p| !written_set.contains(p))
+        .collect();
+
+    if orphaned.is_empty() {
         return Ok(());
     }
 
-    let old_target = {
-        let mut name = target_dir
-            .file_name()
-            .ok_or_else(|| anyhow::anyhow!("target_dir has no file name"))?
-            .to_os_string();
-        name.push(".old");
-        target_dir
-            .parent()
-            .map(|p| p.join(&name))
-            .unwrap_or_else(|| PathBuf::from(&name))
-    };
+    // Stale manifests (.blake3/.sha256) are unconditionally superseded by
+    // the new manifest — delete them silently.
+    let (stale_manifests, stale_iv): (Vec<_>, Vec<_>) =
+        orphaned.into_iter().partition(|p| {
+            matches!(
+                p.extension().and_then(|e| e.to_str()),
+                Some("blake3") | Some("sha256")
+            )
+        });
 
-    if old_target.exists() {
-        bail!(
-            "Leftover directory \"{}\" from a previous failed build swap; \
-             inspect and remove it manually before building again.",
-            old_target.display()
-        );
-    }
-
-    fs::rename(target_dir, &old_target)?;
-
-    if let Err(e) = fs::rename(temp_dir.path(), target_dir) {
-        if let Err(re) = fs::rename(&old_target, target_dir) {
-            messages::error(&format!(
-                "Restore of previous database failed: {re:#}"
+    for path in &stale_manifests {
+        if let Err(e) = fs::remove_file(path) {
+            messages::warn(&format!(
+                "Failed to delete stale manifest {}: {e:#}",
+                path.display()
             ));
         }
-        return Err(e.into());
     }
 
-    if let Err(e) = fs::remove_dir_all(&old_target) {
+    // Orphaned iv4/iv6 files require user action (e.g. legacy→normal
+    // mode transition leaving EU.iv4/EU.iv6 behind).
+    if !stale_iv.is_empty() {
+        let orphaned_path = target_dir.join("orphaned");
         messages::warn(&format!(
-            "Failed to remove previous database \"{}\": {e:#}",
-            old_target.display()
+            "{} orphaned files detected in \"{}\":",
+            stale_iv.len(),
+            target_dir.display()
         ));
+        for p in &stale_iv {
+            messages::warn(&format!("  {}", p.display()));
+        }
+        let list = stale_iv
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        match fs::write(&orphaned_path, &list) {
+            Ok(()) => messages::warn(&format!(
+                "Run `xtgeoip build -c -f` or delete files listed in \"{}\" \
+                 for a clean install.",
+                orphaned_path.display()
+            )),
+            Err(e) => messages::warn(&format!(
+                "Could not write orphaned file list to \"{}\": {e:#}",
+                orphaned_path.display()
+            )),
+        }
     }
 
     Ok(())
