@@ -17,6 +17,50 @@ This applies globally. Every item in this TODO must be assessed against these co
 
 ---
 
+## 🔴 #1 PRIORITY — Revert the atomic build swap; reinstate original manifest-owned delete behaviour verbatim
+
+**Filed 2026-06-09 (user), proven by live repro.** `build` deletes files it did
+not create. With the default `output_dir = /usr/share/xt_geoip`, a plain
+`sudo xtgeoip build` (no `-c`) destroyed `/usr/share/xt_geoip/xtgeoip.conf.example`
+(freshly installed). This violates a core engineering principle — **"do not pop
+what you didn't push"**: never delete a directory/file you did not create. It is
+a correctness/data-loss failure (INVARIANTS #2), not a style issue.
+
+**Root cause.** `build.rs::atomic_swap` (build.rs:194) treats `output_dir` as
+exclusively build-owned: it builds into a `TempDir` in the parent, `rename`s the
+whole `output_dir` to `…xt_geoip.old`, swaps the temp dir into place, then
+`fs::remove_dir_all(old)` — wiping every file build didn't just write, including
+foreign files. Runs unconditionally on every build (build.rs:129), regardless of
+`-c`. Moving `DEFAULT_CONFIG` out of `output_dir` would only *hide* the violation;
+the behaviour itself is wrong.
+
+**Required behaviour (reinstate the ORIGINAL, verbatim):**
+- The **manifest tracks owned files** (the `.iv4`/`.iv6` + version/manifest build
+  produces). Build manages only those.
+- Files **not owned** are left alone — **ignore or warn** (original behaviour),
+  never delete.
+- Untracked files are deleted **only** when `--force` is specified, **and even
+  then only files of the specific types build creates** (`.iv4`/`.iv6`). Never a
+  blanket `remove_dir_all`.
+
+**How.** Revert the atomic-swap implementation and restore the prior manifest-based
+build/clean logic verbatim. The original is recoverable from **`b4ec1db^:src/build.rs`**
+— the swap (`atomic_swap`/`TempDir`) was introduced in commit `b4ec1db`
+("Consolidate duplicate flag declarations"), an unrelated message under which it
+landed untested. Diff `b4ec1db^` vs current `build.rs` to scope the revert; keep
+any *unrelated* later improvements that aren't part of the swap.
+
+**Tension to resolve, do NOT silently reintroduce:** TODO #24 proposes exactly
+"write to temp output directory, atomic swap on success" as a rollback improvement.
+That idea is fine *only* if it never deletes unowned files. If #24 is ever pursued,
+it must respect manifest ownership (swap/delete only build-created types), or it
+recreates this bug. Cross-link #24 ⇄ this item.
+
+**Check against INVARIANTS** (esp. #1/#2 correctness, #5 preserve Rayon parallel
+writes — the revert must keep the parallel `write_outputs`).
+
+---
+
 ## ⏭ IN PROGRESS — Spec-driven validator (DESIGN APPROVED → implementing)
 
 **Design of record: `docs/design/spec-driven-validator.md`** (APPROVED 2026-06-08,
@@ -302,6 +346,8 @@ Priority / notes:
 ### #24 — pipelines: no rollback on mid-pipeline failure
 
 `backup → clean → fetch → build` has no rollback. A failure mid-way leaves system in partially-destroyed state. Future improvement: write to temp output directory, atomic swap on success. Execution planner (#17) is the right place to manage temp directory as a pipeline-level concern.
+
+**⚠ See #1 PRIORITY.** This exact idea was implemented early (`b4ec1db`) and caused a data-loss bug: the atomic swap `remove_dir_all`s the whole `output_dir`, deleting files build never created. It has been reverted. If revisited, the temp/swap MUST respect manifest ownership — never delete unowned files, force-delete only build-created types (`.iv4`/`.iv6`).
 
 ### #38 [also build.rs] — CSV materialisation: high memory risk
 
