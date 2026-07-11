@@ -375,15 +375,13 @@ commands:
     kind: SelectorCommand
     summary: Manage configuration
     usage: "xtgeoip conf <-s|-d|-e>"
-    positional:
-      name: mode
-      required: true
+    selector_flags:
       choices:
         s: { summary: "Show configuration" }
         d: { summary: "Show default (example) configuration" }
         e: { summary: "Edit configuration" }
     constraints:
-      exactly_one_positional: true
+      exactly_one_required: true
     examples:
       - case_id: C-001
         cmd: "xtgeoip conf"

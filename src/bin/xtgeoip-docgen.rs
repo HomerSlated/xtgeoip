@@ -70,7 +70,7 @@ pub enum CommandSpec {
     SelectorCommand {
         summary: String,
         usage: String,
-        positional: PositionalArg,
+        selector_flags: SelectorFlags,
         constraints: Option<Constraints>,
         examples: Vec<Example>,
     },
@@ -98,9 +98,7 @@ pub struct RejectSpec {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct PositionalArg {
-    pub name: String,
-    pub required: bool,
+pub struct SelectorFlags {
     pub choices: BTreeMap<String, ChoiceSummary>,
 }
 
@@ -111,7 +109,7 @@ pub struct ChoiceSummary {
 
 #[derive(Debug, Deserialize)]
 pub struct Constraints {
-    pub exactly_one_positional: bool,
+    pub exactly_one_required: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -433,7 +431,7 @@ fn check_context(
     error_cases: Option<&BTreeMap<String, ErrorCase>>,
 ) -> anyhow::Result<()> {
     // conf (SelectorCommand) is out of the guard model by design: clap's
-    // ArgGroup + the required positional already own its rules.
+    // ArgGroup already enforces exactly-one-of [-d/-s/-e] at parse time.
     let CommandSpec::FlagCommand {
         allowed_flags,
         reject,

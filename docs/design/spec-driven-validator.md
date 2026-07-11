@@ -173,20 +173,21 @@ the split exists only in the *spec surface*, not the evaluator.
 
 ### 3.2 conf is out of scope (SelectorCommand, not a guard context)
 
-`conf` is a `SelectorCommand` (positional `mode`, `exactly_one_positional`), not a
-`FlagCommand`. Its two constraints are already enforced *without* `normalize`:
-"at most one of d/s/e" by clap's `ArgGroup(multiple(false))` at parse time (→
-`PARSE_ERR`), "at least one" is the `required` positional semantic
+`conf` is a `SelectorCommand` (`selector_flags` with `exactly_one_required`), not a
+`FlagCommand`. Its constraints are already enforced *without* `normalize`:
+"exactly one of -d/-s/-e" by clap's `ArgGroup(multiple(false))` at parse time (→
+`PARSE_ERR`), "at least one" is handled in `normalize` directly
 (→ `conf_missing_flag`, the lone `normalize` check). It therefore does **not**
 enter the `reject`/`guards` vocabulary; the validator skips it and the existing
 hand-written conf branch stays. Forcing conf into the guard model would be a third
 encoding of a rule clap already owns.
 
-> Pre-existing inconsistency to log separately (NOT this task): the spec *models*
-> conf as a positional command, but `cli.rs` parses `-d/-s/-e` as flags, and even
-> the spec's own `usage: "xtgeoip conf <-s|-d|-e>"` is flag-style. The model and
-> the code disagree on surface syntax. This is the known run_conf special-case;
-> it deserves its own reconciliation item, out of scope here.
+**Surface-syntax fix (2026-07-11):** the original spec used `positional: {name:
+mode, required: true}` — implying `xtgeoip conf s` (positional token). The actual
+implementation uses `-d/-s/-e` as flags; the usage string and all examples already
+showed flag syntax. The structural model now uses `selector_flags: {choices: …}`
+with `exactly_one_required:`, accurately describing a flag-based selector.
+
 
 ---
 
