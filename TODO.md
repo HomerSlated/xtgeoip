@@ -34,8 +34,9 @@ Gate 2 (`dfc14a9`): `cli.rs` drives generated `cli_rules.rs` guard tables (u8 bi
 `first_guard` evaluator); snapshot green byte-for-byte across all 136 combos.
 Proven live (`2c090bd`): `-b -c -f` → `force_ambiguous` added purely through `cli.yaml`.
 
-Open follow-up: conf surface-syntax mismatch — spec models conf as a positional
-`SelectorCommand`, but `cli.rs` parses `-d/-s/-e` as flags. Reconcile separately.
+Open follow-up resolved (2026-07-11): spec `conf` block changed from
+`positional: {name: mode}` to `selector_flags: {choices: …}` with
+`exactly_one_required:`, matching the flag-based implementation.
 
 ---
 
