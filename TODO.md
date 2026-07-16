@@ -158,7 +158,19 @@ Requires `dashmap` or `Mutex<HashMap>`. **Check against invariant #5.**
 
 ## ARCHITECTURE: fetch.rs RESTRUCTURING
 
-### #57 — fetch.rs: `fetch()` mixes version resolution, acquisition, and extraction
+### #57 — fetch.rs: `fetch()` mixes version resolution, acquisition, and extraction ✅ DONE (2026-07-16)
+
+Landed as two commits: the fetch.rs test net (`6ae8735`), then the
+behaviour-preserving decomposition. `fetch()` is now a recognisable orchestrator
+calling `resolve_version(&resp)`, `check_download_size(&resp)`,
+`acquire_remote_archive(resp)`, and `extract_and_validate(path)` — the last a
+single home for the extract+validate step all three exit paths share (removed
+the triplication). No HEAD request: the one `?suffix=zip` `Response` is threaded
+through (headers read before the body is consumed, borrow-checker enforced).
+Caveat: unit tests cover the helpers, not the HTTP orchestration — verify the
+remote path end-to-end with `sudo target/release/xtgeoip-tests`.
+
+Original description:
 
 `fetch()` mixes version resolution, acquisition, and extraction. Split:
 ```
