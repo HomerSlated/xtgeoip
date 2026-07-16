@@ -16,6 +16,15 @@ use reqwest::{
 use sha2::{Digest, Sha256};
 
 const MAX_DOWNLOAD_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
+/// Cumulative cap on bytes written during archive extraction.
+/// `MAX_DOWNLOAD_BYTES` only bounds the *compressed* download; without this a
+/// small archive that decompresses to many GiB (a "zip bomb") would exhaust the
+/// extraction filesystem. The binary runs as root, and `FetchMode::Local`
+/// extracts archives already sitting in `archive_dir` with no network trust
+/// boundary — so the cap must guard extraction, not just download. Real
+/// GeoLite2 Country CSV data is tens of MiB; 2 GiB is generous headroom while
+/// still bounding disk use. (Guardian audit finding M-1.)
+const MAX_EXTRACT_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2 GiB
 const SIZE_TOLERANCE: f64 = 0.5; // ±50% of last known archive size
 const DEFAULT_TIMEOUT_SECS: u64 = 300;
 const MAX_RETRIES: u32 = 3;
@@ -412,6 +421,16 @@ fn scan_zip_entries(zip: &mut ZipArchive<File>) -> Result<Option<String>> {
 /// extracting. Strips the common top-level directory prefix so that CSV files
 /// land directly in the temp root.
 fn extract_archive_to_temp(archive_path: &Path) -> Result<TempDir> {
+    extract_archive_to_temp_capped(archive_path, MAX_EXTRACT_BYTES)
+}
+
+/// Extraction worker with an explicit byte budget. Split out from
+/// [`extract_archive_to_temp`] so tests can drive the [`MAX_EXTRACT_BYTES`] cap
+/// with a tiny limit instead of generating gigabytes.
+fn extract_archive_to_temp_capped(
+    archive_path: &Path,
+    max_bytes: u64,
+) -> Result<TempDir> {
     verify_zip_magic(archive_path)?;
     let temp_dir = TempDir::new()
         .context("Failed to create temporary extraction directory")?;
@@ -426,6 +445,8 @@ fn extract_archive_to_temp(archive_path: &Path) -> Result<TempDir> {
             "ZIP archive lacks a common top-level directory; extracting flat.",
         );
     }
+
+    let mut total_written: u64 = 0;
 
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).context("Failed to read zip entry")?;
@@ -460,9 +481,24 @@ fn extract_archive_to_temp(archive_path: &Path) -> Result<TempDir> {
             let mut outfile = File::create(&outpath).with_context(|| {
                 format!("Failed to create {}", outpath.display())
             })?;
-            io::copy(&mut entry, &mut outfile).with_context(|| {
-                format!("Failed to extract {}", outpath.display())
-            })?;
+            // Bound each entry's copy by the remaining budget, +1 so a breach
+            // is detectable (mirrors the download cap's `take(MAX +
+            // 1)` idiom). A cumulative check *after* an unbounded
+            // `io::copy` would be a hole: one entry could exhaust
+            // the disk before the check runs.
+            let remaining = max_bytes - total_written;
+            let mut limited = (&mut entry).take(remaining + 1);
+            let n =
+                io::copy(&mut limited, &mut outfile).with_context(|| {
+                    format!("Failed to extract {}", outpath.display())
+                })?;
+            total_written += n;
+            if total_written > max_bytes {
+                bail!(
+                    "Archive extraction exceeded {max_bytes} bytes — refusing \
+                     to unpack possible decompression bomb"
+                );
+            }
         }
     }
 
@@ -660,4 +696,47 @@ fn validate_blocks_csv(path: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use zip::write::{SimpleFileOptions, ZipWriter};
+
+    use super::*;
+
+    /// Write a minimal, security-clean zip: one flat regular-file entry of
+    /// `size` bytes. Passes `scan_zip_entries` (no traversal / absolute path /
+    /// exec bits) so extraction reaches the size-capped copy loop.
+    fn write_test_zip(path: &Path, name: &str, size: usize) {
+        let file = File::create(path).unwrap();
+        let mut zip = ZipWriter::new(file);
+        zip.start_file(name, SimpleFileOptions::default()).unwrap();
+        zip.write_all(&vec![b'x'; size]).unwrap();
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn extract_within_budget_succeeds() {
+        let dir = TempDir::new().unwrap();
+        let zip_path = dir.path().join("ok.zip");
+        write_test_zip(&zip_path, "data.csv", 1_000);
+
+        let out = extract_archive_to_temp_capped(&zip_path, 10_000)
+            .expect("extraction within budget should succeed");
+        assert!(out.path().join("data.csv").exists());
+    }
+
+    #[test]
+    fn extract_exceeding_budget_bails() {
+        let dir = TempDir::new().unwrap();
+        let zip_path = dir.path().join("bomb.zip");
+        write_test_zip(&zip_path, "data.csv", 1_000);
+
+        let err = extract_archive_to_temp_capped(&zip_path, 100)
+            .expect_err("extraction past the budget must be refused");
+        assert!(
+            err.to_string().contains("decompression bomb"),
+            "unexpected error: {err}"
+        );
+    }
 }

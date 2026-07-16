@@ -169,6 +169,26 @@ extract_archive()  → unpack to temp, flatten, move into place (#54)
 ```
 **Constraint: must not break any existing parallelism inside `fetch()`.**
 
+**Scoping notes (2026-07-16):**
+- Behaviour-preserving is achievable *without* the HEAD request the "remote
+  HEAD" line implies: the single `?suffix=zip` GET already carries both the
+  Content-Disposition (version) and the body (download). Thread that one
+  `Response` through — `resolve_version(&resp)` borrows headers, then
+  `acquire_archive(resp, …)` consumes the body — so no second request, no
+  behaviour change.
+- **Verify first.** `fetch.rs` has almost no test net (the M-1 tests below are
+  the only unit tests). A behaviour-preserving refactor of security-critical
+  download/verify/extract code can't be checked cheaply — add fetch.rs test
+  coverage (mock HTTP, CSV/zip fixtures) *before* the split, or the refactor
+  rests on inspection alone. Kept deliberately separate from the M-1 fix for
+  this reason.
+- **M-1 (guardian audit: unbounded extraction / zip bomb) — DONE (2026-07-16).**
+  `extract_archive_to_temp_capped(path, max_bytes)` bounds cumulative extracted
+  bytes (`MAX_EXTRACT_BYTES = 2 GiB`) via a per-entry `take(remaining + 1)`;
+  covers both `FetchMode::Remote` and `::Local`. Two unit tests added. When #57
+  lands, this logic moves into `extract_archive()` verbatim. See
+  `private/guardian/guardian_remediation_M-1_20260716_100638.md`.
+
 ### #54 — fetch.rs: ZIP entry writes are sequential
 
 ZIP entry enumeration is sequential but file writes after decompression are independent. Decompress to buffer sequentially, then spawn parallel write tasks via Rayon. Not critical now; worthwhile if archive grows. **Benchmark before committing.**
@@ -193,6 +213,25 @@ Depends on #17 and spec-driven direction.
 ### #29 — cli.rs: ambiguity checks have no formal basis
 
 Ad hoc ambiguity checks (`if *prune && *force && *clean`, etc.) have no formal basis. "Ambiguous" is undefined. A combination is ambiguous if and only if the execution planner (#17) cannot produce a deterministic `Vec<Step>`. Remove current checks once planner exists; let inability to plan be the rejection signal.
+
+**Reframe (2026-07-16) — this is now a DESIGN FORK, not a coding task:**
+- The planner already exists: `enum Step` + `fn plan(action: &Action) -> Vec<Step>`
+  in `action.rs`. #29's "once planner exists" precondition is already met.
+- But `plan()` is currently *total* — it always returns steps, because invalid
+  flag combos are rejected *earlier*, by the declarative guards the v0.2.0
+  spec-driven validator shipped (`cli.yaml` → `cli_rules.rs`). So "ambiguous"
+  now HAS a formal basis — just a different one than #29 imagined (declarative
+  guards, not planner-inability).
+- Decide before writing code:
+  - (a) Treat the shipped guards as the formal basis #29 asked for and largely
+    **close #29** — the complaint ("no formal basis") is answered.
+  - (b) Push validity *down* into the planner: make `plan()` partial
+    (`Result<Vec<Step>>`), move ambiguity detection there, retire the guard
+    layer. Bigger; must keep the 136-combo `cli::snapshot` green byte-for-byte,
+    and reconciles with #22 (FetchMode into spec).
+- First deliverable is a short design note (in the vein of
+  `docs/design/spec-driven-validator.md`) resolving (a) vs (b) — not an
+  implementation. Research before production.
 
 ---
 
