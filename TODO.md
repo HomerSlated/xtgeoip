@@ -222,7 +222,7 @@ fetch:
 ```
 Depends on #17 and spec-driven direction.
 
-### #29 — cli.rs: ambiguity checks have no formal basis
+### #29 — cli.rs: ambiguity checks have no formal basis ✅ CLOSED (ratified 2026-07-16)
 
 Ad hoc ambiguity checks (`if *prune && *force && *clean`, etc.) have no formal basis. "Ambiguous" is undefined. A combination is ambiguous if and only if the execution planner (#17) cannot produce a deterministic `Vec<Step>`. Remove current checks once planner exists; let inability to plan be the rejection signal.
 
@@ -245,16 +245,23 @@ Ad hoc ambiguity checks (`if *prune && *force && *clean`, etc.) have no formal b
   `docs/design/spec-driven-validator.md`) resolving (a) vs (b) — not an
   implementation. Research before production.
 
-**RESOLVED (2026-07-16): recommend (a) — close #29. Awaiting user ratification.**
-Design note: `docs/design/29-ambiguity-planner-vs-guards.md`. Rationale: the
-declarative guards ARE the formal basis #29 asked for; (b) would move validity
-*backward* (declarative spec → imperative `plan()`) and isn't the north star
-either (#26/#27 is spec-*derived* planning, declarative all the way). Redirected
-residual filed as scoped follow-ups (do NOT start unprompted):
-- unit-pin `plan()`'s `Vec<Step>` per `Action` (golden test) — no unit assertion
-  pins the step sequence today (integration suite exercises it, but nothing else);
-- make Fetch-before-Build a construction/type guarantee, not the runtime
-  `action.rs` `.expect(...)` (unreachable today — maintainability, not a bug).
+**CLOSED (a), ratified by user 2026-07-16.** Design note:
+`docs/design/29-ambiguity-planner-vs-guards.md`. Rationale: the declarative
+guards ARE the formal basis #29 asked for; (b) would move validity *backward*
+(declarative spec → imperative `plan()`) and isn't the north star either
+(#26/#27 is spec-*derived* planning, declarative all the way).
+
+Redirected residual:
+- ✅ **DONE (2026-07-16)** — unit-pin `plan()`'s `Vec<Step>` per `Action`.
+  11 golden tests in `action.rs` assert each plan's `Debug` form (sequence +
+  fields), pinning e.g. run→`Fetch{Remote}`+`PruneCsv` vs
+  build→`Fetch{Local}`+`PruneBin`, and `build_is_always_preceded_by_fetch`
+  sweeps every flag combination to pin the invariant behind
+  `execute_step`'s `.expect("Build step requires prior Fetch")`.
+- **OPEN (not started)** — make Fetch-before-Build a construction/type
+  guarantee rather than that runtime `.expect(...)` (unreachable today — a
+  maintainability nicety, not a bug; the sweep above now guards it).
+
 The proper "one source" endpoint is #26/#27 (spec-derived plan).
 
 ---

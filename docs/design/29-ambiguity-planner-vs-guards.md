@@ -1,6 +1,6 @@
 # Design note: #29 — "ambiguity checks have no formal basis"
 
-Status: **PROPOSED** — recommends closing #29 as filed; awaiting user ratification.
+Status: **RATIFIED** (user, 2026-07-16) — #29 is **CLOSED** on recommendation (a).
 Date: 2026-07-16
 Related: #9/#26/#27/#34 (spec-driven arc), #22 (FetchMode→spec),
 [`spec-driven-validator.md`](spec-driven-validator.md) (the validator this note
@@ -81,12 +81,15 @@ own. The *proper* version of #29's "one source" instinct is the #26/#27 endpoint
 derive the plan from the spec too, so guards and steps share one declarative
 origin and cannot drift.
 
-## 6. Proposed disposition
+## 6. Disposition (ratified 2026-07-16)
 
-1. **Close #29** as filed (user to ratify — it's their TODO item).
-2. File two scoped follow-ups (do not start without the user choosing):
-   - unit-pin `plan()`'s step sequence per `Action` (golden `Vec<Step>`);
-   - make Fetch-before-Build a construction/type guarantee rather than a runtime
-     `expect`.
-3. Record that spec-derived planning (the declarative unification of validity and
-   steps) is the #26/#27 endpoint — the direction #29 should have pointed.
+1. **#29 CLOSED** on recommendation (a). ✅
+2. Redirected follow-ups:
+   - ✅ **DONE** — unit-pin `plan()`'s step sequence per `Action`. 11 golden
+     tests in `action.rs` assert each plan's `Debug` form, plus
+     `build_is_always_preceded_by_fetch`, which sweeps every flag combination to
+     pin the invariant behind `execute_step`'s `.expect(...)` (§5).
+   - **OPEN** — make Fetch-before-Build a construction/type guarantee rather
+     than a runtime `expect`. Lower priority now that the sweep guards it.
+3. Spec-derived planning (the declarative unification of validity and steps)
+   remains the #26/#27 endpoint — the direction #29 should have pointed.
