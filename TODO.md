@@ -245,6 +245,18 @@ Ad hoc ambiguity checks (`if *prune && *force && *clean`, etc.) have no formal b
   `docs/design/spec-driven-validator.md`) resolving (a) vs (b) — not an
   implementation. Research before production.
 
+**RESOLVED (2026-07-16): recommend (a) — close #29. Awaiting user ratification.**
+Design note: `docs/design/29-ambiguity-planner-vs-guards.md`. Rationale: the
+declarative guards ARE the formal basis #29 asked for; (b) would move validity
+*backward* (declarative spec → imperative `plan()`) and isn't the north star
+either (#26/#27 is spec-*derived* planning, declarative all the way). Redirected
+residual filed as scoped follow-ups (do NOT start unprompted):
+- unit-pin `plan()`'s `Vec<Step>` per `Action` (golden test) — no unit assertion
+  pins the step sequence today (integration suite exercises it, but nothing else);
+- make Fetch-before-Build a construction/type guarantee, not the runtime
+  `action.rs` `.expect(...)` (unreachable today — maintainability, not a bug).
+The proper "one source" endpoint is #26/#27 (spec-derived plan).
+
 ---
 
 ## SPEC-DRIVEN ARCHITECTURE: SPECIFIC TASKS
