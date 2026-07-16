@@ -704,24 +704,219 @@ mod tests {
 
     use super::*;
 
-    /// Write a minimal, security-clean zip: one flat regular-file entry of
-    /// `size` bytes. Passes `scan_zip_entries` (no traversal / absolute path /
-    /// exec bits) so extraction reaches the size-capped copy loop.
-    fn write_test_zip(path: &Path, name: &str, size: usize) {
+    // ── zip fixtures ─────────────────────────────────────────────────────────
+
+    /// One entry to place in a test zip.
+    struct E {
+        name: &'static str,
+        size: usize,
+        exec: bool,
+    }
+
+    fn clean(name: &'static str, size: usize) -> E {
+        E {
+            name,
+            size,
+            exec: false,
+        }
+    }
+
+    /// Build a zip at `path` from `entries`. Names are written verbatim — the
+    /// writer does not normalise `..` for plain `start_file` — so this can
+    /// craft the malicious entries the security scanner must reject.
+    fn write_zip(path: &Path, entries: &[E]) {
         let file = File::create(path).unwrap();
         let mut zip = ZipWriter::new(file);
-        zip.start_file(name, SimpleFileOptions::default()).unwrap();
-        zip.write_all(&vec![b'x'; size]).unwrap();
+        for e in entries {
+            let mut opts = SimpleFileOptions::default();
+            if e.exec {
+                opts = opts.unix_permissions(0o755);
+            }
+            zip.start_file(e.name, opts).unwrap();
+            zip.write_all(&vec![b'x'; e.size]).unwrap();
+        }
         zip.finish().unwrap();
     }
+
+    fn open_zip(path: &Path) -> ZipArchive<File> {
+        ZipArchive::new(File::open(path).unwrap()).unwrap()
+    }
+
+    // ── parse_content_disposition_filename ───────────────────────────────────
+
+    #[test]
+    fn cd_unquoted_filename() {
+        assert_eq!(
+            parse_content_disposition_filename(
+                "attachment; filename=GeoLite2-Country-CSV_20260227.zip"
+            ),
+            Some("GeoLite2-Country-CSV_20260227.zip")
+        );
+    }
+
+    #[test]
+    fn cd_quoted_filename() {
+        assert_eq!(
+            parse_content_disposition_filename(
+                "attachment; filename=\"GeoLite2-Country-CSV_20260227.zip\""
+            ),
+            Some("GeoLite2-Country-CSV_20260227.zip")
+        );
+    }
+
+    #[test]
+    fn cd_case_insensitive_key() {
+        assert_eq!(
+            parse_content_disposition_filename("attachment; FileName=x.zip"),
+            Some("x.zip")
+        );
+    }
+
+    #[test]
+    fn cd_missing_filename_is_none() {
+        assert_eq!(parse_content_disposition_filename("attachment"), None);
+    }
+
+    #[test]
+    fn cd_empty_filename_is_none() {
+        assert_eq!(
+            parse_content_disposition_filename("attachment; filename="),
+            None
+        );
+        assert_eq!(
+            parse_content_disposition_filename("attachment; filename=\"\""),
+            None
+        );
+    }
+
+    // ── find_latest_local_csv_archive ────────────────────────────────────────
+
+    #[test]
+    fn find_latest_picks_highest_version() {
+        let dir = TempDir::new().unwrap();
+        for date in ["20260101", "20260315", "20260227"] {
+            fs::write(
+                dir.path().join(format!("GeoLite2-Country-CSV_{date}.zip")),
+                b"",
+            )
+            .unwrap();
+        }
+        let (path, version) =
+            find_latest_local_csv_archive(dir.path()).unwrap();
+        assert_eq!(version.as_str(), "20260315");
+        assert!(path.ends_with("GeoLite2-Country-CSV_20260315.zip"));
+    }
+
+    #[test]
+    fn find_latest_skips_nonmatching_names() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("GeoLite2-Country-CSV_20260101.zip"), b"")
+            .unwrap();
+        // wrong product, checksum sidecar, and unrelated file — all ignored
+        fs::write(dir.path().join("GeoLite2-City-CSV_20260901.zip"), b"")
+            .unwrap();
+        fs::write(
+            dir.path().join("GeoLite2-Country-CSV_20260101.zip.sha256"),
+            b"",
+        )
+        .unwrap();
+        fs::write(dir.path().join("notes.txt"), b"").unwrap();
+        let (_, version) = find_latest_local_csv_archive(dir.path()).unwrap();
+        assert_eq!(version.as_str(), "20260101");
+    }
+
+    #[test]
+    fn find_latest_errors_when_empty() {
+        let dir = TempDir::new().unwrap();
+        assert!(find_latest_local_csv_archive(dir.path()).is_err());
+    }
+
+    // ── verify_zip_magic ─────────────────────────────────────────────────────
+
+    #[test]
+    fn zip_magic_accepts_real_zip() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("real.zip");
+        write_zip(&path, &[clean("a.csv", 4)]);
+        assert!(verify_zip_magic(&path).is_ok());
+    }
+
+    #[test]
+    fn zip_magic_rejects_non_zip() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("fake.zip");
+        fs::write(&path, b"not a zip at all").unwrap();
+        assert!(verify_zip_magic(&path).is_err());
+    }
+
+    // ── scan_zip_entries (security scanner) ──────────────────────────────────
+
+    #[test]
+    fn scan_rejects_path_traversal() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("evil.zip");
+        write_zip(&path, &[clean("../escape.txt", 4)]);
+        let err = scan_zip_entries(&mut open_zip(&path)).unwrap_err();
+        assert!(err.to_string().contains("traversal"), "{err}");
+    }
+
+    #[test]
+    fn scan_rejects_absolute_path() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("abs.zip");
+        // drive-letter form triggers the `:/` branch and survives the writer
+        // verbatim (a leading `/` can be stripped by some tooling).
+        write_zip(&path, &[clean("C:/evil.txt", 4)]);
+        let err = scan_zip_entries(&mut open_zip(&path)).unwrap_err();
+        assert!(err.to_string().contains("absolute"), "{err}");
+    }
+
+    #[test]
+    fn scan_rejects_executable_bits() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("exec.zip");
+        write_zip(
+            &path,
+            &[E {
+                name: "run.sh",
+                size: 4,
+                exec: true,
+            }],
+        );
+        let err = scan_zip_entries(&mut open_zip(&path)).unwrap_err();
+        assert!(err.to_string().contains("executable"), "{err}");
+    }
+
+    #[test]
+    fn scan_detects_common_prefix() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("nested.zip");
+        write_zip(
+            &path,
+            &[clean("GeoLite2/a.csv", 4), clean("GeoLite2/b.csv", 4)],
+        );
+        assert_eq!(
+            scan_zip_entries(&mut open_zip(&path)).unwrap(),
+            Some("GeoLite2".to_string())
+        );
+    }
+
+    #[test]
+    fn scan_flat_archive_has_no_prefix() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("flat.zip");
+        write_zip(&path, &[clean("a.csv", 4), clean("b.csv", 4)]);
+        assert_eq!(scan_zip_entries(&mut open_zip(&path)).unwrap(), None);
+    }
+
+    // ── extract_archive_to_temp_capped ───────────────────────────────────────
 
     #[test]
     fn extract_within_budget_succeeds() {
         let dir = TempDir::new().unwrap();
-        let zip_path = dir.path().join("ok.zip");
-        write_test_zip(&zip_path, "data.csv", 1_000);
-
-        let out = extract_archive_to_temp_capped(&zip_path, 10_000)
+        let path = dir.path().join("ok.zip");
+        write_zip(&path, &[clean("data.csv", 1_000)]);
+        let out = extract_archive_to_temp_capped(&path, 10_000)
             .expect("extraction within budget should succeed");
         assert!(out.path().join("data.csv").exists());
     }
@@ -729,14 +924,108 @@ mod tests {
     #[test]
     fn extract_exceeding_budget_bails() {
         let dir = TempDir::new().unwrap();
-        let zip_path = dir.path().join("bomb.zip");
-        write_test_zip(&zip_path, "data.csv", 1_000);
-
-        let err = extract_archive_to_temp_capped(&zip_path, 100)
+        let path = dir.path().join("bomb.zip");
+        write_zip(&path, &[clean("data.csv", 1_000)]);
+        let err = extract_archive_to_temp_capped(&path, 100)
             .expect_err("extraction past the budget must be refused");
-        assert!(
-            err.to_string().contains("decompression bomb"),
-            "unexpected error: {err}"
-        );
+        assert!(err.to_string().contains("decompression bomb"), "{err}");
+    }
+
+    #[test]
+    fn extract_strips_common_prefix() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("nested.zip");
+        write_zip(&path, &[clean("GeoLite2/data.csv", 20)]);
+        let out = extract_archive_to_temp_capped(&path, 10_000).unwrap();
+        assert!(out.path().join("data.csv").exists());
+        assert!(!out.path().join("GeoLite2").exists());
+    }
+
+    #[test]
+    fn extract_rejects_traversal() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("evil.zip");
+        write_zip(&path, &[clean("../escape.txt", 4)]);
+        assert!(extract_archive_to_temp_capped(&path, 10_000).is_err());
+    }
+
+    // ── verify_cached_archive ────────────────────────────────────────────────
+
+    #[test]
+    fn cached_archive_matching_checksum_is_true() {
+        let dir = TempDir::new().unwrap();
+        let archive = dir.path().join("a.zip");
+        let checksum = dir.path().join("a.zip.sha256");
+        fs::write(&archive, b"payload").unwrap();
+        let hash = format!("{:x}", Sha256::digest(b"payload"));
+        fs::write(&checksum, format!("{hash}  a.zip\n")).unwrap();
+        assert!(verify_cached_archive(&archive, &checksum).unwrap());
+    }
+
+    #[test]
+    fn cached_archive_mismatch_is_false() {
+        let dir = TempDir::new().unwrap();
+        let archive = dir.path().join("a.zip");
+        let checksum = dir.path().join("a.zip.sha256");
+        fs::write(&archive, b"payload").unwrap();
+        fs::write(&checksum, format!("{}  a.zip\n", "0".repeat(64))).unwrap();
+        assert!(!verify_cached_archive(&archive, &checksum).unwrap());
+    }
+
+    #[test]
+    fn cached_archive_bad_checksum_format_errors() {
+        let dir = TempDir::new().unwrap();
+        let archive = dir.path().join("a.zip");
+        let checksum = dir.path().join("a.zip.sha256");
+        fs::write(&archive, b"payload").unwrap();
+        fs::write(&checksum, b"").unwrap();
+        assert!(verify_cached_archive(&archive, &checksum).is_err());
+    }
+
+    // ── CSV validation ───────────────────────────────────────────────────────
+
+    #[test]
+    fn locations_csv_valid_ok() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("loc.csv");
+        fs::write(
+            &path,
+            "geoname_id,country_iso_code,continent_code\n6252001,US,NA\n",
+        )
+        .unwrap();
+        assert!(validate_locations_csv(&path).is_ok());
+    }
+
+    #[test]
+    fn locations_csv_missing_column_bails() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("loc.csv");
+        fs::write(&path, "geoname_id,country_iso_code\n6252001,US\n").unwrap();
+        assert!(validate_locations_csv(&path).is_err());
+    }
+
+    #[test]
+    fn blocks_csv_valid_ok() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("blk.csv");
+        fs::write(
+            &path,
+            "network,geoname_id,is_anonymous_proxy,is_satellite_provider\n1.0.\
+             0.0/24,6252001,0,0\n",
+        )
+        .unwrap();
+        assert!(validate_blocks_csv(&path).is_ok());
+    }
+
+    #[test]
+    fn blocks_csv_missing_column_bails() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("blk.csv");
+        fs::write(
+            &path,
+            "network,geoname_id,is_anonymous_proxy\n1.0.0.0/24,6252001,0\n",
+        )
+        .unwrap();
+        assert!(validate_blocks_csv(&path).is_err());
     }
 }
