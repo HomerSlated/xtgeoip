@@ -624,6 +624,64 @@ fn merge_ranges<T: IpInt>(ranges: &[(T, T)]) -> Vec<(T, T)> {
 // -------------------------
 // mmap helper
 // -------------------------
+fn mmap_file(file: &File) -> anyhow::Result<Mmap> {
+    // Safety: caller must not mutate the file while the mapping is live
+    Ok(unsafe { Mmap::map(file)? })
+}
+
+// -------------------------
+// Write country files: pre-built buffer, single syscall, blake3 hash
+// -------------------------
+fn write_country_v4(
+    file_base: &Path,
+    ranges: &[(u32, u32)],
+) -> anyhow::Result<(String, String)> {
+    let file_path = file_base.with_extension("iv4");
+    let mut buf = Vec::with_capacity(ranges.len() * 8);
+    let mut hasher = blake3::Hasher::new();
+    for &(start, end) in ranges {
+        let s = start.to_be_bytes();
+        let e = end.to_be_bytes();
+        buf.extend_from_slice(&s);
+        buf.extend_from_slice(&e);
+        hasher.update(&s);
+        hasher.update(&e);
+    }
+    let hash = hasher.finalize().to_string();
+    fs::write(&file_path, &buf)?;
+    let fname = file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+    Ok((fname, hash))
+}
+
+fn write_country_v6(
+    file_base: &Path,
+    ranges: &[(u128, u128)],
+) -> anyhow::Result<(String, String)> {
+    let file_path = file_base.with_extension("iv6");
+    let mut buf = Vec::with_capacity(ranges.len() * 32);
+    let mut hasher = blake3::Hasher::new();
+    for &(start, end) in ranges {
+        let s = start.to_be_bytes();
+        let e = end.to_be_bytes();
+        buf.extend_from_slice(&s);
+        buf.extend_from_slice(&e);
+        hasher.update(&s);
+        hasher.update(&e);
+    }
+    let hash = hasher.finalize().to_string();
+    fs::write(&file_path, &buf)?;
+    let fname = file_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_string();
+    Ok((fname, hash))
+}
+
 #[cfg(test)]
 mod tests {
     use std::{
@@ -943,62 +1001,4 @@ mod tests {
             "orphaned list file must be created"
         );
     }
-}
-
-fn mmap_file(file: &File) -> anyhow::Result<Mmap> {
-    // Safety: caller must not mutate the file while the mapping is live
-    Ok(unsafe { Mmap::map(file)? })
-}
-
-// -------------------------
-// Write country files: pre-built buffer, single syscall, blake3 hash
-// -------------------------
-fn write_country_v4(
-    file_base: &Path,
-    ranges: &[(u32, u32)],
-) -> anyhow::Result<(String, String)> {
-    let file_path = file_base.with_extension("iv4");
-    let mut buf = Vec::with_capacity(ranges.len() * 8);
-    let mut hasher = blake3::Hasher::new();
-    for &(start, end) in ranges {
-        let s = start.to_be_bytes();
-        let e = end.to_be_bytes();
-        buf.extend_from_slice(&s);
-        buf.extend_from_slice(&e);
-        hasher.update(&s);
-        hasher.update(&e);
-    }
-    let hash = hasher.finalize().to_string();
-    fs::write(&file_path, &buf)?;
-    let fname = file_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("")
-        .to_string();
-    Ok((fname, hash))
-}
-
-fn write_country_v6(
-    file_base: &Path,
-    ranges: &[(u128, u128)],
-) -> anyhow::Result<(String, String)> {
-    let file_path = file_base.with_extension("iv6");
-    let mut buf = Vec::with_capacity(ranges.len() * 32);
-    let mut hasher = blake3::Hasher::new();
-    for &(start, end) in ranges {
-        let s = start.to_be_bytes();
-        let e = end.to_be_bytes();
-        buf.extend_from_slice(&s);
-        buf.extend_from_slice(&e);
-        hasher.update(&s);
-        hasher.update(&e);
-    }
-    let hash = hasher.finalize().to_string();
-    fs::write(&file_path, &buf)?;
-    let fname = file_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("")
-        .to_string();
-    Ok((fname, hash))
 }
