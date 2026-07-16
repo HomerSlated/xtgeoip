@@ -52,8 +52,7 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, Version)> {
             "Using latest local archive: {}",
             archive_path.display()
         ));
-        let temp_dir = extract_archive_to_temp(&archive_path)?;
-        validate_csv_contents(temp_dir.path())?;
+        let temp_dir = extract_and_validate(&archive_path)?;
         return Ok((temp_dir, version));
     }
 
@@ -94,7 +93,60 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, Version)> {
         bail!("Remote request failed: {}", resp.status());
     }
 
-    // Parse Content-Disposition; each failure mode gets a distinct message
+    // Header-derived facts (version, size guard) must be read before the
+    // response body is consumed by acquire_remote_archive below.
+    let version = resolve_version(&resp)?;
+    messages::info(&format!("Remote archive version: {version}"));
+    check_download_size(&resp, archive_dir)?;
+
+    let archive_path =
+        archive_dir.join(format!("GeoLite2-Country-CSV_{version}.zip"));
+    let checksum_path =
+        archive_dir.join(format!("GeoLite2-Country-CSV_{version}.zip.sha256"));
+
+    // Re-verify cached archive before trusting it
+    if archive_path.exists() && checksum_path.exists() {
+        match verify_cached_archive(&archive_path, &checksum_path) {
+            Ok(true) => {
+                messages::info(&format!(
+                    "Reusing verified local copy: {}",
+                    archive_path.display()
+                ));
+                let temp_dir = extract_and_validate(&archive_path)?;
+                return Ok((temp_dir, version));
+            }
+            Ok(false) => {
+                messages::warn(
+                    "Local archive checksum mismatch — re-downloading.",
+                );
+            }
+            Err(e) => {
+                messages::warn(&format!(
+                    "Could not verify local archive: {e:#} — re-downloading."
+                ));
+            }
+        }
+    }
+
+    messages::info("No verified local copy of this version. Downloading...");
+    acquire_remote_archive(
+        &client,
+        resp,
+        account_id,
+        license_key,
+        maxmind_url,
+        &archive_path,
+        &checksum_path,
+    )?;
+
+    let temp_dir = extract_and_validate(&archive_path)?;
+    Ok((temp_dir, version))
+}
+
+/// Resolve the archive version from the response's `Content-Disposition`
+/// filename. Reads only headers, so it must be called before the body is
+/// consumed by [`acquire_remote_archive`].
+fn resolve_version(resp: &reqwest::blocking::Response) -> Result<Version> {
     let content_disposition = resp
         .headers()
         .get(CONTENT_DISPOSITION)
@@ -104,16 +156,15 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, Version)> {
             )
         })?
         .to_str()
-        .context("Content-Disposition header contains non-UTF-8 characters")?
-        .to_owned();
+        .context("Content-Disposition header contains non-UTF-8 characters")?;
 
-    let cd_filename = parse_content_disposition_filename(&content_disposition)
+    let cd_filename = parse_content_disposition_filename(content_disposition)
         .ok_or_else(|| {
-            anyhow::anyhow!(
-                "Could not extract filename from Content-Disposition: {:?}",
-                content_disposition
-            )
-        })?;
+        anyhow::anyhow!(
+            "Could not extract filename from Content-Disposition: {:?}",
+            content_disposition
+        )
+    })?;
 
     let version = Version::parse(cd_filename).ok_or_else(|| {
         anyhow::anyhow!(
@@ -132,9 +183,16 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, Version)> {
         ));
     }
 
-    messages::info(&format!("Remote archive version: {version}"));
+    Ok(version)
+}
 
-    // Guard against absurd Content-Length before doing anything else
+/// Reject an absurd `Content-Length`, and warn if it deviates far from the last
+/// known archive size. Reads only headers, so it must be called before the body
+/// is consumed by [`acquire_remote_archive`].
+fn check_download_size(
+    resp: &reqwest::blocking::Response,
+    archive_dir: &Path,
+) -> Result<()> {
     let content_length = resp
         .headers()
         .get(CONTENT_LENGTH)
@@ -163,39 +221,21 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, Version)> {
             }
         }
     }
+    Ok(())
+}
 
-    let archive_path =
-        archive_dir.join(format!("GeoLite2-Country-CSV_{version}.zip"));
-    let checksum_path =
-        archive_dir.join(format!("GeoLite2-Country-CSV_{version}.zip.sha256"));
-
-    // Re-verify cached archive before trusting it
-    if archive_path.exists() && checksum_path.exists() {
-        match verify_cached_archive(&archive_path, &checksum_path) {
-            Ok(true) => {
-                messages::info(&format!(
-                    "Reusing verified local copy: {}",
-                    archive_path.display()
-                ));
-                let temp_dir = extract_archive_to_temp(&archive_path)?;
-                validate_csv_contents(temp_dir.path())?;
-                return Ok((temp_dir, version));
-            }
-            Ok(false) => {
-                messages::warn(
-                    "Local archive checksum mismatch — re-downloading.",
-                );
-            }
-            Err(e) => {
-                messages::warn(&format!(
-                    "Could not verify local archive: {e:#} — re-downloading."
-                ));
-            }
-        }
-    }
-
-    messages::info("No verified local copy of this version. Downloading...");
-
+/// Download the archive body plus its checksum, verify the SHA-256, and move
+/// the archive + checksum atomically into place. Consumes `resp` (the archive
+/// body).
+fn acquire_remote_archive(
+    client: &Client,
+    resp: reqwest::blocking::Response,
+    account_id: &str,
+    license_key: &str,
+    maxmind_url: &str,
+    archive_path: &Path,
+    checksum_path: &Path,
+) -> Result<()> {
     // Download to a .part file; rename atomically on success
     let tmp_path = archive_path.with_extension("zip.part");
 
@@ -268,7 +308,7 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, Version)> {
 
     messages::info("Checksum verification successful.");
 
-    fs::rename(&tmp_path, &archive_path).with_context(|| {
+    fs::rename(&tmp_path, archive_path).with_context(|| {
         format!(
             "Failed to rename {} to {}",
             tmp_path.display(),
@@ -277,14 +317,21 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, Version)> {
     })?;
 
     // Save checksum
-    fs::write(&checksum_path, checksum_text)
+    fs::write(checksum_path, checksum_text)
         .context("Failed to save checksum")?;
 
     messages::info(&format!("Saved archive as {}", archive_path.display()));
+    Ok(())
+}
 
-    let temp_dir = extract_archive_to_temp(&archive_path)?;
+/// Extract an archive to a temp dir and validate the CSV contents it must
+/// contain. Single home for the extract-then-validate step shared by all three
+/// `fetch()` exit paths (local, cached-reuse, post-download) — so no path can
+/// silently skip validation.
+fn extract_and_validate(archive_path: &Path) -> Result<TempDir> {
+    let temp_dir = extract_archive_to_temp(archive_path)?;
     validate_csv_contents(temp_dir.path())?;
-    Ok((temp_dir, version))
+    Ok(temp_dir)
 }
 
 /// Find the latest valid local archive matching:
