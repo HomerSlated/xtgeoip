@@ -103,5 +103,27 @@ origin and cannot drift.
      **unchanged** by the refactor (the test helper flattens a `Plan` back
      into the linear sequence), which is the evidence that encoding the
      invariant altered no observable order or argument.
+
+     **Verified against a live run (2026-07-18).** `sudo xtgeoip build -b -c
+     -p` emitted, in order: `Backing up database...`, `Pruning bin
+     archives...`, `Cleaning output directory...`, `Using latest local
+     archive: …CSV_20260714.zip`, `Building binary database...` — i.e.
+     `[Backup, PruneBin, Clean, Fetch { mode: Local }, Build]`, matching the
+     `build_full_sequence` golden exactly. `build` uses `FetchMode::Local`, so
+     this cost no MaxMind request.
+
+     It also settles the one question the unit tests structurally cannot
+     answer, since they never execute a step: the fetch result moved from a
+     struct field (`RunContext.fetch_result`, alive for the whole run) to a
+     **local binding** in `run_action`. Had that `TempDir` dropped early, its
+     destructor would have removed the extracted CSVs *silently* before
+     `build()` read them — failing as "no data" rather than as a crash. The
+     run reported 253 countries, 352,296 IPv4 and 254,153 IPv6 ranges, so the
+     temp directory demonstrably outlived the build.
+
+     Still unverified: the **`mid` slot**, which is only non-empty for `run
+     --prune` (Fetch, PruneCsv, Build). `run` fetches `Remote`, so confirming
+     it costs a rate-capped MaxMind request; it is pinned structurally by
+     `run_full_sequence` and left for the next real `run -p`.
 3. Spec-derived planning (the declarative unification of validity and steps)
    remains the #26/#27 endpoint — the direction #29 should have pointed.

@@ -306,6 +306,16 @@ Redirected residual:
   back to linear form), proving the encoding altered no observable order or
   argument. #29's redirected residuals are now both closed.
 
+  **Live-verified (2026-07-18).** `sudo xtgeoip build -b -c -p` executed
+  `[Backup, PruneBin, Clean, Fetch { mode: Local }, Build]` in exactly that
+  order, matching the `build_full_sequence` golden; no MaxMind request (Local
+  fetch). Its real output (253 countries, 352,296 IPv4 / 254,153 IPv6 ranges)
+  also proves the `TempDir` survived to build time — the one lifetime risk in
+  moving the fetch result from a struct field to a local binding, which would
+  otherwise have failed *silently* as missing data. The `mid` slot (`run
+  --prune` only) remains unverified against a live run because `run` fetches
+  Remote; pinned structurally by `run_full_sequence`.
+
 The proper "one source" endpoint is #26/#27 (spec-derived plan).
 
 ---
