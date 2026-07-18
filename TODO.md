@@ -214,9 +214,32 @@ extract_archive()  → unpack to temp, flatten, move into place (#54)
   lands, this logic moves into `extract_archive()` verbatim. See
   `private/guardian/guardian_remediation_M-1_20260716_100638.md`.
 
-### #54 — fetch.rs: ZIP entry writes are sequential
+### #54 — fetch.rs: ZIP entry writes are sequential ❌ CLOSED — WONTFIX, measured (2026-07-18)
 
 ZIP entry enumeration is sequential but file writes after decompression are independent. Decompress to buffer sequentially, then spawn parallel write tasks via Rayon. Not critical now; worthwhile if archive grows. **Benchmark before committing.**
+
+**Benchmarked as instructed; the proposal does not pay for itself.** Measured against the real cached archive (`/var/lib/xt_geoip/GeoLite2-Country-CSV_20260714.zip`, 45.58 MB uncompressed over 12 entries), same `zip` crate, release build, mean of 5 runs. `fetch.rs` was **not modified**, so its guardian signature is untouched.
+
+| Phase | Time | Share |
+|---|---|---|
+| A — serial extract (today) | 124.24 ms | 100% |
+| B — decompress only | 71.97 ms | 57.9% |
+| C — write only, serial | 45.45 ms | 36.6% |
+| D — write only, Rayon (**the #54 proposal**) | 43.88 ms | 35.3% |
+
+**#54 saves 1.57 ms of 124 ms — 1.3% of extraction.**
+
+Three independent reasons it cannot be worth it:
+
+1. **It parallelises the cheap half.** The proposal explicitly keeps decompression serial and parallelises only writes. Decompression is 57.9% of the work; writes are 36.6%. The expensive part is left untouched by construction.
+2. **The entry profile caps entry-level parallelism at 1.89×.** Two entries — `Blocks-IPv6` (52.8%) and `Blocks-IPv4` (47.0%) — are **99.8%** of all bytes; the other 10 entries total 0.2%. Effective parallel width is 2, not 12, and perfect parallelism still waits on the single largest entry. Even with infinite cores and perfectly parallel writes, the ceiling for the #54 proposal is ~17% of extraction, not the measured 1.3%.
+3. **Extraction is not the bottleneck of the operation it lives in.** `fetch()` downloads a ~4.7 MB archive over the network first. Extraction is ~124 ms against a multi-second download; shaving 1.6 ms off it is unmeasurable in practice.
+
+Caveat recorded honestly: the benchmark machine has **2 cores**, so the measured 1.3% is a lower bound and a many-core host would land somewhere under the ~17% ceiling. That does not change the conclusion — reason 3 is independent of core count, and reason 2 caps the ceiling regardless.
+
+If extraction ever *does* need to be faster (much larger archive), the measurement says to parallelise **decompression** across the two Blocks files — ceiling 1.89× on the whole extraction — not the writes. Recorded here so the next person does not re-derive it. Same reasoning applies to **#71** (sequential manifest verification): measure the split before parallelising, and check what fraction of the enclosing operation it represents.
+
+Benchmark harness is not committed (it was a scratch project depending only on `zip`/`rayon`/`tempfile`); the numbers above are the deliverable.
 
 ### #71 — backup.rs: manifest verification is sequential
 
@@ -410,9 +433,9 @@ Priority / notes:
 
 High memory risk from CSV materialisation; benchmark before implementing the streaming approach.
 
-### #54 [also fetch.rs] — parallel ZIP writes
+### #54 [also fetch.rs] — parallel ZIP writes ❌ CLOSED — WONTFIX (2026-07-18)
 
-Parallel ZIP writes; benchmark before committing.
+Benchmarked: saves 1.3% of extraction (1.57 ms of 124 ms), and extraction is itself dwarfed by the network download it follows. See the full measurement under **ARCHITECTURE: fetch.rs RESTRUCTURING → #54**.
 
 ### #71 [also backup.rs] — parallel manifest verification
 
