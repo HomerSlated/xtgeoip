@@ -323,9 +323,13 @@ Orphaned files from legacy/default mode switching are not covered by the rebuild
 
 **Scenario B (orphan cleanup)**: produce orphans → clean → run same detection → assert no orphans. Requires `requires:` dependencies and `rebuild:` annotations in YAML. Further analysis needed to establish if all state transitions are covered.
 
-### #96 — CI / sync: run `cargo test` so the snapshot guard is enforced
+### #96 — CI / sync: run `cargo test` so the snapshot guard is enforced ✅ DONE (2026-07-18)
 
-`scripts/sync.py` runs docgen → clippy → `+nightly fmt --check` → `build --release`, but **not** `cargo test`. The CLI-semantics snapshot (`cli::snapshot::cli_semantics_snapshot`, golden at `src/cli_snapshot.golden`, commit `33ddeaa`) — and any future `#[cfg(test)]` unit tests (#88) — therefore aren't enforced automatically. Wire `cargo test` (sandboxed, root-free) into the GitHub Actions workflow and/or as a pre-sync step in `sync.py`, so a behavior change that isn't reflected in a regenerated snapshot fails the build. Pairs with #88.
+Original complaint: `scripts/sync.py` ran docgen → clippy → `+nightly fmt --check` → `build --release`, but **not** `cargo test`, so the CLI-semantics snapshot (`cli::snapshot::cli_semantics_snapshot`, golden at `src/cli_snapshot.golden`, commit `33ddeaa`) and any future `#[cfg(test)]` unit tests (#88) weren't enforced automatically.
+
+**Stale as written (found 2026-07-18).** `cargo test` was wired in at some point after this was filed and the ticket was never updated: `scripts/sync.py:87` and the `test` job in `.github/workflows/rust.yml` both run it. The snapshot guard has in fact been enforced.
+
+The real residual was narrower: both gates ran `cargo clippy --` **without** `--all-targets`, so lints in `#[cfg(test)]` code were never gated — test code compiles under `cargo test`, so this was lint coverage, not correctness. It let the `build.rs` `items_after_test_module` lint sit undetected until a manual `--all-targets` run caught it (fixed `22b3645`). Both gates now pass `--all-targets`, matching the `build` job, which already used it.
 
 ---
 
