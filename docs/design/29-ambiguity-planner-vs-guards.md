@@ -89,7 +89,19 @@ origin and cannot drift.
      tests in `action.rs` assert each plan's `Debug` form, plus
      `build_is_always_preceded_by_fetch`, which sweeps every flag combination to
      pin the invariant behind `execute_step`'s `.expect(...)` (§5).
-   - **OPEN** — make Fetch-before-Build a construction/type guarantee rather
-     than a runtime `expect`. Lower priority now that the sweep guards it.
+   - ✅ **DONE (2026-07-18)** — Fetch-before-Build is now a construction
+     guarantee. `Step` lost its `Build` variant; `plan()` returns a `Plan`
+     that is either `Simple(Vec<Step>)` or `Pipeline { pre, fetch, mid,
+     legacy }`, so a build cannot be *described* without naming the fetch
+     that feeds it. `RunContext`, its `Option<(TempDir, Version)>`, and
+     `execute_step`'s `.expect("Build step requires prior Fetch")` are all
+     gone — `run_action` binds the fetch result by value.
+
+     `mid` exists because Fetch and Build are not adjacent: `run --prune`
+     prunes CSVs between them, so fusing the two into one step would have
+     silently reordered that prune. The 11 goldens' expected strings are
+     **unchanged** by the refactor (the test helper flattens a `Plan` back
+     into the linear sequence), which is the evidence that encoding the
+     invariant altered no observable order or argument.
 3. Spec-derived planning (the declarative unification of validity and steps)
    remains the #26/#27 endpoint — the direction #29 should have pointed.

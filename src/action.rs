@@ -63,6 +63,11 @@ fn resolve_paths(cfg: &Config) -> ResolvedPaths<'_> {
     }
 }
 
+/// A step that needs no value from any other step.
+///
+/// `Build` is deliberately *not* here: it consumes the result of a `Fetch`,
+/// and expressing that as a peer step is what forced the old runtime
+/// `.expect("Build step requires prior Fetch")`. See [`Plan`].
 #[derive(Clone, Copy, Debug)]
 enum Step {
     Backup { mode: BackupMode },
@@ -70,7 +75,27 @@ enum Step {
     Fetch { mode: FetchMode },
     PruneCsv,
     PruneBin,
-    Build { legacy: bool },
+}
+
+/// The shape of an execution.
+///
+/// `Pipeline` encodes Fetch-before-Build *structurally*: a build cannot be
+/// described without naming the fetch that feeds it, so the invariant holds by
+/// construction rather than by a runtime assertion. `mid` exists because the
+/// two are not adjacent — `run --prune` prunes CSVs between fetching and
+/// building — so fusing them into one step would silently reorder that prune.
+#[derive(Debug)]
+enum Plan {
+    /// Steps only; nothing consumes a fetch result. Note this still covers
+    /// plans that *contain* a `Fetch` (`xtgeoip fetch`), whose result is
+    /// simply discarded.
+    Simple(Vec<Step>),
+    Pipeline {
+        pre: Vec<Step>,
+        fetch: FetchMode,
+        mid: Vec<Step>,
+        legacy: bool,
+    },
 }
 
 fn backup_mode(force: bool) -> BackupMode {
@@ -81,7 +106,7 @@ fn backup_mode(force: bool) -> BackupMode {
     }
 }
 
-fn plan(action: &Action) -> Vec<Step> {
+fn plan(action: &Action) -> Plan {
     match action {
         Action::TopLevelBackup {
             clean,
@@ -96,14 +121,12 @@ fn plan(action: &Action) -> Vec<Step> {
             if *clean {
                 steps.push(Step::Clean { mode });
             }
-            steps
+            Plan::Simple(steps)
         }
 
-        Action::TopLevelClean { force } => {
-            vec![Step::Clean {
-                mode: backup_mode(*force),
-            }]
-        }
+        Action::TopLevelClean { force } => Plan::Simple(vec![Step::Clean {
+            mode: backup_mode(*force),
+        }]),
 
         Action::Fetch { prune } => {
             let mut steps = vec![Step::Fetch {
@@ -112,7 +135,7 @@ fn plan(action: &Action) -> Vec<Step> {
             if *prune {
                 steps.push(Step::PruneCsv);
             }
-            steps
+            Plan::Simple(steps)
         }
 
         Action::Run {
@@ -123,21 +146,23 @@ fn plan(action: &Action) -> Vec<Step> {
             legacy,
         } => {
             let mode = backup_mode(*force);
-            let mut steps = vec![];
+            let mut pre = vec![];
             if *backup {
-                steps.push(Step::Backup { mode });
+                pre.push(Step::Backup { mode });
             }
             if *clean {
-                steps.push(Step::Clean { mode });
+                pre.push(Step::Clean { mode });
             }
-            steps.push(Step::Fetch {
-                mode: FetchMode::Remote,
-            });
+            let mut mid = vec![];
             if *prune {
-                steps.push(Step::PruneCsv);
+                mid.push(Step::PruneCsv);
             }
-            steps.push(Step::Build { legacy: *legacy });
-            steps
+            Plan::Pipeline {
+                pre,
+                fetch: FetchMode::Remote,
+                mid,
+                legacy: *legacy,
+            }
         }
 
         Action::Build {
@@ -148,37 +173,32 @@ fn plan(action: &Action) -> Vec<Step> {
             legacy,
         } => {
             let mode = backup_mode(*force);
-            let mut steps = vec![];
+            let mut pre = vec![];
             if *backup {
-                steps.push(Step::Backup { mode });
+                pre.push(Step::Backup { mode });
             }
             if *prune {
-                steps.push(Step::PruneBin);
+                pre.push(Step::PruneBin);
             }
             if *clean {
-                steps.push(Step::Clean { mode });
+                pre.push(Step::Clean { mode });
             }
-            steps.push(Step::Fetch {
-                mode: FetchMode::Local,
-            });
-            steps.push(Step::Build { legacy: *legacy });
-            steps
+            Plan::Pipeline {
+                pre,
+                fetch: FetchMode::Local,
+                mid: vec![],
+                legacy: *legacy,
+            }
         }
 
-        Action::Conf(_) => vec![],
+        Action::Conf(_) => Plan::Simple(vec![]),
     }
-}
-
-#[derive(Default)]
-struct RunContext {
-    fetch_result: Option<(TempDir, Version)>,
 }
 
 fn execute_step(
     cfg: &Config,
     paths: &ResolvedPaths<'_>,
     step: Step,
-    ctx: &mut RunContext,
 ) -> Result<()> {
     match step {
         Step::Backup { mode } => {
@@ -191,8 +211,10 @@ fn execute_step(
             delete(paths.output, mode)?;
         }
 
+        // Standalone fetch: nothing downstream consumes the result, so the
+        // extracted temp dir is dropped here.
         Step::Fetch { mode } => {
-            ctx.fetch_result = Some(fetch(cfg, mode)?);
+            fetch(cfg, mode)?;
         }
 
         Step::PruneCsv => {
@@ -204,27 +226,42 @@ fn execute_step(
             messages::info("Pruning bin archives...");
             prune_archives(cfg, PruneMode::Bin)?;
         }
-
-        Step::Build { legacy } => {
-            let (temp_dir, version) = ctx
-                .fetch_result
-                .as_ref()
-                .expect("Build step requires prior Fetch");
-            messages::info("Building binary database...");
-            build(temp_dir.path(), paths.output, version, legacy)?;
-        }
     }
 
     Ok(())
 }
 
+fn execute_steps(
+    cfg: &Config,
+    paths: &ResolvedPaths<'_>,
+    steps: Vec<Step>,
+) -> Result<()> {
+    for step in steps {
+        execute_step(cfg, paths, step)?;
+    }
+    Ok(())
+}
+
 pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
     let paths = resolve_paths(cfg);
-    let steps = plan(&action);
-    let mut ctx = RunContext::default();
 
-    for step in steps {
-        execute_step(cfg, &paths, step, &mut ctx)?;
+    match plan(&action) {
+        Plan::Simple(steps) => execute_steps(cfg, &paths, steps)?,
+
+        Plan::Pipeline {
+            pre,
+            fetch: mode,
+            mid,
+            legacy,
+        } => {
+            execute_steps(cfg, &paths, pre)?;
+            // Owned, not an Option: the plan could not have described a build
+            // without this fetch, so there is nothing to unwrap.
+            let (temp_dir, version): (TempDir, Version) = fetch(cfg, mode)?;
+            execute_steps(cfg, &paths, mid)?;
+            messages::info("Building binary database...");
+            build(temp_dir.path(), paths.output, &version, legacy)?;
+        }
     }
 
     Ok(())
@@ -234,12 +271,36 @@ pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
 mod tests {
     use super::*;
 
-    /// Golden helper: the plan's `Debug` form pins both the step *sequence* and
-    /// each step's fields in one assertion. Mirrors how `cli::snapshot` pins
-    /// `Action`. `plan()` is otherwise only exercised end-to-end by
-    /// `xtgeoip-tests` (root + live MaxMind), so these are its unit-level pin.
+    /// Golden helper: flattens a [`Plan`] back into the linear step sequence it
+    /// describes, pinning both *order* and each step's fields in one
+    /// assertion. Mirrors how `cli::snapshot` pins `Action`.
+    ///
+    /// The flattening is deliberate. These goldens predate the `Plan` split
+    /// and their expected strings are unchanged by it — so they assert that
+    /// encoding Fetch-before-Build in the type system altered no observable
+    /// order or argument. That matters because `run_action` itself is only
+    /// exercised by `xtgeoip-tests` (root + live MaxMind, rate-capped), making
+    /// these the only affordable regression net over the execution path.
     fn steps(action: &Action) -> String {
-        format!("{:?}", plan(action))
+        let parts: Vec<String> = match plan(action) {
+            Plan::Simple(steps) => {
+                steps.iter().map(|s| format!("{s:?}")).collect()
+            }
+            Plan::Pipeline {
+                pre,
+                fetch,
+                mid,
+                legacy,
+            } => {
+                let mut v: Vec<String> =
+                    pre.iter().map(|s| format!("{s:?}")).collect();
+                v.push(format!("Fetch {{ mode: {fetch:?} }}"));
+                v.extend(mid.iter().map(|s| format!("{s:?}")));
+                v.push(format!("Build {{ legacy: {legacy} }}"));
+                v
+            }
+        };
+        format!("[{}]", parts.join(", "))
     }
 
     // ── top-level backup ─────────────────────────────────────────────────────
@@ -384,12 +445,15 @@ mod tests {
 
     // ── invariant ────────────────────────────────────────────────────────────
 
-    /// `execute_step` ends `Step::Build` with
-    /// `.expect("Build step requires prior Fetch")`. That expect is unreachable
-    /// only because every `plan()` arm emitting Build emits a Fetch first — an
-    /// invariant held by construction, not by the type system. Pin it across
-    /// every flag combination so a future edit cannot silently turn it into a
-    /// runtime panic.
+    /// Fetch-before-Build is now a *type* guarantee: a build is only
+    /// expressible as `Plan::Pipeline`, which cannot be constructed without
+    /// naming the fetch that feeds it. This sweep is kept as the behavioural
+    /// half of that claim — it checks the guarantee survives flattening for
+    /// every flag combination, i.e. that no arm emits a build whose fetch
+    /// lands after it in execution order.
+    ///
+    /// It previously guarded `execute_step`'s
+    /// `.expect("Build step requires prior Fetch")`, which no longer exists.
     #[test]
     fn build_is_always_preceded_by_fetch() {
         let mut actions = vec![
@@ -429,17 +493,26 @@ mod tests {
         }
 
         for action in &actions {
-            let plan = plan(action);
-            let Some(build_at) =
-                plan.iter().position(|s| matches!(s, Step::Build { .. }))
-            else {
+            let rendered = steps(action);
+            let Some(build_at) = rendered.find("Build ") else {
+                // No build in this plan; nothing to guarantee.
+                assert!(
+                    matches!(plan(action), Plan::Simple(_)),
+                    "{action:?} has no Build but is not Simple"
+                );
                 continue;
             };
+            let fetch_at = rendered.find("Fetch ").unwrap_or_else(|| {
+                panic!("Build with no Fetch at all for {action:?}: {rendered}")
+            });
             assert!(
-                plan[..build_at]
-                    .iter()
-                    .any(|s| matches!(s, Step::Fetch { .. })),
-                "Build with no preceding Fetch for {action:?}: {plan:?}"
+                fetch_at < build_at,
+                "Fetch must precede Build for {action:?}: {rendered}"
+            );
+            // The structural half: a build is only expressible as a Pipeline.
+            assert!(
+                matches!(plan(action), Plan::Pipeline { .. }),
+                "{action:?} builds but is not a Pipeline"
             );
         }
     }

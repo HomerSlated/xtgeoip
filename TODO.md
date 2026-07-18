@@ -271,9 +271,17 @@ Redirected residual:
   build→`Fetch{Local}`+`PruneBin`, and `build_is_always_preceded_by_fetch`
   sweeps every flag combination to pin the invariant behind
   `execute_step`'s `.expect("Build step requires prior Fetch")`.
-- **OPEN (not started)** — make Fetch-before-Build a construction/type
-  guarantee rather than that runtime `.expect(...)` (unreachable today — a
-  maintainability nicety, not a bug; the sweep above now guards it).
+- ✅ **DONE (2026-07-18)** — Fetch-before-Build is a construction guarantee.
+  `Step` lost its `Build` variant; `plan()` now returns
+  `Plan::Simple(Vec<Step>)` or `Plan::Pipeline { pre, fetch, mid, legacy }`,
+  so a build is not expressible without naming its fetch. `RunContext`, its
+  `Option<(TempDir, Version)>`, and the `.expect("Build step requires prior
+  Fetch")` are all gone; `run_action` binds the fetch result by value.
+  `mid` exists because the two are *not* adjacent — `run --prune` prunes CSVs
+  between fetch and build — so fusing them would have reordered that prune.
+  The 11 goldens' expected strings are unchanged (the helper flattens a `Plan`
+  back to linear form), proving the encoding altered no observable order or
+  argument. #29's redirected residuals are now both closed.
 
 The proper "one source" endpoint is #26/#27 (spec-derived plan).
 
