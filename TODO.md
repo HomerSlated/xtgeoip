@@ -453,7 +453,26 @@ Benchmarked: saves 1.3% of extraction (1.57 ms of 124 ms), and extraction is its
 
 Parallel manifest verification; measure before committing.
 
-### #88 — unit testing: no unit tests exist  ⚑ HIGH PRIORITY (next after spec-driven architecture)
+### #88 — unit testing: no unit tests exist ✅ LARGELY DONE (reassessed 2026-07-18)
+
+**Premise now false.** The title and the "no unit tests exist" claim are stale. As of 2026-07-18 there are **93 unit tests** running under plain `cargo test` (root-free, no network), across `action.rs`, `build.rs`, `cli.rs`, `fetch.rs`, `version.rs` and `xtgeoip-tests.rs`. They are enforced by `sync.py` and by CI's `test` job (see #96). The deliberate ordering the ticket describes — "tackle immediately after the spec-driven architecture lands" — has happened, and the work landed incrementally alongside it rather than as one push.
+
+Delivered against the original acceptance list:
+
+- ✅ **Sandboxed** — no sudo, no network, no interaction; all 93 run under `cargo test`.
+- ✅ **CI/CD compatible** — GitHub Actions `test` job plus `sync.py`.
+- ✅ **Semantics layer oracle** — `cli::snapshot` pins all 136 flag combinations byte-for-byte; `cli::contradiction` (#92) cross-checks the spec's 51 `CLI_MATRIX` examples against the parser and proves every guard reachable.
+- ✅ **Fixtures over live dependencies** — `fetch.rs` tests synthesise ZIPs in-process (traversal, absolute paths, exec bits, prefix detection, extraction cap) and validate CSVs from fixtures; `version.rs` parses tokens; `build.rs` covers its helpers.
+- ✅ **Execution planning** — `action.rs` goldens pin every `Action`'s step sequence.
+
+Genuinely remaining, and smaller than the original scope implies:
+
+- **Mock HTTP.** No test exercises the network path of `fetch()` (`resolve_version`, `check_download_size`, `acquire_remote_archive`). Everything downstream of the download is covered from fixtures. This is the one real gap; it needs a mock server or an injected transport, and it is what #12/#18 configurability would enable.
+- **Setup/teardown lifecycle** — only relevant to the integration suite, which is #87/#89 territory, not unit tests.
+
+Recommend retitling to "unit testing: mock the HTTP layer in fetch.rs" and dropping the HIGH PRIORITY flag; the major gap it was raised for is closed.
+
+*(Historical text below, kept for provenance.)*
 
 **Priority raised by the user 2026-06-07.** No unit tests exist — a major gap. The
 project's only automated tests are the user-owned integration suite (`xtgeoip-tests`,
