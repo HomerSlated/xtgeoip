@@ -1,11 +1,98 @@
 # Design note: state, ownership, and recovery (#98, #24, #89)
 
-Status: **DRAFT — awaiting ratification**
+Status: **REJECTED (2026-07-18)** — see §0. Retained because the rejection
+reasoning is a permanent scope boundary, not a one-off decision.
 Date: 2026-07-18
 Covers: #98 (test setup/teardown), #24 (no rollback on mid-pipeline failure),
 #89 (orphan scenarios), plus the "reject unknown flags" item carried into #98.
 Related: #87 (integration nature, done), the reverted atomic swap (`4909da4`),
 [`29-ambiguity-planner-vs-guards.md`](29-ambiguity-planner-vs-guards.md).
+
+---
+
+## 0. REJECTED — and why (user, 2026-07-18)
+
+**The `restore` primitive proposed in §5 is rejected, and with it the plan
+built on top of it.** The reasoning is recorded in full because it defines a
+permanent boundary for this tool, not just the fate of one proposal.
+
+### The error in this note
+
+§2 called "there is no restore" *the finding*, treating the absence as an
+omission. It is not an omission. It is a **boundary that had already been
+decided**. Everything downstream inherited that mistake.
+
+This note is also internally inconsistent. §10 rejects "implicit backup before
+destructive steps" because unrequested action is a surprise, and principle 2
+(§3) forbids guessing intent when the result is data loss. **Restore *is* data
+loss** — it overwrites the current state with an archived one. The principle
+was applied to `-b -c -f` and to orphan deletion, then not applied to the
+primitive being proposed. The inconsistency runs in the direction of scope
+creep.
+
+### 1. Restore is not an additional source of data
+
+Three sources already exist: `/usr/share/xt_geoip/`, `/var/lib/xt_geoip/`, and
+MaxMind's servers. A built-in restore adds **convenience, not data**. It only
+becomes useful after a cascading failure that has already eliminated two of
+the three — and at that point its usefulness is marginal, because the third
+source is not guaranteed to fix the problem, since we do not know what the
+problem is.
+
+### 2. The audience can use `tar`
+
+`xtgeoip` is a power administrator's tool. The premise that this user cannot
+extract a `.tar.gz` does not survive contact with reality.
+
+### 3. It adopts responsibility for complexity we did not create
+
+Our mandate is already well defined: we write the `xt_geoip` files, the
+`version` file, and the manifest. **The manifest is our only contract.** We may
+overwrite and delete what it lists — nothing more. `-c -f` is a single
+concession to avoid lint accumulating, and even that must be explicitly
+requested.
+
+`restore` breaks that contract. It acts on files whose current state we have
+decided is wrong, which is a judgement we have no basis to make. "Force clean,
+then restore" is the worst form: deleting what may be the **only remaining
+copy** of the data, as a consequence of the very corruption we are responding
+to, and replacing it with something we merely hope is functional.
+
+To do it correctly we would have to understand *why* the restore is needed —
+what caused the loss, what corrupted the data, or what external change made the
+existing data unusable. That means becoming a full diagnostic tool, far outside
+scope.
+
+### The principle
+
+> **Backups are context-free; restores are not.**
+>
+> A backup can be made for the user without knowing or caring about the
+> circumstances, because a backup is never made *because* there is a problem —
+> it is made to provide part of the means to *solve* a problem, if one ever
+> manifests.
+>
+> The moment you adopt responsibility for restoring a backup, you have adopted
+> responsibility for solving the problem — and you cannot solve a problem you
+> do not understand.
+>
+> **That is the user's job.**
+
+This generalises beyond restore: it is the test for any proposed
+"recovery convenience". If the operation is only correct given knowledge of why
+it is being performed, it does not belong in this tool.
+
+### Consequences
+
+- §5 (`restore`): **rejected.**
+- §6 stage 2 (rollback via the taken backup): **rejected** — it was restore
+  under another name.
+- §6 stage 3 (atomic swap): remains rejected, as before.
+- §7 (#98 teardown built on restore): **rejected**; the same objection applies,
+  and the operator can stage their own environment.
+- §11 (decisions needed): moot.
+
+Items in this note that never depended on restore are listed in §12.
 
 ---
 
@@ -219,3 +306,31 @@ require the live run, and they should be batched into it.
 2. Ratify #24 stage 1 (moving `Clean` after `Fetch`) — it changes observable
    step order. (§6)
 3. Confirm the sequencing in §9, in particular batching 5–7 into one live run.
+
+*(§11 is moot — see §0.)*
+
+## 12. What did not depend on `restore`
+
+Listed for completeness, **not** assumed to survive: the plan was rejected
+entirely, and each of these needs its own decision on its own merits. None
+requires a recovery primitive.
+
+1. **Documenting the ownership model** (§4) — owned / unowned / stale-owned,
+   and that the manifest is the contract. Pure documentation of behaviour that
+   already exists and was verified working.
+2. **Documenting the two orphan-clean paths** (§4) — `build -c` during a
+   switch back versus `build -c -f` after the fact. The distinction is real,
+   undocumented, and the author of this note got it wrong from reading the
+   code, which is the argument for writing it down. Per the user: this is an
+   RTFM problem, so the fix is the FM.
+3. **Rejecting unknown CLI flags in `xtgeoip-tests`** (§7) — a typo'd
+   `--rebuil` is silently ignored and produces false "Nothing to back up"
+   failures. Independent of everything else here; root-free to verify.
+4. **#24 stage 1: reorder `Clean` after `Fetch`** (§6) — today `run -c`
+   destroys the working data *before* the network step, so a MaxMind outage
+   leaves `output_dir` empty. This is not recovery; it is not destroying data
+   until the replacement is in hand, which is the same instinct that rejects
+   restore. Unit-testable; verifiable with a free `build -c` (Local fetch).
+5. **#89 integration cases** (§8) — the legacy-flip cycle, whose final
+   assertion (`xtgeoip.conf.example` survives) is the regression test for the
+   `b4ec1db` data-loss bug. Needs no restore, only a defined starting point.
