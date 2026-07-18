@@ -172,7 +172,7 @@ struct Testcase {
 
 fn main() -> anyhow::Result<()> {
     let yaml_str = fs::read_to_string("docs/spec/cli.yaml")?;
-    let spec: Spec = serde_yaml::from_str(&yaml_str)?;
+    let spec: Spec = serde_saphyr::from_str(&yaml_str)?;
 
     const SUPPORTED_SCHEMA_VERSION: &str = "3.1";
     if spec.version != SUPPORTED_SCHEMA_VERSION {
@@ -864,7 +864,7 @@ fn generate_testcases_yaml(spec: &Spec) -> anyhow::Result<String> {
         add(exs);
     }
 
-    Ok(serde_yaml::to_string(&testcases)?)
+    Ok(serde_saphyr::to_string(&testcases)?)
 }
 
 /* ---------------- MANPAGE ---------------- */
