@@ -258,9 +258,24 @@ Guardian finding **F-2**, same audit. **LOW — CVSS 3.7** (`CVSS:3.1/AV:N/AC:H/
 
 Substantially defused downstream: the archive is trusted only after SHA-256 verification against the separately-fetched `.sha256`, so an attacker would have to redirect *both* requests consistently.
 
-Remediation: set an explicit policy — `Policy::limited(3)`, or a custom policy rejecting any redirect that leaves the configured `maxmind_url` host — so the guarantee is asserted here rather than inherited. Cheap: roughly one line plus a comment recording why.
+**Live measurement (2026-07-18) — settles the policy choice and corrects the remediation above.** Observed against the real endpoint with credentials, using a `.sha256` request and a 1-byte range request to keep the cost minimal:
 
-Pairs naturally with **#88** (mock HTTP in `fetch.rs`), which would make redirect behaviour testable, and with the re-audit both would require anyway.
+1. `GET download.maxmind.com/geoip/databases/GeoLite2-Country-CSV/download?suffix=…` with basic auth → **302**
+2. Redirect target is a **Cloudflare R2 bucket host** (`*.r2.cloudflarestorage.com`, different origin), URL carrying a query string
+3. That target is **pre-signed**: fetched with *no credentials at all* it returned **206**
+
+Consequences:
+
+- **`Policy::none()` would break the tool outright** — every fetch depends on following that 302.
+- **Host-pinning would break it too.** The target is a different origin, and its hostname embeds a bucket identifier that is not ours to depend on.
+- **The security argument is concrete, not theoretical.** The license key goes to `download.maxmind.com`; reqwest strips it on the cross-origin hop; and the R2 request needs no credentials — proven. So the stripping prevents the key being sent, *on every fetch*, to a third party that demonstrably does not need it. A reqwest default change would leak it silently and continuously.
+- **The remediation as originally filed was mis-specified.** A redirect policy *cannot* assert the stripping guarantee: reqwest's `Policy` only decides follow-or-stop and cannot inspect or modify headers. Only a **test** can assert non-forwarding.
+
+**Revised remediation.** A custom policy that asserts what a policy actually can:
+- bound the hop count (observed: 1, so 3 gives headroom without brittleness), and
+- **reject any redirect target whose scheme is not `https`** — expressible in a policy, and it closes the downgrade case noted as the secondary residual.
+
+The credential-stripping property is asserted separately, by a test under **#88**: serve a cross-origin redirect from the mock and assert no `Authorization` header reaches the second origin. That is the pairing between these two tickets — #101's *fix* is one line; its *verification* needs #88's harness.
 
 ⚠ Touching `fetch.rs` invalidates its guardian signature and needs a re-audit.
 
