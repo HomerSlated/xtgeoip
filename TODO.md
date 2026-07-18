@@ -394,9 +394,9 @@ The real residual was narrower: both gates ran `cargo clippy --` **without** `--
 
 ---
 
-### #97 — structure-errors: dead binary, broken at HEAD ⚑ NEEDS DECISION
+### #97 — structure-errors: dead binary, broken at HEAD ✅ DELETED (2026-07-18)
 
-Found 2026-07-18 while migrating #2. `src/bin/structure-errors.rs` is dead code and has been for some time:
+Found 2026-07-18 while migrating #2. `src/bin/structure-errors.rs` was dead code and had been for some time:
 
 - **It fails.** Running it aborts with `error_case 'build_force_ambiguous' refers to unknown template 'build_force_ambiguous'`. Confirmed pre-existing at HEAD (reproduced with the original `serde_yaml` reader, so it is not migration fallout). Its `ErrorSpec` model expects every `error_cases.*.maps_to` to name a `reason_templates` key; `cli.yaml:83` has `build_force_ambiguous: { maps_to: build_force_ambiguous }`, which names no such template. The spec moved on (guards now carry `error: build_force_ambiguous`, `cli.yaml:240`) and this binary was never updated.
 - **Its output is unused.** It writes `src/generated/errors.rs.in`, which is untracked, absent from `src/generated/mod.rs` (which declares only `cli_matrix`, `cli_rules`, `error_text` — all written by docgen), and the `CliError` type it generates appears nowhere in `src/`.
@@ -404,7 +404,9 @@ Found 2026-07-18 while migrating #2. `src/bin/structure-errors.rs` is dead code 
 
 It was superseded by docgen's `generate_error_text_rs` (`xtgeoip-docgen.rs:776` → `src/generated/error_text.rs`).
 
-Decide: **delete it** (recommended — the live path is docgen, and a broken generator that nothing runs is a trap for the next reader), or repair it to match the current spec if it is meant to have a role. Note it also counts against #88/#96-style gating: no gate would have caught this, since a `[[bin]]` that compiles but fails at runtime is invisible to `cargo build`/`clippy`/`cargo test`.
+**Deleted** on the user's call — redundant and superseded. `Cargo.toml` needed no change (bins under `src/bin/` are auto-discovered, and there was no `[[bin]]` entry); no stray `errors.rs.in` existed to clean up, since the binary always failed before reaching its write. References updated in `CLAUDE.md` and `TODO_tldr.md`.
+
+**Lesson worth keeping.** No gate would have caught this: a binary that *compiles* but fails at runtime is invisible to `cargo build`, `clippy`, and `cargo test`, and nothing in `sync.py` or CI executed it. That is a different failure class from the `--all-targets` lint gap closed the same day. Any future helper binary should either be invoked by `sync.py`/CI or have a smoke test, otherwise it can rot silently exactly like this one did.
 
 ---
 

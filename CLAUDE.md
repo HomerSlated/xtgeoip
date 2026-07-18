@@ -53,7 +53,7 @@ The test cases come from `docs/generated/testcases.yaml`, which is itself genera
 | `config.rs` | TOML config load (`/etc/xtgeoip.conf`); `conf` subcommand handler |
 | `messages.rs` | `fern` + `syslog` logging setup |
 
-**Helper binaries** (`src/bin/`): `xtgeoip-docgen` (codegen), `structure-errors`, `xtgeoip-tests` (test validator).
+**Helper binaries** (`src/bin/`): `xtgeoip-docgen` (codegen), `xtgeoip-tests` (test validator).
 
 **Config** (TOML, default `/etc/xtgeoip.conf`):
 - `[maxmind]` — account/license/URL for GeoLite2 CSV download
