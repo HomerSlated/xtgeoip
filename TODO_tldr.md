@@ -10,7 +10,7 @@
 ## WIP
 
 - Packaging and deployment — in progress
-- CLI codegen from spec / structure-errors — in progress
+- CLI codegen from spec (`xtgeoip-docgen`) — in progress
 
 ---
 
