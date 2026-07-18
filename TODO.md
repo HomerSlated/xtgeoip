@@ -304,6 +304,23 @@ declare rules (`p conflicts f`, `prune requires backup|fetch-context`) once and 
 *every* combination against them — examples then prove the rules rather than stand in
 for coverage. A committed enumeration harness should back this (overlaps #88).
 
+**✅ CONTRADICTION CHECKS DONE (2026-07-18)** — `cli::contradiction`, 4 tests, no new dependencies.
+
+*Fuzzing/proptest deliberately dropped* (user's call). The flag space is 5 bits — 32 combinations per context, 136 total — and `cli::snapshot` already enumerates all of them. At that size exhaustive enumeration strictly dominates random sampling: proptest could only ever rediscover a subset of what the snapshot already pins, non-deterministically, at the cost of a dependency. The "seed corpus / property testing" framing predates the snapshot.
+
+What was actually uncovered was contradiction *between* layers, now closed:
+
+- `spec_examples_agree_with_parser` — runs all 51 `CLI_MATRIX` examples through the real parser and asserts `valid` matches. Nothing previously checked the spec's hand-written examples against the implementation; a lying example would have shipped as docs, man page, **and** test case, all wrong and all mutually agreeing. This is the `p⊕f` shape.
+- `every_guard_is_reachable` — enumerates all 32 masks per context and asserts each guard is *first to fire* for at least one. Catches a guard fully subsumed by an earlier one, whose error message would then be unreachable while still appearing live in spec and docs. Failure output names the shadowing guard.
+- `guard_keys_are_unique_within_context` — keys identify errors (`[key]: message`) and are what `testcases.yaml` asserts against; duplicates make both ambiguous.
+- `every_flag_is_referenced_by_some_guard` — a flag constrained by no guard is either deliberate or an omission; this pins which.
+
+Both substantive tests were **verified to have teeth** by injecting the fault each targets (flipped a matrix `valid`; inserted a catch-all guard) and confirming failure with a useful diagnostic, then reverting.
+
+**Finding — `CliOutcome::ShowHelp` is misnamed.** Writing the oracle surfaced it: `ShowHelp` is produced at exactly one site (`cli.rs`, bare invocation, `flags == 0`) and `main.rs` renders it as `Error [top_level_no_args]` with a non-zero exit. An explicit `-h` never reaches it — clap intercepts that as a `DisplayHelp` error first. So the variant means "no args: print usage and **fail**", the opposite of what its name suggests, and the validity distinction lives in `main.rs` rather than in the outcome type. Not a bug; a naming trap that cost one wrong oracle. Consider renaming to `NoArgs` — filed as a note here rather than a ticket, since it is cosmetic.
+
+Still open under #92: expanding the *docgen-side* spec validator (contradictions detectable at generation time rather than test time).
+
 ---
 
 ## DOCGEN (xtgeoip-docgen.rs)
