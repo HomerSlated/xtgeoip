@@ -227,6 +227,53 @@ fn check_download_size(
 /// Download the archive body plus its checksum, verify the SHA-256, and move
 /// the archive + checksum atomically into place. Consumes `resp` (the archive
 /// body).
+/// Deletes a partial download on drop unless [`disarm`](Self::disarm)ed.
+///
+/// A failed fetch must leave no ephemeral data behind. The two explicit
+/// cleanups that used to exist covered the size-breach and checksum-mismatch
+/// paths only; six others — a dropped connection mid-copy, a failed or
+/// non-success checksum request, an unreadable or malformed checksum body, and
+/// a failed rename — returned via `?` or `bail!` and leaked the `.part` file.
+///
+/// Leaked files were inert but immortal: `find_latest_local_csv_archive`
+/// requires `.zip`, so they were never mistaken for an archive, but
+/// `prune_csv_archives` matches only `.zip`/`.zip.sha256`, so they were never
+/// pruned either — accumulating unboundedly in `archive_dir`.
+///
+/// Doing this with `Drop` rather than more explicit cleanups means new error
+/// paths are covered by construction rather than by remembering.
+struct PartialDownload<'a> {
+    path: &'a Path,
+    armed: bool,
+}
+
+impl<'a> PartialDownload<'a> {
+    fn new(path: &'a Path) -> Self {
+        Self { path, armed: true }
+    }
+
+    /// Call once the file has been renamed into place and must be kept.
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for PartialDownload<'_> {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        if let Err(e) = fs::remove_file(self.path)
+            && e.kind() != io::ErrorKind::NotFound
+        {
+            messages::warn(&format!(
+                "Failed to remove partial download {}: {e}",
+                self.path.display()
+            ));
+        }
+    }
+}
+
 fn acquire_remote_archive(
     client: &Client,
     resp: reqwest::blocking::Response,
@@ -238,6 +285,8 @@ fn acquire_remote_archive(
 ) -> Result<()> {
     // Download to a .part file; rename atomically on success
     let tmp_path = archive_path.with_extension("zip.part");
+    // Armed from here on: every early return below removes the .part file.
+    let mut partial = PartialDownload::new(&tmp_path);
 
     // Stream archive directly to file + hash while copying
     let mut archive_file =
@@ -257,7 +306,7 @@ fn acquire_remote_archive(
     };
 
     if written > MAX_DOWNLOAD_BYTES {
-        let _ = fs::remove_file(&tmp_path);
+        // `partial` removes the .part file on the way out.
         bail!(
             "Download exceeded {MAX_DOWNLOAD_BYTES} bytes — refusing to use \
              truncated archive"
@@ -291,13 +340,6 @@ fn acquire_remote_archive(
 
     // Verify checksum
     if actual_hash != expected_hash {
-        if let Err(e) = fs::remove_file(&tmp_path) {
-            messages::warn(&format!(
-                "Failed to remove partial download {}: {}",
-                tmp_path.display(),
-                e
-            ));
-        }
         bail!(
             "Checksum verification failed for {}: expected {}, got {}",
             archive_path.display(),
@@ -315,6 +357,9 @@ fn acquire_remote_archive(
             archive_path.display()
         )
     })?;
+    // Renamed into place: the .part path no longer exists and must not be
+    // pursued on drop.
+    partial.disarm();
 
     // Save checksum
     fs::write(checksum_path, checksum_text)
@@ -750,6 +795,49 @@ mod tests {
     use zip::write::{SimpleFileOptions, ZipWriter};
 
     use super::*;
+
+    // ── partial-download cleanup ─────────────────────────────────────────────
+
+    /// The default: any early return removes the `.part` file. Six error
+    /// paths in `acquire_remote_archive` previously leaked it, and because
+    /// `prune_csv_archives` matches only `.zip`/`.zip.sha256`, leaked files
+    /// were never reclaimed.
+    #[test]
+    fn partial_download_is_removed_on_drop() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("archive.zip.part");
+        fs::write(&part, b"half a download").unwrap();
+
+        drop(PartialDownload::new(&part));
+        assert!(!part.exists(), "armed guard must delete the .part file");
+    }
+
+    /// After a successful rename the file has moved; the guard must not chase
+    /// it (and must not delete anything at the old path).
+    #[test]
+    fn disarmed_guard_keeps_the_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("archive.zip.part");
+        fs::write(&part, b"complete").unwrap();
+
+        let mut guard = PartialDownload::new(&part);
+        guard.disarm();
+        drop(guard);
+
+        assert!(part.exists(), "disarmed guard must not delete");
+    }
+
+    /// A guard whose file never got created — e.g. `File::create` failed —
+    /// must drop silently rather than warn about a missing file.
+    #[test]
+    fn missing_partial_download_is_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let part = dir.path().join("never-created.zip.part");
+        assert!(!part.exists());
+
+        drop(PartialDownload::new(&part));
+        assert!(!part.exists());
+    }
 
     // ── zip fixtures ─────────────────────────────────────────────────────────
 
