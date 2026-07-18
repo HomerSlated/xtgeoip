@@ -453,9 +453,15 @@ Benchmarked: saves 1.3% of extraction (1.57 ms of 124 ms), and extraction is its
 
 Parallel manifest verification; measure before committing.
 
-### #88 — unit testing: no unit tests exist ✅ LARGELY DONE (reassessed 2026-07-18)
+### #88 — unit testing: mock the HTTP layer in fetch.rs
 
-**Premise now false.** The title and the "no unit tests exist" claim are stale. As of 2026-07-18 there are **93 unit tests** running under plain `cargo test` (root-free, no network), across `action.rs`, `build.rs`, `cli.rs`, `fetch.rs`, `version.rs` and `xtgeoip-tests.rs`. They are enforced by `sync.py` and by CI's `test` job (see #96). The deliberate ordering the ticket describes — "tackle immediately after the spec-driven architecture lands" — has happened, and the work landed incrementally alongside it rather than as one push.
+*(Retitled 2026-07-18. Was: "unit testing: no unit tests exist ⚑ HIGH PRIORITY (next after spec-driven architecture)". The original gap is closed — 93 unit tests exist; what remains is the network path alone, so the HIGH PRIORITY flag was dropped with it.)*
+
+**Remaining scope.** Nothing exercises `fetch()`'s network path — `resolve_version`, `check_download_size`, `acquire_remote_archive`. Everything downstream of the download is already covered from fixtures. Needs a mock HTTP server or an injected transport; #12/#18 configurability is the enabler. Note `fetch.rs` is guardian-signed, so any change to it requires a re-sign.
+
+---
+
+**Reassessment that led to the retitle (2026-07-18).** The title and the "no unit tests exist" claim were stale. As of 2026-07-18 there are **93 unit tests** running under plain `cargo test` (root-free, no network), across `action.rs`, `build.rs`, `cli.rs`, `fetch.rs`, `version.rs` and `xtgeoip-tests.rs`. They are enforced by `sync.py` and by CI's `test` job (see #96). The deliberate ordering the ticket describes — "tackle immediately after the spec-driven architecture lands" — has happened, and the work landed incrementally alongside it rather than as one push.
 
 Delivered against the original acceptance list:
 
@@ -470,7 +476,7 @@ Genuinely remaining, and smaller than the original scope implies:
 - **Mock HTTP.** No test exercises the network path of `fetch()` (`resolve_version`, `check_download_size`, `acquire_remote_archive`). Everything downstream of the download is covered from fixtures. This is the one real gap; it needs a mock server or an injected transport, and it is what #12/#18 configurability would enable.
 - **Setup/teardown lifecycle** — only relevant to the integration suite, which is #87/#89 territory, not unit tests.
 
-Recommend retitling to "unit testing: mock the HTTP layer in fetch.rs" and dropping the HIGH PRIORITY flag; the major gap it was raised for is closed.
+✅ Retitled and de-flagged 2026-07-18 on that basis; the remaining scope is stated at the top of this entry.
 
 *(Historical text below, kept for provenance.)*
 
