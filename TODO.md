@@ -366,13 +366,23 @@ Still open under #92: expanding the *docgen-side* spec validator (contradictions
 
 Silent fallbacks like `.unwrap_or_else(|| "OK".into())` and `"ERROR".into()` let missing spec data silently become valid-looking output. Distinguish explicit defaults (optional field, spec-defined meaning) from missing required fields (hard error at spec-load time). Enforce required fields via `deny_unknown_fields` or explicit validation. A spec with missing data should not produce output. Ties into #61.
 
-### #77 — docgen: testcase YAML output has no ordering or schema guarantees
+### #77 — docgen: testcase YAML output has no ordering or schema guarantees ✅ DONE (2026-07-18)
 
 `serde_yaml::to_string(&testcases)?` has no ordering guarantees, no schema enforcement, no versioning metadata. Improvements: stable ordering (by `case_id`), top-level `schema_version` field, post-generation round-trip validation. Do alongside #2 migration.
 
-### #79 — docgen: BTreeMap ordering not verified for YAML deserialisation
+**Done, with one sub-part deliberately rejected.**
 
-`BTreeMap<String, CommandSpec>` gives deterministic alphabetical ordering at Rust level. Verify the YAML deserialiser preserves stable iteration order when deserialising into `BTreeMap`. Test with round-trip assertion. Do alongside #2 migration.
+- ✅ **`schema_version` field.** `testcases.yaml` is now `{ schema_version: 1, testcases: [...] }` instead of a bare sequence. `TESTCASES_SCHEMA_VERSION` is declared in *both* `xtgeoip-docgen.rs` (writer) and `xtgeoip-tests.rs` (reader), and the reader **validates** it — `load_testcases` bails with a regenerate hint on mismatch rather than running cases whose meaning may have shifted. A version field nobody checks is exactly the decorative-metadata smell #76 exists to remove, so it is gated by two tests (`wrong_schema_version_is_rejected`, `current_schema_version_is_accepted`). Note this is distinct from the *input* spec's `SUPPORTED_SCHEMA_VERSION` ("3.1", versioning `cli.yaml`); don't conflate "schema 1" with "schema 3.1".
+- ✅ **Post-generation round-trip validation.** `generate_testcases_yaml` now serialises → parses back → re-serialises and asserts the two strings match, failing generation if the emitter and parser ever disagree. Catches divergence at generation time instead of as a confusing failure inside the integration suite.
+- ❌ **Stable ordering *by `case_id`* — rejected.** The order is already deterministic (top-level first, then `spec.commands` in `BTreeMap` alphabetical order: build, conf, fetch, run). Sorting on `case_id` would yield B, C, F, R, TL, **moving all 15 top-level cases from first to last** — and this suite is order-dependent (#87): `TL-007` (`-c`) empties `output_dir`, so every later case would run against a different state sequence. Validating that costs a rate-capped live MaxMind run, for no gain over the existing determinism. Pinned instead by `emission_order_is_stable`, which asserts the run-length encoding `TL·15, B·13, C·4, F·6, R·13` and carries a comment telling future readers not to re-sort it.
+
+Emission is otherwise byte-stable: the regenerated file differs from the pre-change version by exactly the two new lines — entries were not re-indented or reordered.
+
+### #79 — docgen: BTreeMap ordering not verified for YAML deserialisation ✅ DONE (2026-07-18)
+
+Covered by the same work. The round-trip assertion in `generate_testcases_yaml` plus `emission_order_is_stable` together verify that `BTreeMap` iteration order survives deserialisation *and* is preserved through emission. #2's byte-identical regeneration across a full parser swap (serde_yaml → serde-saphyr) was the original evidence; this makes it an assertion rather than an observation, and CI's `docgen-check` job re-proves it on every push.
+
+Original text: `BTreeMap<String, CommandSpec>` gives deterministic alphabetical ordering at Rust level. Verify the YAML deserialiser preserves stable iteration order when deserialising into `BTreeMap`. Test with round-trip assertion. Do alongside #2 migration.
 
 ---
 

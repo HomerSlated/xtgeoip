@@ -5,6 +5,7 @@ use std::{
     fs,
 };
 
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
@@ -152,7 +153,27 @@ struct ManpageTemplate {
     authors: String,
 }
 
-#[derive(Debug, Serialize)]
+/// Schema version of the *output* file `docs/generated/testcases.yaml`.
+///
+/// Distinct from `SUPPORTED_SCHEMA_VERSION` ("3.1"), which versions the
+/// *input* spec `docs/spec/cli.yaml`. Bump this only when the testcase file's
+/// shape changes, and update the matching constant in `xtgeoip-tests.rs`,
+/// which refuses to run against an unrecognised version.
+const TESTCASES_SCHEMA_VERSION: u32 = 1;
+
+/// Envelope for `testcases.yaml`: a version tag plus the case list.
+///
+/// The file was a bare YAML sequence before schema 1 (#77); wrapping it gives
+/// the reader something to check before trusting the contents.
+#[derive(Debug, Serialize, Deserialize)]
+struct TestcaseFile {
+    schema_version: u32,
+    testcases: Vec<Testcase>,
+}
+
+// Deserialize is required for the round-trip self-check in
+// generate_testcases_yaml, not just for emission.
+#[derive(Debug, Serialize, Deserialize)]
 struct Testcase {
     case_id: Option<String>,
     key: String,
@@ -864,7 +885,28 @@ fn generate_testcases_yaml(spec: &Spec) -> anyhow::Result<String> {
         add(exs);
     }
 
-    Ok(serde_saphyr::to_string(&testcases)?)
+    let file = TestcaseFile {
+        schema_version: TESTCASES_SCHEMA_VERSION,
+        testcases,
+    };
+    let yaml = serde_saphyr::to_string(&file)?;
+
+    // Round-trip self-check (#77c): parse the emitted YAML back and re-emit
+    // it. Any field the emitter writes but the parser cannot read — or reads
+    // differently — shows up here, at generation time, rather than as a
+    // confusing failure inside the integration suite that consumes this file.
+    let reparsed: TestcaseFile = serde_saphyr::from_str(&yaml).context(
+        "Generated testcases.yaml could not be parsed back — emitter and \
+         parser disagree",
+    )?;
+    let reemitted = serde_saphyr::to_string(&reparsed)?;
+    anyhow::ensure!(
+        yaml == reemitted,
+        "testcases.yaml is not round-trip stable: re-emitting the parsed file \
+         produced different output"
+    );
+
+    Ok(yaml)
 }
 
 /* ---------------- MANPAGE ---------------- */
