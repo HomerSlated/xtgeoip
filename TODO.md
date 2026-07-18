@@ -601,9 +601,32 @@ It was superseded by docgen's `generate_error_text_rs` (`xtgeoip-docgen.rs:776` 
 
 ## TOOLING / AGENTS
 
-### #95 — import generic agents from private/agents-out/ — docs-auditor ✅ DONE (2026-07-18)
+### #95 — import generic agents from private/agents-out/ ✅ COMPLETE (2026-07-18)
 
-**`docs-auditor` imported and adapted** (`.claude/agents/docs-auditor.md`). Two of seven now installed; the remaining five stay deferred per this ticket's own "adapt as needed when wanted".
+**All seven imported and adapted** into `.claude/agents/`. The initial plan was docs-auditor alone, on the reasoning that the rest had no consumer; the user reviewed the roles and confirmed all are useful here, which also corrected a mistaken assumption on my part — **bug-hunter and guardian-security are deliberately disjoint**, not overlapping: bugs-only versus security-only, with each instructed to hand findings in the other's domain across rather than audit them.
+
+| Agent | Remit | Output |
+|---|---|---|
+| `guardian-security` | security vulnerabilities **only** | `private/guardian/` + `.sig` files |
+| `bug-hunter` | correctness bugs **only** | `private/bug-hunter/` |
+| `optimisation-advisor` | performance **only**; identifies candidates, does not decide them | `private/optimisation/` |
+| `docs-auditor` | hand-maintained docs vs source | edits the audit set in place |
+| `data-flow-tracer` | path responsible for one named value | `private/traces/` (+ `tools/`) |
+| `flow-doc-generator` | Mermaid + prose, for understanding and porting | `private/flow/` |
+| `deep-research-collector` | internet research, cited | `private/research/` |
+
+Adaptations worth recording:
+
+- **`optimisation-advisor` carries this session's method as normative rules**, with the three worked examples: measure the *enclosing* operation, not the function (#71 achieved 4.61× and still saved only 0.6–3.3%); check the proposal targets the expensive half (#54 parallelised writes while leaving decompression serial); sweep the parameter space before assuming a trade-off exists (#99 — level 6 was strictly dominated, no trade to make); and Amdahl's ceiling comes from the work distribution, not the core count (2 of 12 ZIP entries are 99.8% of the bytes). It must state cost-share, ceiling, and the deciding experiment for every candidate.
+- **Every agent is given real magnitudes** — 564,448 IPv4 / 558,545 IPv6 rows, 253 countries, 506 output files, ~45.6 MB CSV from a ~4.7 MB ZIP, extraction ~124 ms, backup ~363 ms — so findings are judged against actual scale rather than guessed at.
+- **All are told `src/generated/` and `docs/generated/` are docgen-owned**: a defect there is a defect in `docs/spec/cli.yaml` or the generator, to be reported by spec key, never edited.
+- **All are told not to run `git`** (commits go via `private/COMMIT_MSG` + `scripts/sync.py`), not to run `xtgeoip-tests` (root + **rate-capped** MaxMind), and not to run docgen (it rewrites generated files).
+- **`TODO.md`'s INVARIANTS are cited as normative**, with constraint 5 called out to `optimisation-advisor` and `bug-hunter`: never trade away working parallelism.
+- **`deep-research-collector` is explicitly barred from transmitting project material** — MaxMind `account_id`/`license_key` and anything under `private/` must never appear in a query, URL or saved document.
+- **`bug-hunter` is told to distinguish latent from live.** Several invariants here are held by construction (`Plan::Pipeline`, `Version::parse` confinement); reporting them as bugs would waste the reader's time.
+- **`flow-doc-generator`'s output location is flagged as questionable**: `private/` is gitignored, which sits awkwardly with a porting aid meant to be shared. `docs/flow/` is the natural home if tracked output is wanted — the agent is told to ask rather than assume.
+
+Two of seven previously; now all seven.
 
 Adaptation notes:
 - Default audit set is exactly what `private/WORKFLOW.md` names: `README.md`, `CLAUDE.md`, `TODO.md`/`TODO_tldr.md`, `docs/design.md`, `docs/legacy.md`. All six verified to exist.
