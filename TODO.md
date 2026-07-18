@@ -271,7 +271,7 @@ Method note, same as #54: measure the split, *then* check what share of the encl
 
 ## ARCHITECTURE: action.rs / EXECUTION PLANNER
 
-### #22 — action.rs: FetchMode semantics exist only in code
+### #22 — action.rs: FetchMode semantics exist only in code ❌ CLOSED — SUBSUMED by #26/#27 (2026-07-18)
 
 `FetchMode::Remote` and `FetchMode::Local` are a clean abstraction but their semantics exist only in code. Bring into spec:
 ```yaml
@@ -279,6 +279,17 @@ fetch:
   mode: remote | local
 ```
 Depends on #17 and spec-driven direction.
+
+**Closed as subsumed**, on the reasoning that doing it piecemeal builds machinery #26/#27 will replace. Spec-derived planning brings `FetchMode` in along with the whole step sequence, from one declarative origin; a standalone `fetch_mode` key would create a *second* partial spec→plan path while the step sequence stayed in code — two mechanisms for one concern, which is the problem the spec-driven arc exists to remove.
+
+Dependency status, for whoever picks up #26/#27:
+
+- **`#17` (execution planner) is satisfied.** It has no ticket of its own — it is a dangling ID referenced by #22, #29 and #24 — but the planner exists: `enum Step` + `enum Plan` + `fn plan()` in `action.rs`, restructured 2026-07-18 (#29) so that `Plan::Pipeline` encodes Fetch-before-Build structurally. Anything blocked "on #17" is now unblocked.
+- **`#26`/`#27` (spec-derived planning) is not started.** That is the real blocker here.
+
+**Carry forward — a documentation gap that is independent of the codegen question.** `FetchMode` is not merely internal: it determines **whether a command contacts the rate-capped MaxMind API**. `run` and `fetch` are Remote; `build` reuses the cached archive (Local). That is arguably the most operationally significant fact about these commands — it is why `build` can be used to exercise the pipeline for free (see #29's live verification), and why full `xtgeoip-tests` runs are expensive. It currently appears in **neither** `cli.yaml`, the man page, nor `--help`. Whether or not the mode is ever code-generated, it should be *documented*. Worth folding into #26/#27, or raising separately if that stalls.
+
+*(Note: `#61`, referenced by #76, is likewise dangling — no such ticket exists.)*
 
 ### #29 — cli.rs: ambiguity checks have no formal basis ✅ CLOSED (ratified 2026-07-16)
 
