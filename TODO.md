@@ -515,7 +515,7 @@ Scope to consider:
 - A setup phase establishing a known-good initial state (populated `output_dir`, known archives) rather than inheriting whatever was left behind.
 - A teardown restoring that state, so a mid-run failure doesn't poison the next run.
 - Whether `--rebuild` should then be the default, or become unnecessary.
-- **Reject unknown CLI flags** (carried over from #87): a typo'd `--rebuil` is currently silent, producing false "Nothing to back up" failures — the precise trap the #87 docs now warn about. Cheap to fix, but a behaviour change.
+- ✅ **Reject unknown CLI flags — DONE (2026-07-18).** `validate_args` rejects anything unrecognised instead of ignoring it, and suggests a near match when the input is a prefix of a real flag — which is exactly the shape of the motivating typo (`--rebuil` → `--rebuild`). Value-taking flags consume the following argument whatever it looks like, so `--case --failed` reads `--failed` as the case id; flags *after* a value are still validated. A value flag with no value is also an error. Checked after `--help` (so help still works alongside a bad argument) and before anything else, so a typo cannot reach a live run. 7 unit tests; verified live: exit 1 with the suggestion, exit 0 for valid args.
 
 Overlaps **#89** (orphan scenarios need deterministic state transitions) and **#24** (no rollback on mid-pipeline failure) — the same "arbitrary state after failure" problem at two levels. Consider designing them together.
 

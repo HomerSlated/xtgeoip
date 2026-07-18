@@ -81,6 +81,9 @@ OPTIONS:
     --bin <path>     Path to the xtgeoip binary under test.
     -h, --help       Show this help.
 
+Unrecognised arguments are rejected, not ignored: a typo'd --rebuil would
+otherwise do nothing and surface later as a false \"Nothing to back up\".
+
 BINARY RESOLUTION:
     --bin <path>, then $XTGEOIP_BIN, then target/release/<program>.
 
@@ -93,6 +96,63 @@ REQUIREMENTS:
 Cases are generated into docs/generated/testcases.yaml by xtgeoip-docgen from
 docs/spec/cli.yaml. Case order is significant and is pinned by tests; do not
 reorder the corpus.";
+
+/// Flags that stand alone.
+const BOOL_FLAGS: &[&str] = &["--failed", "--rebuild", "-h", "--help"];
+
+/// Flags that consume the following argument as their value.
+const VALUE_FLAGS: &[&str] = &["--case", "--bin"];
+
+/// Reject anything not recognised, instead of ignoring it (#98).
+///
+/// Unknown arguments used to be silently discarded, so a typo'd `--rebuil`
+/// did nothing — and because `--rebuild` is what keeps `output_dir` populated
+/// between cases, the run then failed later with `Nothing to back up`, which
+/// reads like a regression rather than a typo. That has already cost one
+/// debugging session.
+///
+/// `argv` must exclude the program name. A value-taking flag consumes the
+/// next argument whatever it looks like, so `--case --failed` treats
+/// `--failed` as the case id rather than as a flag; that is the conventional
+/// reading and keeps the rule simple.
+fn validate_args(argv: &[String]) -> anyhow::Result<()> {
+    let mut i = 0;
+    while i < argv.len() {
+        let arg = argv[i].as_str();
+
+        if BOOL_FLAGS.contains(&arg) {
+            i += 1;
+        } else if VALUE_FLAGS.contains(&arg) {
+            if i + 1 >= argv.len() {
+                anyhow::bail!(
+                    "{arg} requires a value, but none was given\nrun with \
+                     --help for usage"
+                );
+            }
+            i += 2;
+        } else {
+            anyhow::bail!("{}", unknown_arg_message(arg));
+        }
+    }
+    Ok(())
+}
+
+/// Error text for an unrecognised argument, with a suggestion when the input
+/// is a prefix of a real flag — which is the shape of the typo this exists to
+/// catch (`--rebuil` → `--rebuild`).
+fn unknown_arg_message(arg: &str) -> String {
+    let suggestion = BOOL_FLAGS
+        .iter()
+        .chain(VALUE_FLAGS)
+        .find(|known| known.starts_with(arg) && *known != &arg)
+        .map(|known| format!("\ndid you mean {known}?"));
+
+    format!(
+        "unrecognised argument {arg:?}{}\nvalid flags: --failed, --rebuild, \
+         --case <id>, --bin <path>, -h/--help\nrun with --help for usage",
+        suggestion.unwrap_or_default()
+    )
+}
 
 /// Resolve the binary path override, in precedence order (#81):
 /// `--bin <path>` flag, then `$XTGEOIP_BIN`, then none.
@@ -220,6 +280,10 @@ fn main() -> anyhow::Result<()> {
         println!("{HELP}");
         return Ok(());
     }
+
+    // Checked after --help so `--help` still works alongside a bad argument,
+    // and before anything else so a typo cannot reach a live run.
+    validate_args(&argv[1..])?;
 
     let filter_failed_only = argv.iter().any(|a| a == "--failed");
     let rebuild_after_clean = argv.iter().any(|a| a == "--rebuild");
@@ -404,6 +468,87 @@ mod tests {
         let yaml = fs::read_to_string("docs/generated/testcases.yaml")
             .expect("docs/generated/testcases.yaml missing — run docgen");
         load_testcases(&yaml).expect("testcases.yaml failed to load")
+    }
+
+    // ── argument validation (#98) ────────────────────────────────────────
+
+    #[test]
+    fn known_flags_are_accepted() {
+        for args in [
+            vec![],
+            argv(["--failed"]),
+            argv(["--rebuild"]),
+            argv(["--rebuild", "--failed"]),
+            argv(["--case", "TL-007"]),
+            argv(["--bin", "/usr/bin/xtgeoip"]),
+            argv(["--rebuild", "--case", "TL-007", "--bin", "/x"]),
+            argv(["-h"]),
+            argv(["--help"]),
+        ] {
+            assert!(
+                validate_args(&args).is_ok(),
+                "rejected valid args: {args:?}"
+            );
+        }
+    }
+
+    /// The motivating case: a typo'd --rebuild silently did nothing, and the
+    /// run then failed later with "Nothing to back up".
+    #[test]
+    fn typo_is_rejected_and_suggests_the_real_flag() {
+        let err = validate_args(&argv(["--rebuil"]))
+            .expect_err("typo must be rejected")
+            .to_string();
+        assert!(err.contains("--rebuil"), "must name the bad arg: {err}");
+        assert!(
+            err.contains("did you mean --rebuild?"),
+            "must suggest the near match: {err}"
+        );
+    }
+
+    #[test]
+    fn unknown_flag_is_rejected_with_the_valid_list() {
+        let err = validate_args(&argv(["--nonsense"]))
+            .expect_err("must reject")
+            .to_string();
+        assert!(err.contains("unrecognised argument"), "{err}");
+        assert!(err.contains("--rebuild"), "must list valid flags: {err}");
+        // No near match, so no misleading suggestion.
+        assert!(!err.contains("did you mean"), "{err}");
+    }
+
+    /// A bare word is as likely a mistake as a bad flag — e.g. passing a case
+    /// id without `--case`.
+    #[test]
+    fn positional_argument_is_rejected() {
+        assert!(validate_args(&argv(["TL-007"])).is_err());
+    }
+
+    #[test]
+    fn value_flag_without_a_value_is_rejected() {
+        for flag in ["--case", "--bin"] {
+            let err = validate_args(&argv([flag]))
+                .expect_err("must reject")
+                .to_string();
+            assert!(err.contains("requires a value"), "{err}");
+        }
+    }
+
+    /// A value-taking flag consumes the next argument whatever it looks like,
+    /// so its value is never itself validated as a flag.
+    #[test]
+    fn flag_shaped_values_are_consumed_not_validated() {
+        assert!(validate_args(&argv(["--case", "--failed"])).is_ok());
+        assert!(validate_args(&argv(["--bin", "--nonsense"])).is_ok());
+    }
+
+    /// Validation must not silently drop a flag that follows a value.
+    #[test]
+    fn flags_after_a_value_are_still_checked() {
+        assert!(
+            validate_args(&argv(["--case", "TL-007", "--rebuild"])).is_ok()
+        );
+        assert!(validate_args(&argv(["--case", "TL-007", "--bogus"])).is_err());
     }
 
     // ── help text (#87) ──────────────────────────────────────────────────
