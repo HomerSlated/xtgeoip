@@ -277,6 +277,14 @@ Consequences:
 
 The credential-stripping property is asserted separately, by a test under **#88**: serve a cross-origin redirect from the mock and assert no `Authorization` header reaches the second origin. That is the pairing between these two tickets — #101's *fix* is one line; its *verification* needs #88's harness.
 
+✅ **DONE (2026-07-18).** `redirect_policy()` added and wired into the client builder.
+
+The rule implemented is **no scheme downgrade** (https → http refused), not "targets must be https". That is deliberate and is the better rule on two counts: the property that matters is that a secure request is never silently downgraded, and stating it that way keeps the behaviour testable over plain HTTP — a blanket https requirement would have rejected its own test's redirect. Hop count is bounded by `MAX_REDIRECTS = 3` against 1 observed.
+
+Verified by two tests: `redirect_loop_is_bounded` (a self-referential redirect terminates instead of looping) and — the one a policy *cannot* express — `credentials_are_not_forwarded_across_origin_redirect`, which serves a 302 from one local origin to another and asserts the second sees no `Authorization` header while the first does. That converts reqwest's cross-origin stripping from an inherited library default into a property this codebase proves, which matters because the R2 hop makes it load-bearing on **every** fetch.
+
+Still not asserted: the downgrade rule itself, which would need a TLS origin to exercise. Recorded as a known gap rather than claimed.
+
 ⚠ Touching `fetch.rs` invalidates its guardian signature and needs a re-audit.
 
 ### #54 — fetch.rs: ZIP entry writes are sequential ❌ CLOSED — WONTFIX, measured (2026-07-18)
@@ -755,6 +763,23 @@ Measured: parallelises well (4.61× cold) but verification is only 1.5–4% of a
 *(Retitled 2026-07-18. Was: "unit testing: no unit tests exist ⚑ HIGH PRIORITY (next after spec-driven architecture)". The original gap is closed — 93 unit tests exist; what remains is the network path alone, so the HIGH PRIORITY flag was dropped with it.)*
 
 **Remaining scope.** Nothing exercises `fetch()`'s network path — `resolve_version`, `check_download_size`, `acquire_remote_archive`. Everything downstream of the download is already covered from fixtures. Needs a mock HTTP server or an injected transport; #12/#18 configurability is the enabler. Note `fetch.rs` is guardian-signed, so any change to it requires a re-sign.
+
+✅ **DONE (2026-07-18).** No injected transport was needed, and no production seam either — an earlier assessment of mine was wrong about that. `fetch()` takes its URL from `config.maxmind.url` and enforces no scheme, so pointing that at a local listener drives the **real** code path with nothing stubbed.
+
+Mock server is hand-rolled on `std::net::TcpListener` (~120 lines in the test module): non-blocking accept with a 5 ms poll and an `AtomicBool` stop flag, so it cannot hang when the client makes fewer requests than expected; replies close the connection, so no keep-alive handling. **No dev-dependency added** — the request shapes are trivial (GET, no body) and this project is deliberately conservative about dependency surface.
+
+Eight tests over the previously-untested path:
+
+- `remote_fetch_sends_basic_auth` — credentials reach the endpoint as HTTP basic auth
+- `non_success_status_is_reported`, `rate_limit_is_not_retried` — 429 is a *client* error so `send_with_retry` does not retry it, which is correct: hammering a rate limit is the wrong response, and MaxMind's cap is this project's real constraint
+- `missing_content_disposition_is_rejected`, `hostile_content_disposition_is_rejected` — the traversal shapes the guardian audit reasoned about statically are now *executed* (`../../etc/passwd`, `/etc/shadow`, `..`, empty)
+- `checksum_mismatch_leaves_no_partial_download` — end-to-end proof of the `PartialDownload` guard: fails *and* leaves no `.part`
+- `credentials_are_not_forwarded_across_origin_redirect` — see #101
+- `redirect_loop_is_bounded` — see #101
+
+5xx is deliberately avoided in tests: `send_with_retry` backs off 2s/4s/8s, so a persistent server error would cost 14 s per test. 4xx returns immediately.
+
+Note the tests live *in* `fetch.rs` — there is no `lib` target, so nothing under `tests/` can import it. That is why this still required a guardian re-sign despite the production delta being one line.
 
 ---
 

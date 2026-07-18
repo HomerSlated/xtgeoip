@@ -29,6 +29,10 @@ const SIZE_TOLERANCE: f64 = 0.5; // ±50% of last known archive size
 const DEFAULT_TIMEOUT_SECS: u64 = 300;
 const MAX_RETRIES: u32 = 3;
 const BASE_DELAY_SECS: u64 = 2;
+
+/// Maximum redirect hops the MaxMind client will follow (#101). One hop is
+/// observed in practice; this leaves headroom without being unbounded.
+const MAX_REDIRECTS: usize = 3;
 use tempfile::TempDir;
 use zip::ZipArchive;
 
@@ -78,6 +82,7 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, Version)> {
             env!("CARGO_PKG_VERSION")
         ))
         .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
+        .redirect(redirect_policy())
         .build()?;
 
     messages::info("Checking remote archive version...");
@@ -616,6 +621,46 @@ impl<'a, W: Write> Write for HashingWriter<'a, W> {
 }
 
 /// Retry a send closure on transient network errors or 5xx responses.
+/// Redirect policy for the MaxMind client (#101).
+///
+/// Redirects cannot simply be refused: the download endpoint **always**
+/// redirects. Measured 2026-07-18 — `download.maxmind.com` answers 302 with a
+/// pre-signed URL on a Cloudflare R2 bucket host, and that URL needs no
+/// credentials (it returned 206 when fetched with none). So `Policy::none()`
+/// would break every fetch, and pinning the host would too, since the target
+/// is a different origin whose name embeds a bucket identifier.
+///
+/// What a policy *can* assert is bounded hops and no scheme downgrade:
+///
+/// - **Hop limit.** One hop is observed; `MAX_REDIRECTS` leaves headroom
+///   without being unbounded.
+/// - **No downgrade.** A redirect from `https` to `http` is refused. This is
+///   narrower than "targets must be https" deliberately: the rule that matters
+///   is that a secure request is never silently downgraded, and stating it that
+///   way also keeps the behaviour testable over plain HTTP.
+///
+/// What a policy **cannot** assert is that credentials are not forwarded
+/// across origins — `Policy` only decides follow-or-stop and cannot inspect or
+/// modify headers. `reqwest` strips `Authorization` cross-origin, and since the
+/// R2 hop is cross-origin that stripping is load-bearing on *every* fetch. It
+/// is asserted by test instead: see
+/// `credentials_are_not_forwarded_across_origin_redirect`.
+fn redirect_policy() -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() >= MAX_REDIRECTS {
+            return attempt
+                .error(format!("exceeded {MAX_REDIRECTS} redirects"));
+        }
+        let downgrades = attempt.url().scheme() == "http"
+            && attempt.previous().iter().any(|u| u.scheme() == "https");
+        if downgrades {
+            return attempt
+                .error("refusing redirect that downgrades https to http");
+        }
+        attempt.follow()
+    })
+}
+
 fn send_with_retry<F>(f: F) -> Result<reqwest::blocking::Response>
 where
     F: Fn() -> reqwest::Result<reqwest::blocking::Response>,
@@ -792,9 +837,419 @@ fn validate_blocks_csv(path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    // ── mock HTTP server (#88)
+    // ───────────────────────────────────────────────
+    //
+    // The network path was previously untestable in practice. It needs no
+    // production seam: `fetch()` takes its URL from `config.maxmind.url`
+    // and enforces no scheme, so pointing that at a local listener
+    // drives the real code — `resolve_version`, `check_download_size`,
+    // `acquire_remote_archive`, `send_with_retry` — with nothing stubbed.
+    //
+    // Hand-rolled rather than a dev-dependency: the request shapes are
+    // trivial (GET, no body) and this project is deliberately
+    // conservative about dependency surface. Responses close the
+    // connection, so no keep-alive handling is needed.
+    use std::{
+        io::BufRead,
+        net::{TcpListener, TcpStream},
+        sync::{
+            Arc, Mutex,
+            atomic::{AtomicBool, Ordering},
+        },
+    };
+
     use zip::write::{SimpleFileOptions, ZipWriter};
 
     use super::*;
+
+    #[derive(Clone, Debug)]
+    struct MockRequest {
+        line: String,
+        headers: Vec<(String, String)>,
+    }
+
+    impl MockRequest {
+        /// Header lookup by lowercased name.
+        fn header(&self, name: &str) -> Option<&str> {
+            self.headers
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.as_str())
+        }
+
+        /// The request target, e.g. `/?suffix=zip`.
+        fn target(&self) -> &str {
+            self.line.split_whitespace().nth(1).unwrap_or("")
+        }
+    }
+
+    struct MockReply {
+        status: u16,
+        headers: Vec<(String, String)>,
+        body: Vec<u8>,
+    }
+
+    impl MockReply {
+        fn new(status: u16) -> Self {
+            Self {
+                status,
+                headers: Vec::new(),
+                body: Vec::new(),
+            }
+        }
+
+        fn ok(body: impl Into<Vec<u8>>) -> Self {
+            Self {
+                status: 200,
+                headers: Vec::new(),
+                body: body.into(),
+            }
+        }
+
+        fn header(mut self, k: &str, v: &str) -> Self {
+            self.headers.push((k.to_string(), v.to_string()));
+            self
+        }
+    }
+
+    struct MockServer {
+        port: u16,
+        seen: Arc<Mutex<Vec<MockRequest>>>,
+        stop: Arc<AtomicBool>,
+        handle: Option<thread::JoinHandle<()>>,
+    }
+
+    impl MockServer {
+        fn start<F>(router: F) -> Self
+        where
+            F: Fn(&MockRequest) -> MockReply + Send + 'static,
+        {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+            let port = listener.local_addr().expect("addr").port();
+            listener.set_nonblocking(true).expect("nonblocking");
+
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            let stop = Arc::new(AtomicBool::new(false));
+            let (seen_t, stop_t) = (Arc::clone(&seen), Arc::clone(&stop));
+
+            let handle = thread::spawn(move || {
+                while !stop_t.load(Ordering::Relaxed) {
+                    match listener.accept() {
+                        Ok((stream, _)) => {
+                            if let Some(req) = read_request(&stream) {
+                                seen_t.lock().unwrap().push(req.clone());
+                                let _ = write_reply(stream, router(&req));
+                            }
+                        }
+                        // Nonblocking accept with a short poll: no hang if the
+                        // client makes fewer requests than expected.
+                        Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                            thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+
+            Self {
+                port,
+                seen,
+                stop,
+                handle: Some(handle),
+            }
+        }
+
+        fn url(&self) -> String {
+            format!("http://127.0.0.1:{}", self.port)
+        }
+
+        fn requests(&self) -> Vec<MockRequest> {
+            self.seen.lock().unwrap().clone()
+        }
+    }
+
+    impl Drop for MockServer {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Relaxed);
+            if let Some(h) = self.handle.take() {
+                let _ = h.join();
+            }
+        }
+    }
+
+    fn read_request(stream: &TcpStream) -> Option<MockRequest> {
+        stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
+        let mut reader = io::BufReader::new(stream);
+        let mut line = String::new();
+        reader.read_line(&mut line).ok()?;
+        let request_line = line.trim_end().to_string();
+        if request_line.is_empty() {
+            return None;
+        }
+
+        let mut headers = Vec::new();
+        loop {
+            let mut h = String::new();
+            if reader.read_line(&mut h).ok()? == 0 {
+                break;
+            }
+            let h = h.trim_end();
+            if h.is_empty() {
+                break;
+            }
+            if let Some((k, v)) = h.split_once(':') {
+                headers.push((
+                    k.trim().to_ascii_lowercase(),
+                    v.trim().to_string(),
+                ));
+            }
+        }
+
+        Some(MockRequest {
+            line: request_line,
+            headers,
+        })
+    }
+
+    fn write_reply(mut stream: TcpStream, reply: MockReply) -> io::Result<()> {
+        let mut head = format!(
+            "HTTP/1.1 {} X\r\nContent-Length: {}\r\nConnection: close\r\n",
+            reply.status,
+            reply.body.len()
+        );
+        for (k, v) in &reply.headers {
+            head.push_str(&format!("{k}: {v}\r\n"));
+        }
+        head.push_str("\r\n");
+        stream.write_all(head.as_bytes())?;
+        stream.write_all(&reply.body)?;
+        stream.flush()
+    }
+
+    /// A `Config` whose MaxMind URL points at `url` and whose archive dir is
+    /// `archive_dir`. Credentials are dummies that pass the not-configured
+    /// check in `fetch()`.
+    fn mock_config(url: &str, archive_dir: &Path) -> crate::config::Config {
+        crate::config::Config {
+            paths: crate::config::Paths {
+                archive_dir: archive_dir.display().to_string(),
+                archive_prune: 3,
+                output_dir: archive_dir.display().to_string(),
+            },
+            maxmind: crate::config::MaxMind {
+                url: url.to_string(),
+                account_id: "123456".to_string(),
+                license_key: "test-license-key".to_string(),
+            },
+            logging: None,
+            processing: None,
+        }
+    }
+
+    /// Reply carrying a valid-looking archive filename, so `resolve_version`
+    /// succeeds and the flow reaches the download.
+    fn versioned_reply(body: &[u8]) -> MockReply {
+        MockReply::ok(body.to_vec()).header(
+            "Content-Disposition",
+            "attachment; filename=\"GeoLite2-Country-CSV_20260101.zip\"",
+        )
+    }
+
+    /// Credentials must reach MaxMind as HTTP basic auth, and nowhere else.
+    #[test]
+    fn remote_fetch_sends_basic_auth() {
+        let dir = tempfile::tempdir().unwrap();
+        let server = MockServer::start(|_| MockReply::new(401));
+        let cfg = mock_config(&server.url(), dir.path());
+
+        let _ = fetch(&cfg, FetchMode::Remote);
+
+        let reqs = server.requests();
+        assert!(!reqs.is_empty(), "server saw no request");
+        let auth = reqs[0]
+            .header("authorization")
+            .expect("no Authorization header sent");
+        assert!(
+            auth.starts_with("Basic "),
+            "expected HTTP basic auth, got {auth:?}"
+        );
+        assert!(
+            reqs[0].target().contains("suffix=zip"),
+            "unexpected target {:?}",
+            reqs[0].target()
+        );
+    }
+
+    /// A non-success status must abort with the status reported, not proceed.
+    #[test]
+    fn non_success_status_is_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let server = MockServer::start(|_| MockReply::new(401));
+        let cfg = mock_config(&server.url(), dir.path());
+
+        let err = fetch(&cfg, FetchMode::Remote).expect_err("must fail");
+        assert!(
+            err.to_string().contains("401"),
+            "error should name the status: {err}"
+        );
+    }
+
+    /// 429 is a client error, so `send_with_retry` must NOT retry it —
+    /// hammering a rate limit is exactly the wrong response, and MaxMind's cap
+    /// is the real constraint on this project's test runs.
+    #[test]
+    fn rate_limit_is_not_retried() {
+        let dir = tempfile::tempdir().unwrap();
+        let server = MockServer::start(|_| MockReply::new(429));
+        let cfg = mock_config(&server.url(), dir.path());
+
+        let _ = fetch(&cfg, FetchMode::Remote);
+        assert_eq!(
+            server.requests().len(),
+            1,
+            "a rate-limit response must not be retried"
+        );
+    }
+
+    /// `resolve_version` reads the version from `Content-Disposition`; without
+    /// it there is no version, and proceeding would mis-name the archive.
+    #[test]
+    fn missing_content_disposition_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let server = MockServer::start(|_| MockReply::ok("body"));
+        let cfg = mock_config(&server.url(), dir.path());
+
+        let err = fetch(&cfg, FetchMode::Remote).expect_err("must fail");
+        assert!(
+            err.to_string().contains("Content-Disposition"),
+            "unhelpful error: {err}"
+        );
+    }
+
+    /// The header is attacker-influenced and names a file on disk. These are
+    /// the traversal shapes the guardian audit reasoned about statically; here
+    /// they are executed.
+    #[test]
+    fn hostile_content_disposition_is_rejected() {
+        for hostile in [
+            "attachment; filename=\"../../etc/passwd\"",
+            "attachment; filename=\"/etc/shadow\"",
+            "attachment; filename=\"..\"",
+            "attachment; filename=\"\"",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let h = hostile.to_string();
+            let server = MockServer::start(move |_| {
+                MockReply::ok("x").header("Content-Disposition", &h)
+            });
+            let cfg = mock_config(&server.url(), dir.path());
+
+            assert!(
+                fetch(&cfg, FetchMode::Remote).is_err(),
+                "accepted hostile Content-Disposition {hostile:?}"
+            );
+            // Nothing may be written outside the archive dir, and nothing
+            // resembling a traversal target inside it.
+            assert!(
+                !Path::new("/tmp/passwd").exists(),
+                "traversal escaped the archive dir"
+            );
+        }
+    }
+
+    /// End-to-end proof of the `PartialDownload` guard: a checksum mismatch
+    /// must fail *and* leave no `.part` file behind.
+    #[test]
+    fn checksum_mismatch_leaves_no_partial_download() {
+        let dir = tempfile::tempdir().unwrap();
+        let server = MockServer::start(|req| {
+            if req.target().contains("sha256") {
+                // Deliberately not the hash of the body below.
+                MockReply::ok(
+                    "0000000000000000000000000000000000000000000000000000000000000000  x.zip",
+                )
+            } else {
+                versioned_reply(b"not-a-real-archive")
+            }
+        });
+        let cfg = mock_config(&server.url(), dir.path());
+
+        let err = fetch(&cfg, FetchMode::Remote).expect_err("must fail");
+        assert!(
+            err.to_string().contains("Checksum verification failed"),
+            "unexpected error: {err}"
+        );
+
+        let leftovers: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".part"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "partial download left behind: {leftovers:?}"
+        );
+    }
+
+    /// The property `redirect_policy` cannot express, and the reason the R2 hop
+    /// is safe (#101). `reqwest` strips `Authorization` cross-origin; since
+    /// MaxMind redirects to a different origin on *every* fetch, that stripping
+    /// is load-bearing continuously. Two servers are two origins.
+    #[test]
+    fn credentials_are_not_forwarded_across_origin_redirect() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = MockServer::start(|_| MockReply::new(401));
+        let target_url = target.url();
+        let origin = MockServer::start(move |_| {
+            MockReply::new(302).header("Location", &target_url)
+        });
+        let cfg = mock_config(&origin.url(), dir.path());
+
+        let _ = fetch(&cfg, FetchMode::Remote);
+
+        let followed = target.requests();
+        assert_eq!(followed.len(), 1, "redirect was not followed");
+        assert!(
+            followed[0].header("authorization").is_none(),
+            "Authorization was forwarded across origins — the license key \
+             would leak to the redirect target"
+        );
+        // And it *was* sent to the intended origin.
+        assert!(
+            origin.requests()[0].header("authorization").is_some(),
+            "credentials never reached the configured endpoint"
+        );
+    }
+
+    /// The hop limit `redirect_policy` does express. The server redirects to
+    /// itself, so without a bound this would never terminate; the location is
+    /// shared so the router can name a URL that does not exist until after the
+    /// server has bound its port.
+    #[test]
+    fn redirect_loop_is_bounded() {
+        let dir = tempfile::tempdir().unwrap();
+        let location = Arc::new(Mutex::new(String::new()));
+        let for_router = Arc::clone(&location);
+
+        let server = MockServer::start(move |_| {
+            let to = for_router.lock().unwrap().clone();
+            MockReply::new(302).header("Location", &to)
+        });
+        *location.lock().unwrap() = server.url();
+
+        let cfg = mock_config(&server.url(), dir.path());
+        assert!(
+            fetch(&cfg, FetchMode::Remote).is_err(),
+            "an unbounded redirect chain must fail rather than loop"
+        );
+        assert!(
+            server.requests().len() <= MAX_REDIRECTS + 1,
+            "followed more than {MAX_REDIRECTS} redirects: {} requests",
+            server.requests().len()
+        );
+    }
 
     // ── partial-download cleanup ─────────────────────────────────────────────
 
