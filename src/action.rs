@@ -150,10 +150,15 @@ fn plan(action: &Action) -> Plan {
             if *backup {
                 pre.push(Step::Backup { mode });
             }
-            if *clean {
-                pre.push(Step::Clean { mode });
-            }
+            // Clean runs *after* the fetch (#24 stage 1). The fetch is the
+            // failure-prone step — it depends on the network — and cleaning
+            // first meant an outage left `output_dir` empty with no
+            // replacement. Fetching first means a failed run leaves the
+            // existing install untouched.
             let mut mid = vec![];
+            if *clean {
+                mid.push(Step::Clean { mode });
+            }
             if *prune {
                 mid.push(Step::PruneCsv);
             }
@@ -180,13 +185,18 @@ fn plan(action: &Action) -> Plan {
             if *prune {
                 pre.push(Step::PruneBin);
             }
+            // As in Run (#24 stage 1): clean only once the archive is in
+            // hand. A local fetch fails less often than a remote one, but it
+            // still can — missing archive, failed magic check, extraction cap
+            // — and the same reasoning applies.
+            let mut mid = vec![];
             if *clean {
-                pre.push(Step::Clean { mode });
+                mid.push(Step::Clean { mode });
             }
             Plan::Pipeline {
                 pre,
                 fetch: FetchMode::Local,
-                mid: vec![],
+                mid,
                 legacy: *legacy,
             }
         }
@@ -389,6 +399,11 @@ mod tests {
     #[test]
     fn run_full_sequence() {
         // run fetches Remote and prunes CSVs (contrast build_full_sequence).
+        //
+        // Clean sits AFTER Fetch (#24 stage 1). Changed deliberately
+        // 2026-07-18: cleaning first meant a network failure emptied
+        // output_dir with no replacement to install. Backup stays in `pre` —
+        // it is the one step that must happen before anything is disturbed.
         assert_eq!(
             steps(&Action::Run {
                 prune: true,
@@ -397,9 +412,47 @@ mod tests {
                 clean: true,
                 force: true,
             }),
-            "[Backup { mode: Force }, Clean { mode: Force }, Fetch { mode: \
-             Remote }, PruneCsv, Build { legacy: true }]"
+            "[Backup { mode: Force }, Fetch { mode: Remote }, Clean { mode: \
+             Force }, PruneCsv, Build { legacy: true }]"
         );
+    }
+
+    /// The point of #24 stage 1, stated as an invariant rather than a
+    /// sequence: nothing destructive may precede the fetch except the backup.
+    #[test]
+    fn clean_never_precedes_fetch() {
+        for &b in &[false, true] {
+            for &f in &[false, true] {
+                for &p in &[false, true] {
+                    for &l in &[false, true] {
+                        for rendered in [
+                            steps(&Action::Run {
+                                prune: p,
+                                legacy: l,
+                                backup: b,
+                                clean: true,
+                                force: f,
+                            }),
+                            steps(&Action::Build {
+                                legacy: l,
+                                backup: b,
+                                clean: true,
+                                force: f,
+                                prune: p,
+                            }),
+                        ] {
+                            let clean = rendered.find("Clean ").expect("clean");
+                            let fetch = rendered.find("Fetch ").expect("fetch");
+                            assert!(
+                                fetch < clean,
+                                "Clean precedes Fetch — a failed fetch would \
+                                 leave output_dir empty: {rendered}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // ── build ────────────────────────────────────────────────────────────────
@@ -431,8 +484,8 @@ mod tests {
                 force: true,
                 prune: true,
             }),
-            "[Backup { mode: Force }, PruneBin, Clean { mode: Force }, Fetch \
-             { mode: Local }, Build { legacy: true }]"
+            "[Backup { mode: Force }, PruneBin, Fetch { mode: Local }, Clean \
+             { mode: Force }, Build { legacy: true }]"
         );
     }
 

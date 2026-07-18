@@ -590,7 +590,26 @@ Priority / notes:
 
 Design note [`98-state-ownership-recovery.md`](design/98-state-ownership-recovery.md) **REJECTED** (§0). **Stage 2 (rollback) is rejected with it** — it was `restore` under another name, and restoring a backup means adopting responsibility for a problem you have not diagnosed. **Stage 3** (atomic swap) stays rejected.
 
-**Stage 1 survives as an independent question**: reorder `Clean` to run *after* `Fetch`. Today `run -c` destroys the working data *before* the network step, so a MaxMind outage leaves `output_dir` empty. This is not recovery — it is not destroying data until the replacement is in hand, the same instinct that rejects restore. Unit-testable against the 11 `plan()` goldens; verifiable with a free `build -c` (Local fetch, no MaxMind request). Needs a decision on its own merits; it changes observable step order.
+**Stage 1 ✅ DONE (2026-07-18).** `Clean` moved from `pre` to `mid` in both pipeline arms, so it runs *after* `Fetch`:
+
+```
+run -c    [Backup?, Fetch{Remote}, Clean?, PruneCsv?, Build]
+build -c  [Backup?, PruneBin?, Fetch{Local}, Clean?, Build]
+```
+
+`Backup` deliberately stays in `pre` — it is the one step that must happen before anything is disturbed.
+
+Ratified on the grounds that the primary request in `run -c` is *run*; `-c` is a modifier to it. The user already knows `run` fetches and builds over existing data, and that cleaning after building would leave an empty directory — so clean-before-build was never in question. The fetch/clean order only matters when something goes wrong, and the thing that can go wrong is exactly emptying the directory and then failing to produce a replacement.
+
+Exactly 2 of the 11 goldens changed — the two arms containing both `Clean` and `Fetch` — which is the confirmation the change is scoped correctly. Added `clean_never_precedes_fetch`, sweeping every flag combination and asserting the invariant rather than a sequence.
+
+**Cached-archive fallback: considered and rejected.** The initial instinct was to fall back to the cached archive on a failed remote fetch. Rejected on better reasoning: if the objective is to apply *new* data and new data is unavailable while the existing install is intact, rebuilding the *same version* over itself achieves nothing — real risk for a guaranteed no-op. The correct response to a failed fetch is error, early exit, and cleanup of ephemeral data. Note this only became true *because* of stage 1: pre-reorder, the install had already been destroyed by the time the fetch failed, which is what made a fallback look necessary. If the operator does want the cached version applied, that command already exists and is spelled `build`.
+
+**Ephemeral cleanup ✅ DONE (2026-07-18)** — the second half of "error and early exit, cleaning up ephemeral data on the way out". `acquire_remote_archive` cleaned up its `.part` file on 2 error paths and leaked it on **6**: a dropped connection mid-copy, a failed or non-success checksum request, an unreadable or malformed checksum body, and a failed rename. Leaked files were **inert but immortal** — `find_latest_local_csv_archive` requires `.zip` so they were never mistaken for an archive, but `prune_csv_archives` matches only `.zip`/`.zip.sha256`, so they were never reclaimed either, accumulating unboundedly in `archive_dir` at up to ~5 MB per failed attempt.
+
+Replaced both manual cleanups with a `PartialDownload` RAII guard (`Drop` removes, `disarm()` after a successful rename), so new error paths are covered by construction rather than by remembering. 3 unit tests: removes on drop, keeps when disarmed, silent when the file was never created.
+
+⚠ **`src/fetch.rs.sig` is now BAD** — expected, since `fetch.rs` changed. Deliberately not re-signed: the signature attests to a security *audit*, not to file contents, so re-signing without a re-audit would make it assert something untrue. Needs a guardian re-audit.
 
 `backup → clean → fetch → build` has no rollback. A failure mid-way leaves system in partially-destroyed state. Future improvement: write to temp output directory, atomic swap on success. Execution planner (#17) is the right place to manage temp directory as a pipeline-level concern.
 
