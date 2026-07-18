@@ -754,25 +754,64 @@ fn generate_cli_rules_rs(spec: &Spec) -> anyhow::Result<String> {
 
 /* ---------------- OUTCOME ---------------- */
 
-/// Resolve an example's user-facing outcome text.
+/// What an example *means*, independent of how any format displays it (#75).
 ///
-/// Fallible by design (#76). This previously returned `"OK"` for a valid
-/// example with no `outcome` and `"ERROR"` for an invalid one with no usable
+/// Resolution and presentation were previously fused: `resolve_outcome`
+/// returned a bare `String` that every generator interpolated raw. That is
+/// why two separate escaping defects went unnoticed — each format has its own
+/// metacharacters, and a plain `String` carries no signal that escaping is
+/// owed. Callers now receive this type and must pass it through a `render_*`
+/// function, which is where escaping lives.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ResolvedOutcome {
+    /// A valid invocation: what it does, from the example's `outcome`.
+    Succeeds { description: String },
+    /// A rejected invocation: why, from its reason template with `args`
+    /// substituted.
+    Fails { reason: String },
+}
+
+impl ResolvedOutcome {
+    /// The unescaped human-readable text.
+    ///
+    /// Deliberately not `Display`: rendering must be an explicit choice of
+    /// target format, so that interpolating an outcome without escaping it
+    /// requires visibly reaching past the renderers.
+    fn text(&self) -> &str {
+        match self {
+            Self::Succeeds { description } => description,
+            Self::Fails { reason } => reason,
+        }
+    }
+
+    fn succeeded(&self) -> bool {
+        matches!(self, Self::Succeeds { .. })
+    }
+}
+
+/// Semantic resolution: spec data → meaning. No formatting, no fallbacks.
+///
+/// Fallible by design (#76). This once returned `"OK"` for a valid example
+/// with no `outcome` and `"ERROR"` for an invalid one with no usable
 /// `reason` — placeholders that look like real output and would have shipped
 /// into the man page, the markdown and `CLI_MATRIX` alike. Missing spec data
-/// must not produce output, so both cases now fail generation.
+/// must not produce output.
 ///
-/// `validate_examples` rejects these at spec-load time, so in practice
-/// neither branch is reachable; they are the enforcement of last resort for a
+/// `validate_examples` rejects these at spec-load time, so neither error is
+/// reachable in practice; they are the enforcement of last resort for a
 /// caller that skipped validation.
-fn resolve_outcome(spec: &Spec, ex: &Example) -> anyhow::Result<String> {
+fn resolve_outcome(
+    spec: &Spec,
+    ex: &Example,
+) -> anyhow::Result<ResolvedOutcome> {
     if ex.valid {
-        return ex.outcome.clone().ok_or_else(|| {
+        let description = ex.outcome.clone().ok_or_else(|| {
             anyhow::anyhow!(
                 "Example {:?} is valid but declares no `outcome`",
                 ex.cmd
             )
-        });
+        })?;
+        return Ok(ResolvedOutcome::Succeeds { description });
     }
 
     let reason = ex.reason.as_ref().ok_or_else(|| {
@@ -789,13 +828,51 @@ fn resolve_outcome(spec: &Spec, ex: &Example) -> anyhow::Result<String> {
         )
     })?;
 
+    // Template substitution is resolution, not presentation: the result is
+    // the same message regardless of the target format.
     let mut text = t.text.clone();
     if let Some(args) = &reason.args {
         for (k, v) in args {
             text = text.replace(&format!("{{{}}}", k), v);
         }
     }
-    Ok(text)
+    Ok(ResolvedOutcome::Fails { reason: text })
+}
+
+/* ---------------- PRESENTATION ---------------- */
+
+/// Markdown / plain-text targets (`usage.md`, `tldr.md`).
+///
+/// The text is emitted inside prose, not inside a code span or literal, so
+/// no metacharacter has structural meaning here.
+fn render_plain(outcome: &ResolvedOutcome) -> String {
+    outcome.text().to_string()
+}
+
+/// Rust source target (`cli_matrix.rs`).
+///
+/// The text lands inside a `&'static str` literal, so `"` and `\` would
+/// otherwise emit code that does not compile. `{:?}` on a `str` produces a
+/// correctly escaped Rust literal *including* the surrounding quotes, and —
+/// unlike `escape_default` — leaves printable non-ASCII intact, which matters
+/// because the error messages contain em-dashes.
+fn render_rust_literal(outcome: &ResolvedOutcome) -> String {
+    format!("{:?}", outcome.text())
+}
+
+/// roff target (`xtgeoip.1`).
+///
+/// In roff a line beginning with `.` or `'` is a control line, and `\` starts
+/// an escape sequence. Text interpolated into a man page must neutralise
+/// both or it silently corrupts the rendered output.
+fn render_roff(outcome: &ResolvedOutcome) -> String {
+    let escaped = outcome.text().replace('\\', "\\e");
+    match escaped.chars().next() {
+        // `\&` is roff's zero-width character: it stops the line being read
+        // as a control line without displaying anything.
+        Some('.') | Some('\'') => format!("\\&{escaped}"),
+        _ => escaped,
+    }
 }
 
 /* ---------------- USAGE ---------------- */
@@ -818,7 +895,7 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
         }
 
         for ex in exs {
-            let outcome = resolve_outcome(spec, ex)?;
+            let outcome = render_plain(&resolve_outcome(spec, ex)?);
             out.push_str(&format!("- `{}` → {}", ex.cmd, outcome));
 
             if let Some(s) = ex.exit_status {
@@ -873,16 +950,21 @@ fn generate_tldr_md(spec: &Spec) -> anyhow::Result<String> {
     let mut out =
         format!("# {}\n\n> {}\n\n", spec.meta.program, spec.meta.summary);
 
-    let mut add = |exs: &[Example]| {
+    // Previously read ex.outcome directly with an unwrap_or_default(),
+    // bypassing resolution entirely (#75/#76). Routing through
+    // resolve_outcome means the missing-data guarantee applies here too.
+    let mut add = |exs: &[Example]| -> anyhow::Result<()> {
         for ex in exs {
-            if ex.valid {
+            let outcome = resolve_outcome(spec, ex)?;
+            if outcome.succeeded() {
                 out.push_str(&format!(
                     "- {}:\n\n`{}`\n\n",
-                    ex.outcome.clone().unwrap_or_default(),
+                    render_plain(&outcome),
                     ex.cmd
                 ));
             }
         }
+        Ok(())
     };
 
     if let Some(cmd) = &spec.top_level {
@@ -890,7 +972,7 @@ fn generate_tldr_md(spec: &Spec) -> anyhow::Result<String> {
             CommandSpec::FlagCommand { examples, .. }
             | CommandSpec::SelectorCommand { examples, .. } => examples,
         };
-        add(exs);
+        add(exs)?;
     }
 
     for cmd in spec.commands.values() {
@@ -898,7 +980,7 @@ fn generate_tldr_md(spec: &Spec) -> anyhow::Result<String> {
             CommandSpec::FlagCommand { examples, .. }
             | CommandSpec::SelectorCommand { examples, .. } => examples,
         };
-        add(exs);
+        add(exs)?;
     }
 
     Ok(out)
@@ -931,10 +1013,11 @@ fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
 
     let mut add = |exs: &[Example]| -> anyhow::Result<()> {
         for ex in exs {
-            let outcome = resolve_outcome(spec, ex)?;
+            // Both fields are Rust literals: escape via the renderer, and
+            // `{:?}` supplies the surrounding quotes.
+            let outcome = render_rust_literal(&resolve_outcome(spec, ex)?);
             out.push_str(&format!(
-                "    CliExample {{ cmd: \"{}\", valid: {}, outcome: \"{}\" \
-                 }},\n",
+                "    CliExample {{ cmd: {:?}, valid: {}, outcome: {} }},\n",
                 ex.cmd, ex.valid, outcome
             ));
         }
@@ -1078,27 +1161,35 @@ fn generate_manpage(
 
     // EXAMPLES (from spec valid examples)
     out.push_str(".SH EXAMPLES\n");
-    let emit_valid = |out: &mut String, exs: &[Example]| {
-        for ex in exs {
-            if ex.valid {
-                let desc = ex.outcome.as_deref().unwrap_or("");
-                out.push_str(&format!(".TP\n.B {}\n{}\n", ex.cmd, desc));
+    // roff-escaped via render_roff: an outcome starting with `.` or `'`
+    // would otherwise be read as a control line (#75).
+    let emit_valid =
+        |out: &mut String, exs: &[Example]| -> anyhow::Result<()> {
+            for ex in exs {
+                let outcome = resolve_outcome(spec, ex)?;
+                if outcome.succeeded() {
+                    out.push_str(&format!(
+                        ".TP\n.B {}\n{}\n",
+                        ex.cmd,
+                        render_roff(&outcome)
+                    ));
+                }
             }
-        }
-    };
+            Ok(())
+        };
     if let Some(cmd) = &spec.top_level {
         let exs = match cmd {
             CommandSpec::FlagCommand { examples, .. }
             | CommandSpec::SelectorCommand { examples, .. } => examples,
         };
-        emit_valid(&mut out, exs);
+        emit_valid(&mut out, exs)?;
     }
     for cmd in spec.commands.values() {
         let exs = match cmd {
             CommandSpec::FlagCommand { examples, .. }
             | CommandSpec::SelectorCommand { examples, .. } => examples,
         };
-        emit_valid(&mut out, exs);
+        emit_valid(&mut out, exs)?;
     }
 
     // FILES, SEE ALSO, AUTHORS from template
@@ -1239,6 +1330,106 @@ mod tests {
             .to_string();
         assert!(msg.contains("X-001"), "case_id missing from: {msg}");
         assert!(msg.contains("xtgeoip -x"), "cmd missing from: {msg}");
+    }
+
+    // ── resolution vs presentation (#75) ─────────────────────────────────
+
+    fn succeeds(text: &str) -> ResolvedOutcome {
+        ResolvedOutcome::Succeeds {
+            description: text.into(),
+        }
+    }
+
+    #[test]
+    fn resolution_distinguishes_success_from_failure() {
+        let spec = spec_with(conforming_valid());
+        assert!(
+            resolve_outcome(&spec, &conforming_valid())
+                .unwrap()
+                .succeeded()
+        );
+
+        let mut spec = spec_with(conforming_invalid());
+        spec.reason_templates.insert(
+            "some_code".into(),
+            ReasonTemplate {
+                text: "because {why}".into(),
+            },
+        );
+        let out = resolve_outcome(&spec, &conforming_invalid()).unwrap();
+        assert!(!out.succeeded());
+        assert_eq!(out.text(), "because {why}");
+    }
+
+    #[test]
+    fn template_args_are_substituted_during_resolution() {
+        let ex = Example {
+            reason: Some(Reason {
+                code: "c".into(),
+                args: Some(BTreeMap::from([(
+                    "why".into(),
+                    "it is bad".into(),
+                )])),
+            }),
+            maps_to: Some("m".into()),
+            ..example(false)
+        };
+        let mut spec = spec_with(conforming_valid());
+        spec.reason_templates.insert(
+            "c".into(),
+            ReasonTemplate {
+                text: "refused because {why}".into(),
+            },
+        );
+        assert_eq!(
+            resolve_outcome(&spec, &ex).unwrap().text(),
+            "refused because it is bad"
+        );
+    }
+
+    /// The defect that motivated the split: an outcome containing a quote or
+    /// backslash was interpolated raw into a Rust `&'static str` literal,
+    /// emitting code that does not compile.
+    #[test]
+    fn rust_literal_escapes_quotes_and_backslashes() {
+        assert_eq!(
+            render_rust_literal(&succeeds(r#"he said "hi""#)),
+            r#""he said \"hi\"""#
+        );
+        assert_eq!(render_rust_literal(&succeeds(r"a\b")), r#""a\\b""#);
+    }
+
+    /// Messages contain em-dashes; escaping must not mangle printable
+    /// non-ASCII the way `escape_default` would.
+    #[test]
+    fn rust_literal_preserves_non_ascii() {
+        assert_eq!(
+            render_rust_literal(&succeeds("a — b")),
+            "\"a — b\"",
+            "em-dash must survive escaping"
+        );
+    }
+
+    /// In roff a line starting with `.` or `'` is a control line.
+    #[test]
+    fn roff_neutralises_leading_control_characters() {
+        assert_eq!(
+            render_roff(&succeeds(".B not a command")),
+            "\\&.B not a command"
+        );
+        assert_eq!(render_roff(&succeeds("'quoted")), "\\&'quoted");
+        assert_eq!(render_roff(&succeeds("safe text")), "safe text");
+    }
+
+    #[test]
+    fn roff_escapes_backslashes() {
+        assert_eq!(render_roff(&succeeds(r"a\b")), r"a\eb");
+    }
+
+    /// Plain targets embed the text in prose, so it passes through as-is.
+    #[test]
+    fn plain_render_is_verbatim() {
+        assert_eq!(render_plain(&succeeds(r#".a\b"c"#)), r#".a\b"c"#);
     }
 
     /// `resolve_outcome` is the enforcement of last resort for a caller that
