@@ -1,3 +1,5 @@
+schema_version: 1
+testcases:
 - case_id: TL-001
   key: f
   cmd:
