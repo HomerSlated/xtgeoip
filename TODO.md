@@ -604,7 +604,7 @@ Measured: peak transient is **35.7 MB**, not a risk. The "high memory" framing a
 
 Benchmarked: saves 1.3% of extraction (1.57 ms of 124 ms), and extraction is itself dwarfed by the network download it follows. See the full measurement under **ARCHITECTURE: fetch.rs RESTRUCTURING → #54**.
 
-### #99 — backup.rs: gzip compression level is the backup bottleneck
+### #99 — backup.rs: gzip compression level is the backup bottleneck ✅ DONE (2026-07-18)
 
 Found 2026-07-18 while measuring #71. `create_tarball` uses flate2's default compression (level 6), which is **96–98.5% of a backup's wall time**. Measured on the real data directory (509 files / 10.95 MB), mean of 5 runs:
 
@@ -619,11 +619,30 @@ Two findings:
 - **Level 1 cuts total backup time by ~84%** (950 ms → 152 ms) for 0.58 MB more per archive — on files that `archive_prune = 3` discards anyway. That is a ~6× improvement on the operation, versus the 0.6–3.3% #71 offered.
 - **Level 9 is strictly worse than level 6 here**: 3.4× slower for output that is marginally *larger* (3.32 vs 3.30 MB). The extra search finds nothing on this data. Nobody should raise it; recorded so it isn't tried.
 
-Scope to decide: hardcode a lower level, or expose it as a `[paths]`/`[backup]` config key with a fast default. Consider whether archive size matters at all given pruning to 3.
+**Full sweep (levels 0-9) changed the answer.** The 1/6/9 sample suggested a speed-vs-size trade. There isn't one — level 6 is *strictly dominated*:
 
-Unmeasured alternative: a parallel gzip implementation could use both cores on the dominant step — a larger change than a level tweak, and worth measuring against level 1 before assuming it wins.
+| level | time | size | |
+|-------|--------|----------|---|
+| 0 | 197 ms | 11.38 MB | slower than L1: writing 11 MB costs more than compressing it |
+| **1** | 131 ms | 3.89 MB | fastest |
+| 2 | 276 ms | 3.57 MB | on frontier |
+| 3 | 416 ms | 3.38 MB | dominated by L4 |
+| **4** | **360 ms** | **3.27 MB** | **2.2x faster than L6 AND smaller** |
+| 5 | 463 ms | 3.27 MB | dominated by L4 |
+| 6 | 807 ms | 3.31 MB | *current default — dominated* |
+| 7-9 | 1.2-2.6 s | 3.31 MB | pure waste |
 
-Cheap to validate: backup/restore is exercisable without MaxMind (`xtgeoip -b`), and archives are self-describing, so a level change is verifiable by round-tripping an archive.
+Pareto frontier is only L1, L2, L4. Sizes are deterministic per level+input, so the size figure is not noise; zlib varies both search depth and lazy-matching strategy by level, and past 4 the extra effort buys nothing here.
+
+**Resolved: hardcoded level 4** (`COMPRESSION_LEVEL` in `backup.rs`). Chosen because it is a strict improvement over the previous default with no trade to argue about, and it adds no config surface. Backup wall time drops ~807 ms -> ~360 ms; since compression was 96-98.5% of a backup, that is essentially the whole operation halving.
+
+Caveat recorded at the constant: the *speed* win holds for any input, but "also smaller" is a property of this dataset and may not generalise. Even if it didn't, 2.2x faster stands.
+
+Config key rejected: no trade left to expose once the default is on the frontier, and it would mean threading a parameter through `backup()` -> `create_tarball()` -> `write_tarball()` plus validation and spec work.
+
+Unmeasured alternative, left open: a parallel gzip implementation could use both cores on the dominant step — larger than a level tweak, and worth measuring against L4 before assuming it wins.
+
+**Gave `backup.rs` its first tests** (it had none): archive round-trips contents byte-exact, entries are flat (no leading paths), missing files are skipped, `create_tarball` leaves no stale `.part`, and the level constant stays inside the measured frontier. The round-trip helper decodes an archive in *test code only* — `xtgeoip` still has no restore, per `98-state-ownership-recovery.md` §0.
 
 ### #71 [also backup.rs] — parallel manifest verification ❌ CLOSED — WONTFIX (2026-07-18)
 

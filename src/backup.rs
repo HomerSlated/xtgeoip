@@ -17,6 +17,30 @@ use crate::{
 
 const VERSION_FILE: &str = "version";
 
+/// gzip level for bin archives (#99).
+///
+/// Not `Compression::default()` (6), which is **strictly dominated** on this
+/// data — measured over the real 507-file output directory, mean of 3:
+///
+/// | level | time | size |
+/// |-------|--------|----------|
+/// | 1     | 131 ms | 3.89 MB  |
+/// | **4** | **360 ms** | **3.27 MB** |
+/// | 6     | 807 ms | 3.31 MB  |
+/// | 9     | 2.6 s  | 3.31 MB  |
+///
+/// Level 4 is 2.2× faster than 6 *and* marginally smaller: zlib changes both
+/// search depth and lazy-matching strategy with level, and past 4 the extra
+/// effort buys nothing here (6–9 all land on 3.31 MB). Compression dominated
+/// backup wall time — 96–98.5% of it — so this is the whole operation getting
+/// ~2× faster.
+///
+/// The speed win holds for any input; "also smaller" is a property of this
+/// data and may not generalise. Level 0 is not an option: storing uncompressed
+/// is *slower* (197 ms) because writing 11.38 MB costs more than compressing
+/// it.
+const COMPRESSION_LEVEL: u32 = 4;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackupMode {
     Verified,
@@ -146,7 +170,7 @@ fn verify_manifest_files(
 /// Write a tar.gz archive to `path` (inner step; no atomicity).
 fn write_tarball(path: &Path, files: &[PathBuf]) -> Result<()> {
     let tar_gz = fs::File::create(path)?;
-    let enc = GzEncoder::new(tar_gz, Compression::default());
+    let enc = GzEncoder::new(tar_gz, Compression::new(COMPRESSION_LEVEL));
     let mut tar = Builder::new(enc);
 
     for file in files {
@@ -560,4 +584,132 @@ fn prune_bin_archives(dir: &Path, keep: usize) -> Result<usize> {
     }
 
     Ok(removed)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use tempfile::TempDir;
+
+    use super::*;
+
+    fn file_with(dir: &Path, name: &str, bytes: &[u8]) -> PathBuf {
+        let p = dir.join(name);
+        let mut f = fs::File::create(&p).unwrap();
+        f.write_all(bytes).unwrap();
+        p
+    }
+
+    /// Read an archive back: entry names paired with their contents.
+    ///
+    /// Test-only. `xtgeoip` deliberately has no restore — see
+    /// `docs/design/98-state-ownership-recovery.md` §0. This exists to prove
+    /// what `write_tarball` produced, not to offer recovery.
+    fn read_archive(path: &Path) -> Vec<(String, Vec<u8>)> {
+        use std::io::Read;
+        let f = fs::File::open(path).unwrap();
+        let dec = flate2::read::GzDecoder::new(f);
+        let mut ar = tar::Archive::new(dec);
+        let mut out = Vec::new();
+        for entry in ar.entries().unwrap() {
+            let mut e = entry.unwrap();
+            let name = e.path().unwrap().to_string_lossy().into_owned();
+            let mut buf = Vec::new();
+            e.read_to_end(&mut buf).unwrap();
+            out.push((name, buf));
+        }
+        out.sort();
+        out
+    }
+
+    /// The level change (#99) is only safe if archives stay readable and
+    /// byte-exact. gzip level affects encoding, never decoded content — this
+    /// pins that, since `backup.rs` had no tests before.
+    #[test]
+    fn tarball_round_trips_contents_intact() {
+        let src = TempDir::new().unwrap();
+        let out = TempDir::new().unwrap();
+        let files = vec![
+            file_with(src.path(), "AA.iv4", b"\x01\x02\x03\x04"),
+            file_with(src.path(), "AA.iv6", &[0xFFu8; 64]),
+            file_with(src.path(), VERSION_FILE, b"20260714"),
+        ];
+
+        let archive = out.path().join("test.tar.gz");
+        write_tarball(&archive, &files).unwrap();
+
+        let got = read_archive(&archive);
+        assert_eq!(
+            got,
+            vec![
+                ("AA.iv4".to_string(), b"\x01\x02\x03\x04".to_vec()),
+                ("AA.iv6".to_string(), vec![0xFFu8; 64]),
+                (VERSION_FILE.to_string(), b"20260714".to_vec()),
+            ]
+        );
+    }
+
+    /// Entries are stored by file name only — a leading path would make the
+    /// archive extract into unexpected locations.
+    #[test]
+    fn tarball_entries_are_flat() {
+        let src = TempDir::new().unwrap();
+        let out = TempDir::new().unwrap();
+        let nested = src.path().join("nested");
+        fs::create_dir(&nested).unwrap();
+        let files = vec![file_with(&nested, "ZZ.iv4", b"data")];
+
+        let archive = out.path().join("flat.tar.gz");
+        write_tarball(&archive, &files).unwrap();
+
+        let names: Vec<String> =
+            read_archive(&archive).into_iter().map(|(n, _)| n).collect();
+        assert_eq!(names, vec!["ZZ.iv4".to_string()]);
+    }
+
+    /// Missing files are skipped rather than aborting the backup.
+    #[test]
+    fn tarball_skips_nonexistent_files() {
+        let src = TempDir::new().unwrap();
+        let out = TempDir::new().unwrap();
+        let files = vec![
+            file_with(src.path(), "AA.iv4", b"present"),
+            src.path().join("GONE.iv4"),
+        ];
+
+        let archive = out.path().join("partial.tar.gz");
+        write_tarball(&archive, &files).unwrap();
+
+        let names: Vec<String> =
+            read_archive(&archive).into_iter().map(|(n, _)| n).collect();
+        assert_eq!(names, vec!["AA.iv4".to_string()]);
+    }
+
+    /// `create_tarball` writes to `.part` and renames on success, so a failed
+    /// write can never leave a half-written archive in place.
+    #[test]
+    fn create_tarball_leaves_no_part_file() {
+        let src = TempDir::new().unwrap();
+        let out = TempDir::new().unwrap();
+        let files = vec![file_with(src.path(), "AA.iv4", b"x")];
+
+        let archive = out.path().join("atomic.tar.gz");
+        create_tarball(&archive, &files).unwrap();
+
+        assert!(archive.exists(), "archive must exist");
+        let part = out.path().join("atomic.tar.gz.part");
+        assert!(!part.exists(), "stale .part left behind");
+    }
+
+    /// Guards the constant itself: 0 would be slower *and* far larger, and
+    /// anything above 5 is pure waste on this data (#99).
+    #[test]
+    fn compression_level_is_in_the_useful_range() {
+        assert!(
+            (1..=5).contains(&COMPRESSION_LEVEL),
+            "level {COMPRESSION_LEVEL} is outside the measured Pareto \
+             frontier — see the constant's docs"
+        );
+    }
 }
