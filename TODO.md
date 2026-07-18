@@ -495,7 +495,13 @@ Two tests guard against doc drift: `help_documents_every_flag` (every flag `main
 
 **Observation, not actioned:** unknown flags are still silently ignored, so a typo'd `--rebuil` does nothing and produces exactly the false-failure pattern documented above. Rejecting unknown arguments would close that, but it is a behaviour change and was outside this ticket's agreed scope. Recorded in #98.
 
-### #98 — tests: setup/teardown for a known-good initial state
+### #98 — tests: setup/teardown for a known-good initial state ⚑ DESIGN NOTE AWAITING RATIFICATION
+
+**Design note: [`docs/design/98-state-ownership-recovery.md`](design/98-state-ownership-recovery.md)** (2026-07-18) — covers #98, #24 and #89 as one cluster, per the user's instruction to roll the overlapping items into a single plan.
+
+**Key finding: `xtgeoip` cannot read its own backups.** There is no `restore` — `backup.rs` writes `.tar.gz` archives and prunes them, and nothing anywhere reads one back. #24's rollback has nothing to roll back *to*; #98's teardown has no restore mechanism; #89's deterministic transitions have no baseline to return to. The cluster is **one missing primitive plus three consumers**, not three features.
+
+Decisions needed before any implementation — see §11 of the note.
 
 Split out of #87 (2026-07-18) because it is a behaviour change to an order-dependent suite, not documentation, and bundling the two would have made a cheap verifiable change risky.
 
@@ -525,7 +531,9 @@ Flags are now documented in the file header, which partly overlaps #87.
 
 Verified root-free by running the release binary with `--case NOSUCH` under both override forms: all 51 cases skipped, exit 0, no `sudo` spawned — confirming the new argv parsing doesn't disturb `--case`/`--failed`/`--rebuild`.
 
-### #89 — tests: orphaned file scenarios not covered
+### #89 — tests: orphaned file scenarios not covered ⚑ SEE DESIGN NOTE #98
+
+**Premise partly wrong.** The *detection* exists (`detect_orphans`, called after every build, 6 unit tests) and the full legacy→default→clean cycle was demonstrated working on 2026-07-18. What is missing is an *integration* case and documentation of which clean form applies when (`build -c` during the switch back, `build -c -f` after the fact — see §4 of the design note). Concrete scenarios in §8; the final assertion (`xtgeoip.conf.example` survives) is the regression test for the `b4ec1db` data-loss bug.
 
 Orphaned files from legacy/default mode switching are not covered by the rebuild logic. Add two explicit test scenarios:
 
@@ -574,7 +582,9 @@ Priority / notes:
 
 ## LOW PRIORITY / LARGE SCOPE
 
-### #24 — pipelines: no rollback on mid-pipeline failure
+### #24 — pipelines: no rollback on mid-pipeline failure ⚑ SEE DESIGN NOTE #98
+
+Folded into [`docs/design/98-state-ownership-recovery.md`](design/98-state-ownership-recovery.md) (2026-07-18). Staged there: **stage 1** reorders `Clean` to run *after* `Fetch` (today `run -c` cleans before the network step, so a MaxMind outage leaves `output_dir` empty) — cheap, unit-testable, verifiable with a free `build -c`. **Stage 2** is true rollback, which requires the `restore` primitive that does not yet exist. **Stage 3** (atomic swap) stays rejected.
 
 `backup → clean → fetch → build` has no rollback. A failure mid-way leaves system in partially-destroyed state. Future improvement: write to temp output directory, atomic swap on success. Execution planner (#17) is the right place to manage temp directory as a pipeline-level concern.
 
