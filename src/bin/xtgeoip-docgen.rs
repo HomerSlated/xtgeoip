@@ -9,6 +9,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Spec {
     pub meta: Meta,
     pub version: String,
@@ -33,6 +34,7 @@ pub struct Spec {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FlagDef {
     pub long: String,
     pub kind: String,
@@ -40,17 +42,20 @@ pub struct FlagDef {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Proof {
     pub unique_maps_to: Option<bool>,
     pub full_branch_coverage: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ErrorCase {
     pub maps_to: String,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Meta {
     pub program: String,
     pub summary: String,
@@ -81,6 +86,7 @@ pub enum CommandSpec {
 /// AND every flag in `forbid` is absent. First firing guard (in declared order,
 /// after lowered `reject` entries) wins → its `error` case is emitted.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GuardSpec {
     #[serde(default)]
     pub require: Vec<String>,
@@ -93,27 +99,32 @@ pub struct GuardSpec {
 /// list) MUST equal the complement of `allowed_flags`; order is precedence and
 /// is preserved. Lowered to a leading single-flag guard (`require:[flag]`).
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RejectSpec {
     pub flag: String,
     pub error: String,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SelectorFlags {
     pub choices: BTreeMap<String, ChoiceSummary>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ChoiceSummary {
     pub summary: String,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Constraints {
     pub exactly_one_required: bool,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Example {
     pub case_id: Option<String>,
     pub cmd: String,
@@ -130,17 +141,20 @@ pub struct Example {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Reason {
     pub code: String,
     pub args: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReasonTemplate {
     pub text: String,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ManpageTemplate {
     description: String,
     commands: String,
@@ -205,6 +219,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     validate_spec(&spec)?;
+    validate_examples(&spec)?;
     validate_rules(&spec)?;
 
     let toml_str = fs::read_to_string("docs/spec/manpage-template.toml")?;
@@ -239,6 +254,77 @@ fn main() -> anyhow::Result<()> {
 }
 
 /* ---------------- VALIDATION ---------------- */
+
+/// Enforce the field invariant that `valid` implies (#76).
+///
+/// The spec has always followed a strict bimodal rule, but nothing checked
+/// it, so a violation would have been absorbed by `resolve_outcome`'s old
+/// `"OK"` / `"ERROR"` fallbacks and shipped as real-looking documentation:
+///
+/// | `valid` | `outcome` | `reason` | `maps_to` |
+/// |---------|-----------|----------|-----------|
+/// | `true`  | required  | rejected | rejected  |
+/// | `false` | rejected  | required | required  |
+///
+/// A valid example describes what it *does*; an invalid one describes why it
+/// is refused, and must name the error case it maps to so the integration
+/// suite can assert the keyed error. Mixing the two is always a spec mistake.
+fn validate_examples(spec: &Spec) -> anyhow::Result<()> {
+    let mut problems: Vec<String> = Vec::new();
+
+    let mut check = |scope: &str, ex: &Example| {
+        let id = ex.case_id.as_deref().unwrap_or("<no case_id>");
+        let where_ = format!("[{scope}] {id} ({:?})", ex.cmd);
+
+        if ex.valid {
+            if ex.outcome.is_none() {
+                problems.push(format!("{where_}: valid, but no `outcome`"));
+            }
+            if ex.reason.is_some() {
+                problems.push(format!("{where_}: valid, but has a `reason`"));
+            }
+            if ex.maps_to.is_some() {
+                problems.push(format!("{where_}: valid, but has `maps_to`"));
+            }
+        } else {
+            if ex.reason.is_none() {
+                problems.push(format!("{where_}: invalid, but no `reason`"));
+            }
+            if ex.maps_to.is_none() {
+                problems.push(format!("{where_}: invalid, but no `maps_to`"));
+            }
+            if ex.outcome.is_some() {
+                problems.push(format!(
+                    "{where_}: invalid, but has an `outcome` (the text comes \
+                     from its reason template)"
+                ));
+            }
+        }
+    };
+
+    if let Some(cmd) = &spec.top_level {
+        let (CommandSpec::FlagCommand { examples, .. }
+        | CommandSpec::SelectorCommand { examples, .. }) = cmd;
+        for ex in examples {
+            check("top_level", ex);
+        }
+    }
+    for (name, cmd) in &spec.commands {
+        let (CommandSpec::FlagCommand { examples, .. }
+        | CommandSpec::SelectorCommand { examples, .. }) = cmd;
+        for ex in examples {
+            check(name, ex);
+        }
+    }
+
+    anyhow::ensure!(
+        problems.is_empty(),
+        "{} example(s) violate the valid/outcome/reason invariant:\n{}",
+        problems.len(),
+        problems.join("\n")
+    );
+    Ok(())
+}
 
 fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
     let mut used_error_cases: BTreeSet<String> = BTreeSet::new();
@@ -668,24 +754,48 @@ fn generate_cli_rules_rs(spec: &Spec) -> anyhow::Result<String> {
 
 /* ---------------- OUTCOME ---------------- */
 
-fn resolve_outcome(spec: &Spec, ex: &Example) -> String {
+/// Resolve an example's user-facing outcome text.
+///
+/// Fallible by design (#76). This previously returned `"OK"` for a valid
+/// example with no `outcome` and `"ERROR"` for an invalid one with no usable
+/// `reason` — placeholders that look like real output and would have shipped
+/// into the man page, the markdown and `CLI_MATRIX` alike. Missing spec data
+/// must not produce output, so both cases now fail generation.
+///
+/// `validate_examples` rejects these at spec-load time, so in practice
+/// neither branch is reachable; they are the enforcement of last resort for a
+/// caller that skipped validation.
+fn resolve_outcome(spec: &Spec, ex: &Example) -> anyhow::Result<String> {
     if ex.valid {
-        return ex.outcome.clone().unwrap_or_else(|| "OK".into());
+        return ex.outcome.clone().ok_or_else(|| {
+            anyhow::anyhow!(
+                "Example {:?} is valid but declares no `outcome`",
+                ex.cmd
+            )
+        });
     }
 
-    if let Some(reason) = &ex.reason
-        && let Some(t) = spec.reason_templates.get(&reason.code)
-    {
-        let mut text = t.text.clone();
-        if let Some(args) = &reason.args {
-            for (k, v) in args {
-                text = text.replace(&format!("{{{}}}", k), v);
-            }
+    let reason = ex.reason.as_ref().ok_or_else(|| {
+        anyhow::anyhow!(
+            "Example {:?} is invalid but declares no `reason`",
+            ex.cmd
+        )
+    })?;
+    let t = spec.reason_templates.get(&reason.code).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Example {:?} references unknown reason template {:?}",
+            ex.cmd,
+            reason.code
+        )
+    })?;
+
+    let mut text = t.text.clone();
+    if let Some(args) = &reason.args {
+        for (k, v) in args {
+            text = text.replace(&format!("{{{}}}", k), v);
         }
-        return text;
     }
-
-    "ERROR".into()
+    Ok(text)
 }
 
 /* ---------------- USAGE ---------------- */
@@ -698,7 +808,8 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
                   spec: &Spec,
                   exs: &[Example],
                   title: &str,
-                  extra: Option<&str>| {
+                  extra: Option<&str>|
+     -> anyhow::Result<()> {
         out.push_str(&format!("## {}\n", title));
 
         if let Some(e) = extra {
@@ -707,7 +818,7 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
         }
 
         for ex in exs {
-            let outcome = resolve_outcome(spec, ex);
+            let outcome = resolve_outcome(spec, ex)?;
             out.push_str(&format!("- `{}` → {}", ex.cmd, outcome));
 
             if let Some(s) = ex.exit_status {
@@ -720,6 +831,7 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
         }
 
         out.push('\n');
+        Ok(())
     };
 
     if let Some(cmd) = &spec.top_level {
@@ -727,12 +839,12 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
             CommandSpec::FlagCommand {
                 summary, examples, ..
             } => {
-                render(&mut out, spec, examples, "top level", Some(summary));
+                render(&mut out, spec, examples, "top level", Some(summary))?;
             }
             CommandSpec::SelectorCommand {
                 usage, examples, ..
             } => {
-                render(&mut out, spec, examples, "top level", Some(usage));
+                render(&mut out, spec, examples, "top level", Some(usage))?;
             }
         }
     }
@@ -742,12 +854,12 @@ fn generate_usage_md(spec: &Spec) -> anyhow::Result<String> {
             CommandSpec::FlagCommand {
                 summary, examples, ..
             } => {
-                render(&mut out, spec, examples, name, Some(summary));
+                render(&mut out, spec, examples, name, Some(summary))?;
             }
             CommandSpec::SelectorCommand {
                 usage, examples, ..
             } => {
-                render(&mut out, spec, examples, name, Some(usage));
+                render(&mut out, spec, examples, name, Some(usage))?;
             }
         }
     }
@@ -817,15 +929,16 @@ fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
          const CLI_MATRIX: &[CliExample] = &[\n",
     );
 
-    let mut add = |exs: &[Example]| {
+    let mut add = |exs: &[Example]| -> anyhow::Result<()> {
         for ex in exs {
-            let outcome = resolve_outcome(spec, ex);
+            let outcome = resolve_outcome(spec, ex)?;
             out.push_str(&format!(
                 "    CliExample {{ cmd: \"{}\", valid: {}, outcome: \"{}\" \
                  }},\n",
                 ex.cmd, ex.valid, outcome
             ));
         }
+        Ok(())
     };
 
     if let Some(cmd) = &spec.top_level {
@@ -833,7 +946,7 @@ fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
             CommandSpec::FlagCommand { examples, .. }
             | CommandSpec::SelectorCommand { examples, .. } => examples,
         };
-        add(exs);
+        add(exs)?;
     }
 
     for cmd in spec.commands.values() {
@@ -841,7 +954,7 @@ fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
             CommandSpec::FlagCommand { examples, .. }
             | CommandSpec::SelectorCommand { examples, .. } => examples,
         };
-        add(exs);
+        add(exs)?;
     }
 
     out.push_str("];\n");
@@ -994,4 +1107,151 @@ fn generate_manpage(
     push_section(&mut out, "AUTHORS", &tmpl.authors);
 
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn example(valid: bool) -> Example {
+        Example {
+            case_id: Some("X-001".into()),
+            cmd: "xtgeoip -x".into(),
+            valid,
+            outcome: None,
+            reason: None,
+            exit_status: None,
+            note: None,
+            maps_to: None,
+            rebuild: None,
+            timeout_secs: None,
+            expected_stdout: None,
+            expected_stderr: None,
+        }
+    }
+
+    /// Minimal spec carrying one example in the top-level command.
+    fn spec_with(ex: Example) -> Spec {
+        Spec {
+            meta: Meta {
+                program: "xtgeoip".into(),
+                summary: "test".into(),
+            },
+            version: "3.1".into(),
+            proof: None,
+            flags: BTreeMap::new(),
+            error_cases: None,
+            top_level: Some(CommandSpec::FlagCommand {
+                summary: "test".into(),
+                allowed_flags: vec![],
+                reject: vec![],
+                guards: vec![],
+                examples: vec![ex],
+            }),
+            commands: BTreeMap::new(),
+            reason_templates: BTreeMap::new(),
+        }
+    }
+
+    fn conforming_valid() -> Example {
+        Example {
+            outcome: Some("does a thing".into()),
+            ..example(true)
+        }
+    }
+
+    fn conforming_invalid() -> Example {
+        Example {
+            reason: Some(Reason {
+                code: "some_code".into(),
+                args: None,
+            }),
+            maps_to: Some("some_case".into()),
+            ..example(false)
+        }
+    }
+
+    #[test]
+    fn conforming_examples_pass() {
+        assert!(validate_examples(&spec_with(conforming_valid())).is_ok());
+        assert!(validate_examples(&spec_with(conforming_invalid())).is_ok());
+    }
+
+    #[test]
+    fn valid_without_outcome_is_rejected() {
+        let err = validate_examples(&spec_with(example(true)))
+            .expect_err("must reject");
+        assert!(
+            err.to_string().contains("valid, but no `outcome`"),
+            "unhelpful: {err}"
+        );
+    }
+
+    #[test]
+    fn valid_with_reason_is_rejected() {
+        let ex = Example {
+            reason: Some(Reason {
+                code: "c".into(),
+                args: None,
+            }),
+            ..conforming_valid()
+        };
+        assert!(
+            validate_examples(&spec_with(ex))
+                .expect_err("must reject")
+                .to_string()
+                .contains("valid, but has a `reason`")
+        );
+    }
+
+    #[test]
+    fn invalid_without_reason_is_rejected() {
+        let err = validate_examples(&spec_with(example(false)))
+            .expect_err("must reject");
+        let msg = err.to_string();
+        assert!(msg.contains("invalid, but no `reason`"), "unhelpful: {msg}");
+        assert!(
+            msg.contains("invalid, but no `maps_to`"),
+            "unhelpful: {msg}"
+        );
+    }
+
+    #[test]
+    fn invalid_with_outcome_is_rejected() {
+        let ex = Example {
+            outcome: Some("text".into()),
+            ..conforming_invalid()
+        };
+        assert!(
+            validate_examples(&spec_with(ex))
+                .expect_err("must reject")
+                .to_string()
+                .contains("invalid, but has an `outcome`")
+        );
+    }
+
+    /// The failure message must name the offending case, or a spec author
+    /// gets "something is wrong" with 51 candidates.
+    #[test]
+    fn rejection_names_the_case() {
+        let msg = validate_examples(&spec_with(example(true)))
+            .expect_err("must reject")
+            .to_string();
+        assert!(msg.contains("X-001"), "case_id missing from: {msg}");
+        assert!(msg.contains("xtgeoip -x"), "cmd missing from: {msg}");
+    }
+
+    /// `resolve_outcome` is the enforcement of last resort for a caller that
+    /// skipped validation: it must error, not emit a plausible placeholder.
+    #[test]
+    fn resolve_outcome_refuses_to_invent_text() {
+        let spec = spec_with(conforming_valid());
+        let err = resolve_outcome(&spec, &example(true))
+            .expect_err("must not return \"OK\"");
+        assert!(err.to_string().contains("declares no `outcome`"));
+
+        let err = resolve_outcome(&spec, &example(false))
+            .expect_err("must not return \"ERROR\"");
+        assert!(err.to_string().contains("declares no `reason`"));
+    }
 }
