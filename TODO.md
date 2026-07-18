@@ -495,13 +495,17 @@ Two tests guard against doc drift: `help_documents_every_flag` (every flag `main
 
 **Observation, not actioned:** unknown flags are still silently ignored, so a typo'd `--rebuil` does nothing and produces exactly the false-failure pattern documented above. Rejecting unknown arguments would close that, but it is a behaviour change and was outside this ticket's agreed scope. Recorded in #98.
 
-### #98 — tests: setup/teardown for a known-good initial state ⚑ DESIGN NOTE AWAITING RATIFICATION
+### #98 — tests: setup/teardown for a known-good initial state ❌ PLAN REJECTED (2026-07-18)
 
-**Design note: [`docs/design/98-state-ownership-recovery.md`](design/98-state-ownership-recovery.md)** (2026-07-18) — covers #98, #24 and #89 as one cluster, per the user's instruction to roll the overlapping items into a single plan.
+**Design note: [`docs/design/98-state-ownership-recovery.md`](design/98-state-ownership-recovery.md) — REJECTED, §0.** The note proposed a `restore` primitive as the missing capability underlying #98, #24 and #89. Rejected by the user, and the reasoning is a permanent scope boundary worth reading before proposing anything similar:
 
-**Key finding: `xtgeoip` cannot read its own backups.** There is no `restore` — `backup.rs` writes `.tar.gz` archives and prunes them, and nothing anywhere reads one back. #24's rollback has nothing to roll back *to*; #98's teardown has no restore mechanism; #89's deterministic transitions have no baseline to return to. The cluster is **one missing primitive plus three consumers**, not three features.
+> **Backups are context-free; restores are not.** A backup can be made without knowing or caring about the circumstances — it is never made *because* there is a problem, but to provide part of the means to *solve* one. Adopting responsibility for restoring means adopting responsibility for solving the problem, and you cannot solve a problem you do not understand. That is the user's job.
 
-Decisions needed before any implementation — see §11 of the note.
+The note's framing was the error: it called "there is no restore" *the finding*, treating an absence as an omission when it was a **boundary already decided**. Three data sources already exist (`output_dir`, `archive_dir`, MaxMind); restore adds convenience, not data. The manifest is our only contract — we may overwrite and delete what it lists, nothing more. "Force clean, then restore" would delete what may be the last intact copy and replace it with something merely hoped to work.
+
+The note was also internally inconsistent: it rejected implicit backups as an unrequested surprise, then proposed restore — which *is* data loss — without applying the same test.
+
+**Still open, and each needing its own decision** (none depends on restore): documenting the ownership model and the two orphan-clean paths; rejecting unknown flags in `xtgeoip-tests`; #24 stage 1 (reorder `Clean` after `Fetch`); #89 integration cases. See §12.
 
 Split out of #87 (2026-07-18) because it is a behaviour change to an order-dependent suite, not documentation, and bundling the two would have made a cheap verifiable change risky.
 
@@ -584,7 +588,9 @@ Priority / notes:
 
 ### #24 — pipelines: no rollback on mid-pipeline failure ⚑ SEE DESIGN NOTE #98
 
-Folded into [`docs/design/98-state-ownership-recovery.md`](design/98-state-ownership-recovery.md) (2026-07-18). Staged there: **stage 1** reorders `Clean` to run *after* `Fetch` (today `run -c` cleans before the network step, so a MaxMind outage leaves `output_dir` empty) — cheap, unit-testable, verifiable with a free `build -c`. **Stage 2** is true rollback, which requires the `restore` primitive that does not yet exist. **Stage 3** (atomic swap) stays rejected.
+Design note [`98-state-ownership-recovery.md`](design/98-state-ownership-recovery.md) **REJECTED** (§0). **Stage 2 (rollback) is rejected with it** — it was `restore` under another name, and restoring a backup means adopting responsibility for a problem you have not diagnosed. **Stage 3** (atomic swap) stays rejected.
+
+**Stage 1 survives as an independent question**: reorder `Clean` to run *after* `Fetch`. Today `run -c` destroys the working data *before* the network step, so a MaxMind outage leaves `output_dir` empty. This is not recovery — it is not destroying data until the replacement is in hand, the same instinct that rejects restore. Unit-testable against the 11 `plan()` goldens; verifiable with a free `build -c` (Local fetch, no MaxMind request). Needs a decision on its own merits; it changes observable step order.
 
 `backup → clean → fetch → build` has no rollback. A failure mid-way leaves system in partially-destroyed state. Future improvement: write to temp output directory, atomic swap on success. Execution planner (#17) is the right place to manage temp directory as a pipeline-level concern.
 
