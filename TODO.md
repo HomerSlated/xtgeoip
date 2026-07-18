@@ -388,9 +388,35 @@ Original text: `BTreeMap<String, CommandSpec>` gives deterministic alphabetical 
 
 ## TEST INFRASTRUCTURE (xtgeoip-tests.rs)
 
-### #87 — tests: system integration nature not documented
+### #87 — tests: system integration nature not documented ✅ DONE (2026-07-18)
 
-Explicitly document that `xtgeoip-tests` is a system integration test suite (not unit tests): tests are order-dependent, require root, require a real release build, and depend on prior test execution. Add to comments and `--help`. Consider a setup/teardown phase for known-good initial state.
+Explicitly document that `xtgeoip-tests` is a system integration test suite (not unit tests): tests are order-dependent, require root, require a real release build, and depend on prior test execution. Add to comments and `--help`. ~~Consider a setup/teardown phase for known-good initial state.~~ → split to **#98**.
+
+**Documentation done.** The module header now leads with "SYSTEM INTEGRATION test suite (not unit tests)" and states each constraint explicitly: requires root, requires a real release build (not debug, not a Cargo harness), order-dependent with cases depending on prior execution (`TL-007` empties `output_dir`, so everything after it runs against a cleaned system), hits the fetch-capped live MaxMind API, and must run from the repository root. It also notes that the `#[cfg(test)]` module at the bottom *is* root-free and covers only parsing/versioning/path-resolution — not the cases.
+
+**`--help` added.** The binary previously had none. It documents every flag plus the binary resolution order and the operational requirements, and exits 0 root-free.
+
+**`--rebuild` is called out as effectively required**, with the concrete failure mode named ("Nothing to back up" false failures). That omission has already cost one debugging session; it now appears in both the header and `--help`.
+
+Two tests guard against doc drift: `help_documents_every_flag` (every flag `main` parses appears in `HELP` — help that omits a flag is worse than none, since it implies the flag doesn't exist) and `help_states_the_operational_constraints` (root / release build / MaxMind / REQUIRED survive future edits).
+
+**Observation, not actioned:** unknown flags are still silently ignored, so a typo'd `--rebuil` does nothing and produces exactly the false-failure pattern documented above. Rejecting unknown arguments would close that, but it is a behaviour change and was outside this ticket's agreed scope. Recorded in #98.
+
+### #98 — tests: setup/teardown for a known-good initial state
+
+Split out of #87 (2026-07-18) because it is a behaviour change to an order-dependent suite, not documentation, and bundling the two would have made a cheap verifiable change risky.
+
+`xtgeoip-tests` has no setup or teardown phase. Cases run in file order against whatever system state the previous case left, so a failure mid-run leaves the system in an arbitrary state and the next full run starts from it. `--rebuild` is a partial, opt-in mitigation rather than a guarantee.
+
+Scope to consider:
+- A setup phase establishing a known-good initial state (populated `output_dir`, known archives) rather than inheriting whatever was left behind.
+- A teardown restoring that state, so a mid-run failure doesn't poison the next run.
+- Whether `--rebuild` should then be the default, or become unnecessary.
+- **Reject unknown CLI flags** (carried over from #87): a typo'd `--rebuil` is currently silent, producing false "Nothing to back up" failures — the precise trap the #87 docs now warn about. Cheap to fix, but a behaviour change.
+
+Overlaps **#89** (orphan scenarios need deterministic state transitions) and **#24** (no rollback on mid-pipeline failure) — the same "arbitrary state after failure" problem at two levels. Consider designing them together.
+
+**Verification cost:** any change here must be validated by a full `xtgeoip-tests --rebuild` run against live, rate-capped MaxMind. Design on paper first; do not iterate against the server.
 
 ### #81 — tests: binary path hardcoded ✅ DONE (2026-07-18)
 
