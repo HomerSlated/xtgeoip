@@ -241,9 +241,31 @@ If extraction ever *does* need to be faster (much larger archive), the measureme
 
 Benchmark harness is not committed (it was a scratch project depending only on `zip`/`rayon`/`tempfile`); the numbers above are the deliverable.
 
-### #71 — backup.rs: manifest verification is sequential
+### #71 — backup.rs: manifest verification is sequential ❌ CLOSED — WONTFIX, measured (2026-07-18)
 
 Consider Rayon `.par_lines()` or `.par_iter()`. On small datasets, overhead may exceed benefit. On NVMe with many files, likely a win. **Measure first.**
+
+**Measured as instructed. The ticket's own hypothesis is confirmed — and it still isn't worth doing.** Benchmarked against the real data directory (`/usr/share/xt_geoip`, 509 files / 10.95 MB, manifest `GeoLite2-Country-bin_20260714.blake3`), release build, mean of 5 runs, 2 cores. `backup.rs` was **not modified**.
+
+| Phase | Cold cache | Warm cache |
+|---|---|---|
+| A — verify, serial (today) | 39.05 ms | 14.23 ms |
+| B — verify, Rayon (**the proposal**) | 8.46 ms | 8.07 ms |
+| speedup | **4.61×** | 1.76× |
+| C — tar + gzip | 888 ms | 950 ms |
+
+Unlike #54, the parallelism genuinely works: 506 similarly-sized files give an Amdahl ceiling of 6.9×, and it reaches 4.61× on two cores — superlinear against core count because the work is I/O-latency-bound and the syscalls overlap. "Likely a win on many files" was correct.
+
+**It is nonetheless immaterial: verification is 1.5–4% of a backup; tar+gzip is 96–98.5%.** #71 saves **0.6–3.3%** of the operation.
+
+Two reasons to close rather than take the free 3%:
+
+1. **Scale.** The saving is invisible next to the ~950 ms compression step it sits beside.
+2. **It would cost error determinism** — a cost the ticket does not mention. `verify_manifest_files` `bail!`s on the *first* mismatch and names that file. Under `par_iter` the winning failure becomes nondeterministic: the same corrupted directory could report a different filename on each run. This is an **integrity check**; reproducible diagnostics matter more here than 30 ms. Doing it properly would mean collecting all failures and choosing deterministically (e.g. lowest manifest index), which is more code and more risk than the gain justifies.
+
+**Redirect — the real win is compression, filed as #99.** See below; level 1 would cut the whole backup ~84%.
+
+Method note, same as #54: measure the split, *then* check what share of the enclosing operation it represents. Both parallelism tickets failed on the second question, not the first.
 
 ---
 
@@ -533,9 +555,30 @@ High memory risk from CSV materialisation; benchmark before implementing the str
 
 Benchmarked: saves 1.3% of extraction (1.57 ms of 124 ms), and extraction is itself dwarfed by the network download it follows. See the full measurement under **ARCHITECTURE: fetch.rs RESTRUCTURING → #54**.
 
-### #71 [also backup.rs] — parallel manifest verification
+### #99 — backup.rs: gzip compression level is the backup bottleneck
 
-Parallel manifest verification; measure before committing.
+Found 2026-07-18 while measuring #71. `create_tarball` uses flate2's default compression (level 6), which is **96–98.5% of a backup's wall time**. Measured on the real data directory (509 files / 10.95 MB), mean of 5 runs:
+
+| Level | Time | Output |
+|-------|------|--------|
+| **1** | **152 ms** | 3.88 MB |
+| **6** (current) | 959 ms | 3.30 MB |
+| 9 | 3.29 s | 3.32 MB |
+
+Two findings:
+
+- **Level 1 cuts total backup time by ~84%** (950 ms → 152 ms) for 0.58 MB more per archive — on files that `archive_prune = 3` discards anyway. That is a ~6× improvement on the operation, versus the 0.6–3.3% #71 offered.
+- **Level 9 is strictly worse than level 6 here**: 3.4× slower for output that is marginally *larger* (3.32 vs 3.30 MB). The extra search finds nothing on this data. Nobody should raise it; recorded so it isn't tried.
+
+Scope to decide: hardcode a lower level, or expose it as a `[paths]`/`[backup]` config key with a fast default. Consider whether archive size matters at all given pruning to 3.
+
+Unmeasured alternative: a parallel gzip implementation could use both cores on the dominant step — a larger change than a level tweak, and worth measuring against level 1 before assuming it wins.
+
+Cheap to validate: backup/restore is exercisable without MaxMind (`xtgeoip -b`), and archives are self-describing, so a level change is verifiable by round-tripping an archive.
+
+### #71 [also backup.rs] — parallel manifest verification ❌ CLOSED — WONTFIX (2026-07-18)
+
+Measured: parallelises well (4.61× cold) but verification is only 1.5–4% of a backup, so it saves 0.6–3.3%; and it would make integrity-failure reporting nondeterministic. The real bottleneck is gzip → **#99**. Full measurement under **ARCHITECTURE: ANALYSIS AND SMALL REFACTORS → #71**.
 
 ### #88 — unit testing: mock the HTTP layer in fetch.rs
 
