@@ -442,7 +442,10 @@ fn load_blocks_v4(
     let idx = parse_block_indices(&headers, FILE_NAME)?;
 
     let skipped = AtomicUsize::new(0);
-    let parsed: Vec<(CountryCode, Option<(u32, u32)>)> = rdr
+    // Rows without a usable range are dropped here rather than carried into
+    // `parsed` and skipped during grouping (#38): the `Option` cost 4 bytes
+    // per element on this path and a branch per row in the loop below.
+    let parsed: Vec<(CountryCode, (u32, u32))> = rdr
         .into_records()
         .par_bridge()
         .filter_map(|r| {
@@ -451,7 +454,7 @@ fn load_blocks_v4(
             })
             .ok()
         })
-        .map(|rec| {
+        .filter_map(|rec| {
             let id = rec.get(idx.id).unwrap_or("");
             let rid = rec.get(idx.rid).unwrap_or("");
             let proxy = rec.get(idx.proxy).unwrap_or("") == "1";
@@ -463,7 +466,7 @@ fn load_blocks_v4(
             } else {
                 cidr_to_range_ipv4(network)
             };
-            (cc, range)
+            range.map(|r| (cc, r))
         })
         .collect();
 
@@ -474,10 +477,8 @@ fn load_blocks_v4(
 
     let mut pools: HashMap<CountryCode, Vec<(u32, u32)>> =
         HashMap::with_capacity(country_count);
-    for (cc, range_opt) in parsed {
-        if let Some(range) = range_opt {
-            pools.entry(cc).or_default().push(range);
-        }
+    for (cc, range) in parsed {
+        pools.entry(cc).or_default().push(range);
     }
     pools.par_iter_mut().for_each(|(_, v)| *v = merge_ranges(v));
     Ok(pools)
@@ -501,7 +502,11 @@ fn load_blocks_v6(
     let idx = parse_block_indices(&headers, FILE_NAME)?;
 
     let skipped = AtomicUsize::new(0);
-    let parsed: Vec<(CountryCode, Option<(u128, u128)>)> = rdr
+    // As in load_blocks_v4, but the saving is larger here: `Option` around a
+    // `(u128, u128)` costs 16 bytes at 16-byte alignment, so dropping it
+    // takes each element from 64 to 48 bytes — ~25% of this path's transient
+    // allocation, which is the larger of the two (#38).
+    let parsed: Vec<(CountryCode, (u128, u128))> = rdr
         .into_records()
         .par_bridge()
         .filter_map(|r| {
@@ -510,7 +515,7 @@ fn load_blocks_v6(
             })
             .ok()
         })
-        .map(|rec| {
+        .filter_map(|rec| {
             let id = rec.get(idx.id).unwrap_or("");
             let rid = rec.get(idx.rid).unwrap_or("");
             let proxy = rec.get(idx.proxy).unwrap_or("") == "1";
@@ -522,7 +527,7 @@ fn load_blocks_v6(
             } else {
                 cidr_to_range_ipv6(network)
             };
-            (cc, range)
+            range.map(|r| (cc, r))
         })
         .collect();
 
@@ -533,10 +538,8 @@ fn load_blocks_v6(
 
     let mut pools: HashMap<CountryCode, Vec<(u128, u128)>> =
         HashMap::with_capacity(country_count);
-    for (cc, range_opt) in parsed {
-        if let Some(range) = range_opt {
-            pools.entry(cc).or_default().push(range);
-        }
+    for (cc, range) in parsed {
+        pools.entry(cc).or_default().push(range);
     }
     pools.par_iter_mut().for_each(|(_, v)| *v = merge_ranges(v));
     Ok(pools)

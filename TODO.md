@@ -152,7 +152,29 @@ once, via the custom handler (stderr + file, never stdout). Done together with #
 
 ## ARCHITECTURE: build.rs RESTRUCTURING
 
-### #38 — build.rs: CSV parsing materialises all rows before grouping
+### #38 — build.rs: CSV parsing materialises all rows before grouping ❌ CLOSED — premise invalidated; small win taken (2026-07-18)
+
+**The ticket's premise is stale.** It quotes `let parsed: Vec<(String, Option<(u32, u32)>)>` and calls it "high memory risk". The code has since changed to `Vec<(CountryCode, ...)>`, where `CountryCode` is a `Copy` enum over `[u8; 2]` — **no heap allocation at all**. The ticket was never updated.
+
+Measured at real row counts (564,448 IPv4 / 558,545 IPv6 rows, from the cached `GeoLite2-Country-CSV_20260714.zip`):
+
+| | element size | rows | transient |
+|---|---|---|---|
+| v4 `(CountryCode, Option<(u32,u32)>)` | 16 B | 564,448 | 9.0 MB |
+| v6 `(CountryCode, Option<(u128,u128)>)` | 64 B | 558,545 | 35.7 MB |
+| *(what #38 assumed)* `(String, Option<(u32,u32)>)` | 40 B | — | 22.6 MB **+ 564,448 heap allocations** |
+
+v4 and v6 load in **sequence**, so peak transient is the larger — **35.7 MB**, not a sum and not a risk.
+
+**The DashMap proposal is rejected on invariant #5.** Today parsing is parallel (`par_bridge`), grouping is a serial loop, merging is parallel (`par_iter_mut`). Streaming into a `DashMap` moves grouping into the parallel phase at the cost of **564k contended inserts on 2 cores** — plausibly a net loss, and invariant #5 forbids trading away existing parallelism for structure. With the memory rationale gone, there is nothing left to justify the risk or the new dependency.
+
+**Small win taken instead.** `map` → `filter_map` so rows without a usable range are dropped at parse time rather than carried and skipped during grouping. This removes the `Option`:
+
+- v6: 64 → 48 bytes/element (**~25%** off the larger path — `Option<(u128,u128)>` costs 16 bytes at 16-byte alignment)
+- v4: 16 → 12 bytes/element
+- one branch removed from each grouping loop
+
+No new dependency, no parallelism traded, behaviour identical (the same rows were being discarded, just later).
 
 `let parsed: Vec<(String, Option<(u32, u32)>)>` materialises millions of rows before grouping. Stream directly into grouping structure:
 ```rust
@@ -558,9 +580,9 @@ Priority / notes:
 
 **⚠ See #1 PRIORITY.** This exact idea was implemented early (`b4ec1db`) and caused a data-loss bug: the atomic swap `remove_dir_all`s the whole `output_dir`, deleting files build never created. It has been reverted. If revisited, the temp/swap MUST respect manifest ownership — never delete unowned files, force-delete only build-created types (`.iv4`/`.iv6`).
 
-### #38 [also build.rs] — CSV materialisation: high memory risk
+### #38 [also build.rs] — CSV materialisation: high memory risk ❌ CLOSED — premise invalidated (2026-07-18)
 
-High memory risk from CSV materialisation; benchmark before implementing the streaming approach.
+Measured: peak transient is **35.7 MB**, not a risk. The "high memory" framing assumed `Vec<(String, ...)>`; the code uses a `Copy` `CountryCode` with no heap allocation. DashMap streaming rejected on invariant #5 (564k contended inserts on 2 cores would trade away working parallelism). Full measurement under **ARCHITECTURE: build.rs RESTRUCTURING → #38**.
 
 ### #54 [also fetch.rs] — parallel ZIP writes ❌ CLOSED — WONTFIX (2026-07-18)
 
