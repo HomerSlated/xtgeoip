@@ -99,9 +99,22 @@ precedence). Not yet implemented.
 
 ## MIGRATION
 
-### #2 — Cargo.toml / docgen: migrate from `serde-yaml` to `serde-saphyr`
+### #2 — Cargo.toml / docgen: migrate from `serde-yaml` to `serde-saphyr` ✅ DONE (2026-07-18)
 
 `serde-yaml` is deprecated. Migrate to `serde-saphyr` (maintained successor, compatible API). Do alongside #77 and #79 to avoid touching the YAML serialisation path twice.
+
+**Done.** API was drop-in — `from_str`/`to_string` under the same names — so all four call sites were one-word changes. Migrated in two stages, each with its own oracle:
+
+1. **Readers** (`xtgeoip-docgen.rs:175`, `structure-errors.rs:26`, `xtgeoip-tests.rs:99`). Oracle: regenerate and `git diff --exit-code src/generated/ docs/generated/` — byte-identical, so the parser is equivalent on this spec.
+2. **Emitter** (`xtgeoip-docgen.rs:867`, the only site producing committed output). Expected formatting churn in `docs/generated/testcases.yaml`; got **byte-identical output** instead, verified by `cmp` against the pre-swap file after forcing a rewrite. Byte-identity is strictly stronger than the semantic-equivalence check that was planned as a fallback.
+
+**Pinned to `=0.0.29`** deliberately. Despite the README's "1.0 API" language the crate is published `0.0.x`, where Cargo treats *every* release as incompatible and the author guarantees nothing between versions. An exact pin makes upgrades a reviewed event rather than something that can silently shift emitter output and churn `testcases.yaml`. Revisit the pin if/when it reaches 0.1+.
+
+**No YAML 1.1→1.2 scalar hazards**: `cli.yaml` has no bare `yes`/`no`/`on`/`off`, no unquoted nulls, no leading-zero numerics — the cases where saphyr (1.2) and serde_yaml (1.1-era) resolve types differently. The byte-diff would have caught a flip regardless.
+
+Guard added: `xtgeoip-tests.rs` gained a `#[cfg(test)] mod tests` (3 tests) that parses the committed `testcases.yaml` and asserts case count (51), well-formedness, and `case_id` uniqueness. That reader was previously exercised *only* by the root + live-MaxMind run, so a deserialiser regression could not have surfaced without a rate-capped run.
+
+Bearing on **#79** (verify `BTreeMap` ordering survives YAML deserialisation): the byte-identical regeneration is direct evidence that iteration order is preserved, and CI's `docgen-check` job re-proves it on every push. #79's explicit round-trip assertion is still unwritten; left open.
 
 ---
 
@@ -330,6 +343,20 @@ Original complaint: `scripts/sync.py` ran docgen → clippy → `+nightly fmt --
 **Stale as written (found 2026-07-18).** `cargo test` was wired in at some point after this was filed and the ticket was never updated: `scripts/sync.py:87` and the `test` job in `.github/workflows/rust.yml` both run it. The snapshot guard has in fact been enforced.
 
 The real residual was narrower: both gates ran `cargo clippy --` **without** `--all-targets`, so lints in `#[cfg(test)]` code were never gated — test code compiles under `cargo test`, so this was lint coverage, not correctness. It let the `build.rs` `items_after_test_module` lint sit undetected until a manual `--all-targets` run caught it (fixed `22b3645`). Both gates now pass `--all-targets`, matching the `build` job, which already used it.
+
+---
+
+### #97 — structure-errors: dead binary, broken at HEAD ⚑ NEEDS DECISION
+
+Found 2026-07-18 while migrating #2. `src/bin/structure-errors.rs` is dead code and has been for some time:
+
+- **It fails.** Running it aborts with `error_case 'build_force_ambiguous' refers to unknown template 'build_force_ambiguous'`. Confirmed pre-existing at HEAD (reproduced with the original `serde_yaml` reader, so it is not migration fallout). Its `ErrorSpec` model expects every `error_cases.*.maps_to` to name a `reason_templates` key; `cli.yaml:83` has `build_force_ambiguous: { maps_to: build_force_ambiguous }`, which names no such template. The spec moved on (guards now carry `error: build_force_ambiguous`, `cli.yaml:240`) and this binary was never updated.
+- **Its output is unused.** It writes `src/generated/errors.rs.in`, which is untracked, absent from `src/generated/mod.rs` (which declares only `cli_matrix`, `cli_rules`, `error_text` — all written by docgen), and the `CliError` type it generates appears nowhere in `src/`.
+- **Nothing runs it.** `sync.py` and CI both invoke only `xtgeoip-docgen`. That is why the breakage went unnoticed.
+
+It was superseded by docgen's `generate_error_text_rs` (`xtgeoip-docgen.rs:776` → `src/generated/error_text.rs`).
+
+Decide: **delete it** (recommended — the live path is docgen, and a broken generator that nothing runs is a trap for the next reader), or repair it to match the current spec if it is meant to have a role. Note it also counts against #88/#96-style gating: no gate would have caught this, since a `[[bin]]` that compiles but fails at runtime is invisible to `cargo build`/`clippy`/`cargo test`.
 
 ---
 

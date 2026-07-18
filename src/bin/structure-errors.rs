@@ -23,7 +23,7 @@ struct ErrorCase {
 
 fn main() -> anyhow::Result<()> {
     let yaml = fs::read_to_string("docs/spec/cli.yaml")?;
-    let spec: ErrorSpec = serde_yaml::from_str(&yaml)?;
+    let spec: ErrorSpec = serde_saphyr::from_str(&yaml)?;
 
     let output = generate_errors_rs(&spec)?;
 

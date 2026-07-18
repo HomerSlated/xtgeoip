@@ -96,7 +96,7 @@ fn main() -> anyhow::Result<()> {
         .map(String::as_str);
 
     let yaml_str = fs::read_to_string("docs/generated/testcases.yaml")?;
-    let testcases: Vec<Testcase> = serde_yaml::from_str(&yaml_str)?;
+    let testcases: Vec<Testcase> = serde_saphyr::from_str(&yaml_str)?;
 
     if testcases.is_empty() {
         println!("No testcases found.");
@@ -254,4 +254,63 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The committed corpus this suite runs. Parsing it is otherwise only
+    /// exercised by a full root + live-MaxMind run, so a deserialiser change
+    /// (e.g. the serde_yaml → serde-saphyr migration, #2) could silently
+    /// drop or mangle cases and only surface during a rate-capped run.
+    /// `cargo test` sets CWD to the package root, so the path resolves.
+    fn load() -> Vec<Testcase> {
+        let yaml = fs::read_to_string("docs/generated/testcases.yaml")
+            .expect("docs/generated/testcases.yaml missing — run docgen");
+        serde_saphyr::from_str(&yaml).expect("testcases.yaml failed to parse")
+    }
+
+    #[test]
+    fn corpus_parses_with_expected_case_count() {
+        assert_eq!(load().len(), 51);
+    }
+
+    #[test]
+    fn every_case_is_well_formed() {
+        for tc in &load() {
+            let id = tc.case_id.as_deref().unwrap_or("<no case_id>");
+            assert!(
+                tc.key == "p" || tc.key == "f",
+                "{id}: key must be \"p\" or \"f\", got {:?}",
+                tc.key
+            );
+            assert!(!tc.cmd.is_empty(), "{id}: empty cmd");
+            assert_eq!(tc.cmd[0], "xtgeoip", "{id}: cmd must invoke xtgeoip");
+            // A failing case must say which exit status it expects; a
+            // passing one must not claim a non-zero status.
+            match (tc.key.as_str(), tc.exit_status) {
+                ("f", None) => panic!("{id}: key 'f' with no exit_status"),
+                ("p", Some(s)) if s != 0 => {
+                    panic!("{id}: key 'p' with exit_status {s}")
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Case IDs are how failures are reported and how `--case` selects a
+    /// single test; duplicates would make both ambiguous.
+    #[test]
+    fn case_ids_are_present_and_unique() {
+        let cases = load();
+        let ids: Vec<&str> = cases
+            .iter()
+            .filter_map(|tc| tc.case_id.as_deref())
+            .collect();
+        assert_eq!(ids.len(), 51, "every case needs a case_id");
+        let unique: std::collections::BTreeSet<&str> =
+            ids.iter().copied().collect();
+        assert_eq!(unique.len(), ids.len(), "duplicate case_id");
+    }
 }
