@@ -601,7 +601,24 @@ It was superseded by docgen's `generate_error_text_rs` (`xtgeoip-docgen.rs:776` 
 
 ## TOOLING / AGENTS
 
-### #95 — import generic agents from private/agents-out/
+### #95 — import generic agents from private/agents-out/ — docs-auditor ✅ DONE (2026-07-18)
+
+**`docs-auditor` imported and adapted** (`.claude/agents/docs-auditor.md`). Two of seven now installed; the remaining five stay deferred per this ticket's own "adapt as needed when wanted".
+
+Adaptation notes:
+- Default audit set is exactly what `private/WORKFLOW.md` names: `README.md`, `CLAUDE.md`, `TODO.md`/`TODO_tldr.md`, `docs/design.md`, `docs/legacy.md`. All six verified to exist.
+- **`docs/generated/` and `src/generated/` are hard off-limits** — docgen-owned. If their content is wrong the *spec* is wrong; the agent must report the offending `cli.yaml` key and stop. Also excluded: `src/`, `docs/spec/`, `private/`, `Cargo.*`, `scripts/`, `.github/`.
+- The generic template's standard set assumes a hand-written man page and config example. Here the man page is **generated** (`docs/generated/xtgeoip.1`), so it is off-limits; `conf/usr/share/xt_geoip/xtgeoip.conf.example` is in scope only when explicitly named, since `WORKFLOW.md` does not list it.
+- Flagged for report-only, not editing: `docs/xtgeoip-usage.md`, `docs/xtgeoip-usage.yaml` and `docs/xtgeoip-wip.1` are hand-maintained files sitting alongside generated equivalents. Their status is unclear and resolving it is a decision, not an audit.
+- Given a **"stale TODO premises"** section in its output format and an explicit instruction to verify each open ticket's premise against source. That is the highest-value work available to it: this session alone found four tickets describing code that no longer existed (#96, #54, #88, #38).
+
+⚠ `.claude/` is gitignored, so the agent definition is **local-only** and will not survive a fresh clone — the same asymmetry as `scripts/`. `private/agents-out/` is likewise gitignored, so the templates are local too.
+
+Two directories exist, and this ticket only named one: `private/agents-in/` holds the original definitions from another project (`cdda2img`) with full frontmatter but foreign paths; `private/agents-out/` holds the genericised role descriptions with `[bracketed]` placeholders and no frontmatter by design. Import from **`agents-out/`**.
+
+Original ticket text follows.
+
+### #95 (original) — import generic agents from private/agents-out/
 
 The seven project-agnostic agent role descriptions in `private/agents-out/` (bug-hunter, data-flow-tracer, deep-research-collector, docs-auditor, flow-doc-generator, optimisation-advisor, guardian-security) are to be imported as actual project agents, adapting each by filling its `[bracketed]` placeholders for xtgeoip (`[language]` = Rust, `[source-dir]` = `src/`, `[output-dir]` under `private/`, etc.).
 
