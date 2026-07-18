@@ -236,6 +236,34 @@ extract_archive()  → unpack to temp, flatten, move into place (#54)
   lands, this logic moves into `extract_archive()` verbatim. See
   `private/guardian/guardian_remediation_M-1_20260716_100638.md`.
 
+### #100 — fetch.rs: shared `.part` path allows concurrent-fetch interference
+
+Guardian finding **F-1**, audit `guardian_report_20260718_214129.md`. **LOW — CVSS 3.3** (`CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:N/A:L`). Pre-existing; *not* introduced by the `PartialDownload` guard.
+
+`fetch.rs` derives the temp path as `archive_path.with_extension("zip.part")`, which is deterministic per version. Two concurrent `xtgeoip fetch` processes resolving the same version therefore share one temp file: interleaved `io::copy` writes could corrupt it, and one process's guard could remove a path the other is still writing.
+
+**Fails closed.** Any corruption is caught by SHA-256 verification before the archive is trusted, so a bad archive is rejected rather than consumed. The guard does not worsen it — the shared path predates it, and `remove_file` tolerates `NotFound`. Worst case is a spurious failed fetch that a retry resolves.
+
+Optional hardening: a unique suffix (PID, or `tempfile::NamedTempFile` in `archive_dir`), or an advisory lock on `archive_dir` for the duration of a fetch. Weigh against the fact that concurrent fetches are not an expected usage pattern for this tool.
+
+⚠ Touching `fetch.rs` invalidates its guardian signature and needs a re-audit.
+
+### #101 — fetch.rs: no explicit HTTP redirect policy
+
+Guardian finding **F-2**, same audit. **LOW — CVSS 3.7** (`CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N`).
+
+`Client::builder()` sets a User-Agent and a 300 s timeout but no `.redirect(Policy::…)`, so it inherits reqwest's default of following up to 10 hops.
+
+**The credential risk is already mitigated — by the library, not by us.** reqwest strips the `Authorization` header on cross-origin redirects, so the license key is not forwarded to a redirect target. The residual is precisely that this is an *inherited* guarantee: a credentialed request whose safety depends on a library default that could change on upgrade, with nothing in this codebase asserting it. Secondary residual is an unpinned redirect destination — a compromised or misconfigured MaxMind endpoint could redirect the download to an arbitrary host.
+
+Substantially defused downstream: the archive is trusted only after SHA-256 verification against the separately-fetched `.sha256`, so an attacker would have to redirect *both* requests consistently.
+
+Remediation: set an explicit policy — `Policy::limited(3)`, or a custom policy rejecting any redirect that leaves the configured `maxmind_url` host — so the guarantee is asserted here rather than inherited. Cheap: roughly one line plus a comment recording why.
+
+Pairs naturally with **#88** (mock HTTP in `fetch.rs`), which would make redirect behaviour testable, and with the re-audit both would require anyway.
+
+⚠ Touching `fetch.rs` invalidates its guardian signature and needs a re-audit.
+
 ### #54 — fetch.rs: ZIP entry writes are sequential ❌ CLOSED — WONTFIX, measured (2026-07-18)
 
 ZIP entry enumeration is sequential but file writes after decompression are independent. Decompress to buffer sequentially, then spawn parallel write tasks via Rayon. Not critical now; worthwhile if archive grows. **Benchmark before committing.**
