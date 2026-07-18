@@ -392,9 +392,19 @@ Original text: `BTreeMap<String, CommandSpec>` gives deterministic alphabetical 
 
 Explicitly document that `xtgeoip-tests` is a system integration test suite (not unit tests): tests are order-dependent, require root, require a real release build, and depend on prior test execution. Add to comments and `--help`. Consider a setup/teardown phase for known-good initial state.
 
-### #81 — tests: binary path hardcoded
+### #81 — tests: binary path hardcoded ✅ DONE (2026-07-18)
 
 `format!("target/release/{}", program)` hardcodes release build path. Two options: (1) `env!("CARGO_BIN_EXE_xtgeoip")` if restructured to Cargo integration tests, (2) accept `--bin <path>` flag or `XTGEOIP_BIN` env var. Option 2 is the simpler near-term fix.
+
+**Option (2) implemented**, per the ticket's own recommendation. Option (1) was not viable: `xtgeoip-tests` is a standalone binary invoked under `sudo`, which is not how Cargo integration tests run, so `CARGO_BIN_EXE_*` would have required restructuring the suite and would still collide with the root requirement.
+
+Resolution order is `--bin <path>` → `$XTGEOIP_BIN` → `target/release/<program>`. The default is byte-identical to the previous hardcoded behaviour, so existing invocations are unaffected.
+
+Two pure functions carry the logic — `resolve_bin_override(argv, env_value)` and `resolve_bin(program, override)` — with the environment value passed in as a parameter rather than read inside, so precedence is testable without mutating the process environment. Six unit tests cover it: default, flag, env, flag-beats-env, trailing `--bin` with no value falling through, and the override *not* applying to a non-`xtgeoip` program name (precautionary — every case invokes `xtgeoip` today, asserted by `every_case_is_well_formed`, but a future helper binary shouldn't be silently redirected).
+
+Flags are now documented in the file header, which partly overlaps #87.
+
+Verified root-free by running the release binary with `--case NOSUCH` under both override forms: all 51 cases skipped, exit 0, no `sudo` spawned — confirming the new argv parsing doesn't disturb `--case`/`--failed`/`--rebuild`.
 
 ### #89 — tests: orphaned file scenarios not covered
 

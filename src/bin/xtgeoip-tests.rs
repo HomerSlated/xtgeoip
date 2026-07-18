@@ -8,6 +8,15 @@
 //!   expected_stdout: ""        → stdout must be empty
 //!   expected_stdout: "text"    → stdout must contain "text"
 //!   expected_stderr: (same)
+//!
+//! Flags:
+//!   --failed            only run cases expected to fail (key: f)
+//!   --rebuild           rebuild after a passing case marked `rebuild: true`
+//!   --case <id>         run a single case by case_id
+//!   --bin <path>        path to the xtgeoip binary under test (#81)
+//!
+//! Binary resolution order: `--bin <path>`, then $XTGEOIP_BIN, then
+//! `target/release/<program>` relative to the working directory.
 
 use std::{
     env, fs,
@@ -20,6 +29,43 @@ use std::{
 use serde::Deserialize;
 
 const DEFAULT_TEST_TIMEOUT_SECS: u64 = 60;
+
+/// Where binaries are looked up when no override is given (#81). Relative, so
+/// the suite still assumes it is run from the repository root by default.
+const DEFAULT_BIN_DIR: &str = "target/release";
+
+/// Environment variable form of the binary override.
+const BIN_ENV_VAR: &str = "XTGEOIP_BIN";
+
+/// Resolve the binary path override, in precedence order (#81):
+/// `--bin <path>` flag, then `$XTGEOIP_BIN`, then none.
+///
+/// Taking the env value as a parameter rather than reading it here keeps the
+/// precedence rule testable without mutating the process environment.
+fn resolve_bin_override(
+    argv: &[String],
+    env_value: Option<String>,
+) -> Option<String> {
+    argv.iter()
+        .position(|a| a == "--bin")
+        .and_then(|i| argv.get(i + 1))
+        .cloned()
+        .or(env_value)
+}
+
+/// Resolve the executable path for the program named in a case's `cmd[0]`.
+///
+/// The override replaces the path for `xtgeoip` itself; any other program
+/// name keeps the directory-based lookup. Every case currently invokes
+/// `xtgeoip` (asserted by `every_case_is_well_formed`), so this distinction
+/// is precautionary — it stops an override silently redirecting some future
+/// helper binary to the wrong executable.
+fn resolve_bin(program: &str, bin_override: Option<&str>) -> String {
+    match bin_override {
+        Some(path) if program == "xtgeoip" => path.to_string(),
+        _ => format!("{DEFAULT_BIN_DIR}/{program}"),
+    }
+}
 
 /// Schema version of `docs/generated/testcases.yaml` this binary understands.
 /// Must match `TESTCASES_SCHEMA_VERSION` in `xtgeoip-docgen.rs`. Validated on
@@ -120,6 +166,7 @@ fn main() -> anyhow::Result<()> {
         .position(|a| a == "--case")
         .and_then(|i| argv.get(i + 1))
         .map(String::as_str);
+    let bin_override = resolve_bin_override(&argv, env::var(BIN_ENV_VAR).ok());
 
     let yaml_str = fs::read_to_string("docs/generated/testcases.yaml")?;
     let testcases = load_testcases(&yaml_str)?;
@@ -171,7 +218,7 @@ fn main() -> anyhow::Result<()> {
 
         let program = tc.cmd.first().expect("cmd must not be empty");
         let cmd_args = &tc.cmd[1..];
-        let bin = format!("target/release/{}", program);
+        let bin = resolve_bin(program, bin_override.as_deref());
         let timeout = Duration::from_secs(
             tc.timeout_secs.unwrap_or(DEFAULT_TEST_TIMEOUT_SECS),
         );
@@ -295,6 +342,64 @@ mod tests {
         let yaml = fs::read_to_string("docs/generated/testcases.yaml")
             .expect("docs/generated/testcases.yaml missing — run docgen");
         load_testcases(&yaml).expect("testcases.yaml failed to load")
+    }
+
+    // ── binary path resolution (#81) ─────────────────────────────────────
+
+    fn argv<const N: usize>(args: [&str; N]) -> Vec<String> {
+        args.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn bin_defaults_to_release_dir() {
+        assert_eq!(
+            resolve_bin("xtgeoip", None),
+            "target/release/xtgeoip",
+            "default must match the pre-#81 hardcoded path"
+        );
+    }
+
+    #[test]
+    fn bin_flag_overrides_default() {
+        let o =
+            resolve_bin_override(&argv(["--bin", "/usr/bin/xtgeoip"]), None);
+        assert_eq!(resolve_bin("xtgeoip", o.as_deref()), "/usr/bin/xtgeoip");
+    }
+
+    #[test]
+    fn bin_env_var_used_when_no_flag() {
+        let o = resolve_bin_override(&argv([]), Some("/opt/xtgeoip".into()));
+        assert_eq!(resolve_bin("xtgeoip", o.as_deref()), "/opt/xtgeoip");
+    }
+
+    #[test]
+    fn bin_flag_beats_env_var() {
+        let o = resolve_bin_override(
+            &argv(["--bin", "/from/flag"]),
+            Some("/from/env".into()),
+        );
+        assert_eq!(resolve_bin("xtgeoip", o.as_deref()), "/from/flag");
+    }
+
+    /// A trailing `--bin` with no value must not panic or consume the next
+    /// thing; it falls through to the env var, then the default.
+    #[test]
+    fn bin_flag_without_value_falls_through() {
+        assert_eq!(resolve_bin_override(&argv(["--bin"]), None), None);
+        assert_eq!(
+            resolve_bin_override(&argv(["--bin"]), Some("/from/env".into())),
+            Some("/from/env".to_string())
+        );
+    }
+
+    /// The override names the xtgeoip binary specifically; a different
+    /// program must not be silently redirected to it.
+    #[test]
+    fn override_does_not_apply_to_other_programs() {
+        assert_eq!(
+            resolve_bin("some-helper", Some("/usr/bin/xtgeoip")),
+            "target/release/some-helper"
+        );
     }
 
     /// The version gate must actually reject, not just record. A file whose
