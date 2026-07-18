@@ -358,9 +358,28 @@ Still open under #92: expanding the *docgen-side* spec validator (contradictions
 
 ## DOCGEN (xtgeoip-docgen.rs)
 
-### #75 — docgen: `resolve_outcome` conflates resolution and presentation
+### #75 — docgen: `resolve_outcome` conflates resolution and presentation ✅ DONE (2026-07-18)
 
 `resolve_outcome` conflates template resolution, fallback logic, and user-facing output strings — a mini templating engine inside business logic. Split into semantic resolution (typed `ResolvedOutcome`, no strings) and presentation rendering (format-specific, no logic). Each generator renders a `ResolvedOutcome` independently.
+
+**Done as written** — and the split turned out to be justified by a defect, not by taste. The initial assessment was that it was speculative (all four generators appeared to render the outcome text identically, so per-format renderers would have had one variant). That reading was wrong: the code was uniformly *unescaped*, which was the bug rather than the requirement. Two live defects existed, in two different formats:
+
+- **`cli_matrix.rs` emitted unescaped text into a Rust `&'static str` literal.** An outcome containing `"` or `\` produced code that does not compile — docgen would succeed and the *build* would fail on generated source.
+- **`xtgeoip.1` emitted unescaped text into roff**, where a leading `.` or `'` is a control line and `\` starts an escape. Silent corruption of the rendered man page.
+
+Both latent today (no such characters in the spec), but `cli.yaml` is hand-edited.
+
+**Structure now:**
+
+- `enum ResolvedOutcome { Succeeds { description }, Fails { reason } }` — semantic, format-free. Template-arg substitution stays in resolution (it produces the same message regardless of target).
+- Deliberately **not** `Display`: rendering must be an explicit choice of target, so interpolating an outcome without escaping requires visibly reaching past the renderers.
+- `render_plain` (usage.md, tldr.md — prose, no metacharacters), `render_rust_literal` (`{:?}`, which escapes `"`/`\`, supplies the quotes, and unlike `escape_default` preserves the em-dashes in the messages), `render_roff` (escapes `\` → `\e`, prefixes `\&` before a leading `.`/`'`).
+
+Also fixed the two generators that bypassed resolution entirely (`tldr`, `manpage` read `ex.outcome` directly with `unwrap_or_default()` / `unwrap_or("")`) — residual #76 fallbacks in code that didn't call `resolve_outcome`. Both now route through it, so the missing-data guarantee applies uniformly.
+
+**Verification:** generated output is **byte-identical** across all files, so the refactor is provably behaviour-preserving on current data. End-to-end fault injection — a spec outcome containing both `"` and `\` — now emits correctly escaped Rust that compiles; before the split the same input produced a syntax error. 7 new unit tests cover resolution (variant selection, arg substitution) and each renderer's escaping, including non-ASCII preservation.
+
+*(Note: #76's "Ties into #61" is a dangling reference — no #61 exists in this file.)*
 
 ### #76 — docgen: silent fallbacks mask missing spec data ✅ DONE (2026-07-18)
 
