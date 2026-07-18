@@ -612,7 +612,7 @@ It was superseded by docgen's `generate_error_text_rs` (`xtgeoip-docgen.rs:776` 
 | `optimisation-advisor` | performance **only**; identifies candidates, does not decide them | `private/optimisation/` |
 | `docs-auditor` | hand-maintained docs vs source | edits the audit set in place |
 | `data-flow-tracer` | path responsible for one named value | `private/traces/` (+ `tools/`) |
-| `flow-doc-generator` | Mermaid + prose, for understanding and porting | `private/flow/` |
+| `flow-doc-generator` | Mermaid + prose, for understanding and porting | **`docs/flow/`** (tracked) |
 | `deep-research-collector` | internet research, cited | `private/research/` |
 
 Adaptations worth recording:
@@ -624,7 +624,7 @@ Adaptations worth recording:
 - **`TODO.md`'s INVARIANTS are cited as normative**, with constraint 5 called out to `optimisation-advisor` and `bug-hunter`: never trade away working parallelism.
 - **`deep-research-collector` is explicitly barred from transmitting project material** — MaxMind `account_id`/`license_key` and anything under `private/` must never appear in a query, URL or saved document.
 - **`bug-hunter` is told to distinguish latent from live.** Several invariants here are held by construction (`Plan::Pipeline`, `Version::parse` confinement); reporting them as bugs would waste the reader's time.
-- **`flow-doc-generator`'s output location is flagged as questionable**: `private/` is gitignored, which sits awkwardly with a porting aid meant to be shared. `docs/flow/` is the natural home if tracked output is wanted — the agent is told to ask rather than assume.
+- **`flow-doc-generator` writes to `docs/flow/`, which is tracked** — the one agent whose output is not under `private/`. Deliberate: these documents exist to be read by someone porting or reimplementing the code, which is impossible if they do not survive a clone. The agent is told two consequences: its output is *published*, so it must meet the standard of committed documentation; and `docs/flow/` is hand-maintained, so it falls inside `docs-auditor`'s remit and must not be confused with docgen-owned `docs/generated/`.
 
 Two of seven previously; now all seven.
 
