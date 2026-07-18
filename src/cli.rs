@@ -378,3 +378,165 @@ mod snapshot {
         std::fs::write(path, snapshot()).unwrap();
     }
 }
+
+/// Contradiction checks over the spec (#92).
+///
+/// `snapshot` above proves *what the implementation does* across all 136 flag
+/// combinations. These tests prove something different: that the spec does not
+/// contradict itself or the implementation. Two distinct classes:
+///
+/// 1. **The spec's examples could lie.** `CLI_MATRIX` is generated from the
+///    hand-written `examples:` in `cli.yaml`, and nothing checked them against
+///    the parser. An example asserting `valid: true` for a combination the
+///    guards reject would ship as documentation, a man-page entry, and a test
+///    case — all wrong, all agreeing with each other. This is the shape of the
+///    `p⊕f` leak recorded in #92.
+/// 2. **A guard could be unreachable.** Guard order encodes precedence, so an
+///    earlier guard can fully subsume a later one, which then never fires. The
+///    dead guard's error message becomes unreachable while still appearing in
+///    the spec and docs as if it were live.
+#[cfg(test)]
+mod contradiction {
+    use clap::{Parser, error::ErrorKind};
+
+    use super::*;
+    use crate::generated::{
+        cli_matrix::CLI_MATRIX,
+        cli_rules::{
+            B, BUILD_GUARDS, C, F, FETCH_GUARDS, Guard, L, P, RUN_GUARDS,
+            TOP_LEVEL_GUARDS,
+        },
+    };
+
+    /// Every guard table, with the context name used in failure messages.
+    fn all_contexts() -> [(&'static str, &'static [Guard]); 4] {
+        [
+            ("top-level", TOP_LEVEL_GUARDS),
+            ("build", BUILD_GUARDS),
+            ("fetch", FETCH_GUARDS),
+            ("run", RUN_GUARDS),
+        ]
+    }
+
+    /// Does the real CLI accept this invocation — i.e. would it exit 0?
+    ///
+    /// Two asymmetries make this less obvious than `is_ok()`:
+    ///
+    /// - **`-h` is an `Err`.** clap intercepts help/version before
+    ///   `normalize_cli_to_action` ever runs and reports them as errors, so
+    ///   they must be mapped back to accepted.
+    /// - **`Ok(ShowHelp)` is a rejection.** Despite the name, `ShowHelp` is
+    ///   produced at exactly one place — bare `xtgeoip` with no flags
+    ///   (`cli.rs:267`) — and `main.rs:94` renders it as `Error
+    ///   [top_level_no_args]` and exits non-zero. It is never the result of the
+    ///   user *asking* for help; that path is the clap `Err` above. Treating it
+    ///   as valid is what made this test fail on its first run against
+    ///   `xtgeoip` with no arguments.
+    fn accepted(argv: &[&str]) -> bool {
+        match Cli::try_parse_from(argv) {
+            Err(e) => {
+                matches!(
+                    e.kind(),
+                    ErrorKind::DisplayHelp | ErrorKind::DisplayVersion
+                )
+            }
+            Ok(cli) => {
+                matches!(
+                    normalize_cli_to_action(&cli),
+                    Ok(CliOutcome::Action(_))
+                )
+            }
+        }
+    }
+
+    /// Class 1: every spec example must agree with the implementation.
+    #[test]
+    fn spec_examples_agree_with_parser() {
+        let mut disagreements = Vec::new();
+        for ex in CLI_MATRIX {
+            let argv: Vec<&str> = ex.cmd.split_whitespace().collect();
+            let actual = accepted(&argv);
+            if actual != ex.valid {
+                disagreements.push(format!(
+                    "  {:?}: spec says valid={}, parser says valid={} \
+                     (outcome: {:?})",
+                    ex.cmd, ex.valid, actual, ex.outcome
+                ));
+            }
+        }
+        assert!(
+            disagreements.is_empty(),
+            "{} of {} spec examples contradict the parser:\n{}",
+            disagreements.len(),
+            CLI_MATRIX.len(),
+            disagreements.join("\n")
+        );
+    }
+
+    /// Class 2: every guard must be the first to fire for at least one flag
+    /// combination. A guard that never wins is dead code whose error message
+    /// can never be produced.
+    #[test]
+    fn every_guard_is_reachable() {
+        let mut dead = Vec::new();
+        for (ctx, guards) in all_contexts() {
+            for (i, guard) in guards.iter().enumerate() {
+                // 5 flag bits => 32 combinations, exhaustive.
+                let reachable = (0u8..32).any(|flags| {
+                    first_guard(flags, guards)
+                        .is_some_and(|g| std::ptr::eq(g, guard))
+                });
+                if !reachable {
+                    let shadow = (0u8..32)
+                        .find(|&f| {
+                            f & guard.require == guard.require
+                                && f & guard.forbid == 0
+                        })
+                        .and_then(|f| first_guard(f, guards))
+                        .map_or("nothing", |g| g.key);
+                    dead.push(format!(
+                        "  [{ctx}] guard #{i} {:?} never fires (shadowed by \
+                         {shadow:?})",
+                        guard.key
+                    ));
+                }
+            }
+        }
+        assert!(
+            dead.is_empty(),
+            "unreachable guards — their error messages cannot be produced:\n{}",
+            dead.join("\n")
+        );
+    }
+
+    /// Guard keys are how errors are identified in output (`[key]: message`)
+    /// and how `testcases.yaml` asserts which rule fired; duplicates within a
+    /// context would make both ambiguous.
+    #[test]
+    fn guard_keys_are_unique_within_context() {
+        for (ctx, guards) in all_contexts() {
+            let keys: std::collections::BTreeSet<&str> =
+                guards.iter().map(|g| g.key).collect();
+            assert_eq!(keys.len(), guards.len(), "[{ctx}] duplicate guard key");
+        }
+    }
+
+    /// Every flag in the universe must be constrained somewhere. A flag that
+    /// appears in no guard is either unconstrained by design or an omission —
+    /// this pins which, so adding a flag without rules fails loudly.
+    #[test]
+    fn every_flag_is_referenced_by_some_guard() {
+        let used = all_contexts()
+            .iter()
+            .flat_map(|(_, guards)| guards.iter())
+            .fold(0u8, |acc, g| acc | g.require | g.forbid);
+        for (bit, name) in
+            [(B, "-b"), (C, "-c"), (F, "-f"), (L, "-l"), (P, "-p")]
+        {
+            assert!(
+                used & bit != 0,
+                "flag {name} is declared but constrained by no guard"
+            );
+        }
+    }
+}
