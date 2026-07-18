@@ -362,9 +362,28 @@ Still open under #92: expanding the *docgen-side* spec validator (contradictions
 
 `resolve_outcome` conflates template resolution, fallback logic, and user-facing output strings — a mini templating engine inside business logic. Split into semantic resolution (typed `ResolvedOutcome`, no strings) and presentation rendering (format-specific, no logic). Each generator renders a `ResolvedOutcome` independently.
 
-### #76 — docgen: silent fallbacks mask missing spec data
+### #76 — docgen: silent fallbacks mask missing spec data ✅ DONE (2026-07-18)
 
 Silent fallbacks like `.unwrap_or_else(|| "OK".into())` and `"ERROR".into()` let missing spec data silently become valid-looking output. Distinguish explicit defaults (optional field, spec-defined meaning) from missing required fields (hard error at spec-load time). Enforce required fields via `deny_unknown_fields` or explicit validation. A spec with missing data should not produce output. Ties into #61.
+
+**Analysis first.** Both fallbacks were *unreachable*, so this was a latent risk rather than an active bug — structurally the same as #29's `.expect()`. All 51 examples follow a strict bimodal rule with zero exceptions, which was written down nowhere and enforced by nothing:
+
+| `valid` | `outcome` | `reason` | `maps_to` | count |
+|---------|-----------|----------|-----------|-------|
+| `true`  | required  | rejected | rejected  | 30    |
+| `false` | rejected  | required | required  | 21    |
+
+The first example to break that rule would have been absorbed by `"OK"` / `"ERROR"` and shipped as real-looking text into the man page, the markdown *and* `CLI_MATRIX` simultaneously.
+
+**All three parts done:**
+
+- ✅ **Invariant enforced** — `validate_examples` runs at spec-load time and reports *every* violation at once, naming the case_id and cmd (a spec author otherwise gets "something is wrong" with 51 candidates).
+- ✅ **Fallbacks removed** — `resolve_outcome` returns `anyhow::Result<String>` and errors instead of inventing placeholder text. Two closures (`render` in usage.md, `add` in cli_matrix) became fallible to propagate it. It is now unreachable given validation, and is documented as the enforcement of last resort for a caller that skipped it.
+- ✅ **`deny_unknown_fields`** on all 14 spec structs. This closes a *live* bug class, not a latent one: a typo'd key in `cli.yaml` was previously ignored in silence. Verified `serde-saphyr` honours the attribute — a `outcomee:` typo now fails with `unknown field 'outcomee', expected one of case_id, cmd, valid, outcome, ...` plus the line number. Safe to add: every key present in `cli.yaml` was already modelled at all three levels.
+
+**Verified by fault injection, then made permanent.** Injecting a typo'd key and a valid-example-missing-`outcome` both produced precise failures; `cli.yaml` was restored after each. Those checks are now 7 unit tests in a new `#[cfg(test)]` module in `xtgeoip-docgen.rs` (the binary previously had none), covering each invariant direction, the "names the case" requirement, and `resolve_outcome` refusing to invent text.
+
+Generated output is **byte-identical** after the change, confirming the fallbacks were indeed never taken.
 
 ### #77 — docgen: testcase YAML output has no ordering or schema guarantees ✅ DONE (2026-07-18)
 
