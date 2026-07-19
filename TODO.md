@@ -287,7 +287,7 @@ Still not asserted: the downgrade rule itself, which would need a TLS origin to 
 
 ⚠ Touching `fetch.rs` invalidates its guardian signature and needs a re-audit.
 
-### #102 — config: `maxmind.url` scheme is unconstrained
+### #102 — config: `maxmind.url` scheme is unconstrained ✅ DONE (2026-07-19)
 
 Guardian finding **F-3**, audit `guardian_report_20260719_000315.md`. **LOW — CVSS 2.4**. Pre-existing; not introduced by the #101 delta.
 
@@ -297,7 +297,13 @@ Bounded: setting it requires root write access to `/etc/xtgeoip.conf`, and root 
 
 **Remediation — note where it goes.** `.https_only(true)` on the client would close it but break all eight mock tests in `fetch.rs`, which drive `http://127.0.0.1`. The guardian's suggestion is better: **validate the scheme in `config.rs` at load time** and leave `fetch()` scheme-agnostic. That also keeps the change out of guardian-signed `fetch.rs`, so it costs no re-audit.
 
-Decide whether to reject non-https outright or warn — a local mirror over plain HTTP is a legitimate if unusual setup.
+**Resolved: reject any non-https, no exception.** Loopback is deliberately not special-cased — a local http mirror must be fronted with https rather than carved out. The shipped `xtgeoip.conf.example` already uses https, so nothing documented breaks.
+
+Implemented in `Config::validate()`, which `load_config()` calls on every real load. Scheme comparison is case-insensitive, since RFC 3986 defines schemes that way and rejecting `HTTPS://` would be wrong. The empty-URL check still fires first with its own message.
+
+7 tests: https accepted, uppercase scheme accepted, http rejected *with the reason in the message*, http loopback rejected, other schemes (`ftp:`, `file:`, bare string) rejected, surrounding whitespace neither smuggles a bad scheme through nor fails a good one, and an empty URL still reports as empty rather than as a scheme error.
+
+This and `fetch::redirect_policy` are complementary halves of one property: the policy refuses an https→http *downgrade*, but cannot help when the origin is already http, because there is no https predecessor to downgrade from.
 
 ### #54 — fetch.rs: ZIP entry writes are sequential ❌ CLOSED — WONTFIX, measured (2026-07-18)
 
