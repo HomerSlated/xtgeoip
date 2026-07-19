@@ -287,6 +287,18 @@ Still not asserted: the downgrade rule itself, which would need a TLS origin to 
 
 ⚠ Touching `fetch.rs` invalidates its guardian signature and needs a re-audit.
 
+### #102 — config: `maxmind.url` scheme is unconstrained
+
+Guardian finding **F-3**, audit `guardian_report_20260719_000315.md`. **LOW — CVSS 2.4**. Pre-existing; not introduced by the #101 delta.
+
+Nothing requires `maxmind.url` to be `https`. An `http://` value in `/etc/xtgeoip.conf` would send the license key in cleartext — and `redirect_policy`'s downgrade check cannot fire, because with an `http` origin there is no `https` predecessor to downgrade *from*.
+
+Bounded: setting it requires root write access to `/etc/xtgeoip.conf`, and root already wins. The realistic risk is **operator misconfiguration**, not attack.
+
+**Remediation — note where it goes.** `.https_only(true)` on the client would close it but break all eight mock tests in `fetch.rs`, which drive `http://127.0.0.1`. The guardian's suggestion is better: **validate the scheme in `config.rs` at load time** and leave `fetch()` scheme-agnostic. That also keeps the change out of guardian-signed `fetch.rs`, so it costs no re-audit.
+
+Decide whether to reject non-https outright or warn — a local mirror over plain HTTP is a legitimate if unusual setup.
+
 ### #54 — fetch.rs: ZIP entry writes are sequential ❌ CLOSED — WONTFIX, measured (2026-07-18)
 
 ZIP entry enumeration is sequential but file writes after decompression are independent. Decompress to buffer sequentially, then spawn parallel write tasks via Rayon. Not critical now; worthwhile if archive grows. **Benchmark before committing.**
