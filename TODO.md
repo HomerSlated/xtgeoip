@@ -97,6 +97,135 @@ precedence). Not yet implemented.
 
 ---
 
+### #103 — config.rs: MaxMind credentials stored in plaintext ✅ DONE (2026-07-20)
+
+`maxmind.account_id`/`license_key` were plaintext TOML in `/etc/xtgeoip.conf`.
+`#102` closed the *transport* leak (https-only); this closed the *storage*
+leak. Design: `docs/design/103-encrypted-credentials.md` (all rationale —
+KDF/AEAD choice, TOML shape, memory hygiene, UX — lives there, not here).
+
+Implemented: `src/secrets.rs` (new — Argon2id derives a key for
+XChaCha20-Poly1305; `rpassword`/`secrecy`/`zeroize`/`mlock` for memory
+hygiene; `encrypt`/`decrypt` plus round-trip/tamper/wrong-passphrase unit
+tests). `config::MaxMind.credentials: Option<Credentials>` replaces the
+plaintext fields. `conf --set-credentials` (`-c`) prompts for
+account_id/license_key/passphrase and splices ciphertext into
+`/etc/xtgeoip.conf` via `toml_edit` + atomic `tempfile` write, preserving
+the rest of the file untouched. `conf::splice_credentials` is a pure,
+`pub(crate)` helper (source string + `Credentials` → new source string) so
+the write→read seam has real test coverage:
+`secrets::tests::splice_then_parse_then_decrypt_round_trips` writes
+ciphertext via `toml_edit`, parses it back via plain `toml::from_str
+::<Config>`, and decrypts it — proving the two parsers actually agree on
+field names/types/table nesting, without touching the real
+`/etc/xtgeoip.conf`. `fetch()` now takes already-decrypted
+`account_id`/`license_key` as plain `&str` params instead of reading
+`Config` directly — `action.rs`'s new `fetch_step` calls `secrets::decrypt`
+before `fetch()` for `FetchMode::Remote` only. This split (not decrypting
+inside `fetch.rs` itself, as §7 first said) was necessary to keep
+`fetch.rs`'s existing mock-HTTP unit test suite running under plain
+`cargo test` — those tests construct plaintext credentials directly and
+have no terminal to prompt on; decrypting inside `fetch()` would have
+broken all of them. `cli.yaml`/docgen/`xtgeoip-tests.rs` updated to match
+(new case count 52; `-c` skipped by the integration harness, same as `-e`,
+since both need a real terminal).
+
+**Two bugs found by the user's own manual testing, both fixed 2026-07-20:**
+1. **Migration didn't strip legacy plaintext.** Running `conf -c` against a
+   pre-#103 config (still holding plaintext `account_id`/`license_key`
+   under `[maxmind]`) added the new `[maxmind.credentials]` table but left
+   the old plaintext fields sitting right next to it — the operator's real
+   credentials stayed in cleartext through the whole exercise, defeating
+   the feature. Fixed: `conf::splice_credentials` now removes those two
+   keys before writing. Also added `#[serde(deny_unknown_fields)]` to
+   `MaxMind` as a second layer, so any stray field there fails loudly at
+   load time instead of parsing silently. Test:
+   `secrets::tests::splice_removes_legacy_plaintext_fields`.
+2. **`load_config()` failures were completely silent on the terminal** —
+   pre-existing, not specific to #103, but the new `deny_unknown_fields`
+   check gave an easy way to trigger it. Cause: `init_logger` (which
+   installs the "always on" stdout/stderr dispatch) only ran *after* a
+   successful config load, inside `init_runtime`; on a load failure,
+   `log_early_error` wrote only to syslog and the `log` crate silently
+   drops everything if no logger has been installed yet. Fixed in
+   `main.rs`: `init_logger` now runs unconditionally right after
+   `load_config()` is attempted (with `log_file: None` if it failed),
+   *before* the failure is propagated — so every config-load error is now
+   visible on the terminal. Confirmed fixed against the user's real config.
+
+**Guardian audit complete (2026-07-20).** `src/secrets.rs` (first signature)
+and `src/fetch.rs` (re-signature) both pass with no CRITICAL/HIGH finding —
+report: `private/guardian/guardian_report_20260719_182033.md` (signed). No
+RustSec advisories for any of the 7 new dependencies. One MEDIUM finding
+outside both signed files, tracked as `#104` below. Two LOW/informational
+notes accepted as-is, no action needed (both already within `docs/design/
+103…md` §4's stated threat-model boundary — see the report's L-1/I-1/I-2 if
+ever revisited): a theoretical stale-unzeroized-heap-copy in
+`secrets::lock_and_wrap` reachable only by an attacker who can already read
+live process memory (already out of scope), and `conf.rs`'s pre-encryption
+locals being `zeroize`d but not `mlock`ed (narrower window than the decrypt
+path, consistent with the design's own "best-effort" framing).
+
+**Ultrareview pass (2026-07-20), two findings, both resolved:**
+1. `src/secrets.rs`/`.sig` and `docs/design/103-encrypted-credentials.md` had
+   never been `git add`ed — the review's diff scope only sees tracked
+   changes, so from its vantage point `mod secrets;` pointed at nothing and
+   it (correctly, given what it could see) reported the crate as
+   non-compiling. Not a code defect — `cargo build` passed locally the whole
+   time — but a real process gap: `git commit -a` only stages tracked
+   modifications, so committing without an explicit `git add` on those three
+   files would have shipped a broken build to anyone else. Fixed: staged.
+2. `conf -c` prompted for account_id, license_key (the real one, into an
+   unprivileged process), and ran the ~1s Argon2id KDF *before*
+   `write_system_config_atomically` discovered `/etc` wasn't writable and
+   failed with a bare EACCES. Nit, not a security hole (nothing reaches
+   disk; the key is `zeroize`d), but bad UX for the first operator who
+   forgets `sudo`. Fixed: new `conf::check_system_config_writable()` runs
+   right after the terminal check, before any prompt — verified live over a
+   pty as non-root: fails immediately with "Cannot write to /etc. Re-run as
+   root (e.g. with sudo)."
+
+### #104 — main.rs: top-level error handler can echo raw config source (incl. credentials) to stderr/log ⚑ FOUND BY GUARDIAN AUDIT (2026-07-20), NOT YET FIXED
+
+Found auditing `#103`. `main()`'s catch-all prints `{e:#}` (anyhow's full
+cause chain) on any unhandled error. `toml`'s parse-error `Display` embeds
+the offending source line. Combine that with `#103`'s new `#[serde(deny_
+unknown_fields)]` on `MaxMind`: a host upgraded to the `#103` binary but not
+yet migrated (`conf --set-credentials` not run — legacy plaintext `account_
+id`/`license_key` still under `[maxmind]`) fails to load config on **every**
+non-`conf` command, and the raw source line leaks to stderr/log. Live-
+reproduced: in the canonical field order (matching the pre-#103
+`conf.example` — `account_id`, `license_key`, `url`) only `account_id`
+(non-secret, per `#103`'s own §3 reasoning) is exposed; `license_key`
+surfaces only in less-common orderings or an adjacent syntax typo landing
+on its line. CVSS 6.2 (MEDIUM) — real, not blocking.
+
+Two independently-correct changes combined to create this: `deny_unknown_
+fields` (correct hardening) and today's other fix (installing `init_logger`
+before `load_config`, so failures stop being silently dropped — see #103
+item 2 above). Neither change alone would have caused it.
+
+**Not attributable to `secrets.rs` or `fetch.rs`** — both were audited and
+confirmed clean of this; the issue is `main.rs`'s formatting choice
+interacting with `config.rs`'s hardening.
+
+Guardian's advisory (non-prescriptive) options:
+1. Use `{}` (top message only) instead of `{:#}` in `main()`'s catch-all for
+   errors that may wrap a raw config-parse failure; reserve the full chain
+   for a `RUST_LOG`-gated debug path.
+2. Special-case a config-load failure to emit a fixed, field-name-only
+   message instead of the raw parser error.
+3. Proactively detect "legacy plaintext fields still present" (nothing does
+   today) and nudge the operator to run `--set-credentials`, since that's
+   the durable fix regardless of (1)/(2) — the leak only exists during the
+   migration window.
+
+Worth doing (2) and (3) together: (2) closes the leak mechanically; (3)
+shortens the window it can ever fire in, and is a good UX nudge on its own
+merits post-upgrade.
+
+---
+
 ## MIGRATION
 
 ### #2 — Cargo.toml / docgen: migrate from `serde-yaml` to `serde-saphyr` ✅ DONE (2026-07-18)

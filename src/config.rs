@@ -21,10 +21,30 @@ pub struct Paths {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MaxMind {
     pub url: String,
-    pub account_id: String,
-    pub license_key: String,
+    /// `None` until `xtgeoip conf --set-credentials` has been run. Not
+    /// required at parse time so a freshly-installed config (which has no
+    /// `[maxmind.credentials]` table yet) still loads — `fetch` reports the
+    /// friendlier "run --set-credentials" message itself rather than a raw
+    /// TOML "missing field" error.
+    pub credentials: Option<Credentials>,
+}
+
+/// MaxMind `account_id`/`license_key`, encrypted at rest (#103). Everything
+/// here is either a cost parameter or hex-encoded ciphertext — nothing in
+/// this struct is secret, so deriving `Debug` is safe (contrast the
+/// plaintext fields this replaced, which were not).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Credentials {
+    pub m_cost: u32,
+    pub t_cost: u32,
+    pub p_cost: u32,
+    pub salt: String,
+    pub nonce: String,
+    pub ciphertext: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -85,11 +105,16 @@ impl Config {
                 self.maxmind.url.trim()
             );
         }
-        if self.maxmind.account_id.trim().is_empty() {
-            bail!("maxmind.account_id must not be empty");
-        }
-        if self.maxmind.license_key.trim().is_empty() {
-            bail!("maxmind.license_key must not be empty");
+        if let Some(creds) = &self.maxmind.credentials {
+            if creds.salt.trim().is_empty() {
+                bail!("maxmind.credentials.salt must not be empty");
+            }
+            if creds.nonce.trim().is_empty() {
+                bail!("maxmind.credentials.nonce must not be empty");
+            }
+            if creds.ciphertext.trim().is_empty() {
+                bail!("maxmind.credentials.ciphertext must not be empty");
+            }
         }
         Ok(())
     }
@@ -131,8 +156,7 @@ mod tests {
             },
             maxmind: MaxMind {
                 url: url.into(),
-                account_id: "123456".into(),
-                license_key: "key".into(),
+                credentials: None,
             },
             logging: None,
             processing: None,

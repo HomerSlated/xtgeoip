@@ -20,6 +20,7 @@ mod config;
 mod fetch;
 mod generated;
 mod messages;
+mod secrets;
 mod version;
 
 use crate::{
@@ -58,8 +59,6 @@ fn init_runtime(cfg: &config::Config) -> Result<()> {
         messages::warn(&format!("Rayon thread pool init failed: {e}"));
     }
 
-    init_logger(cfg.logging.as_ref().map(|l| l.log_file.as_str()))?;
-
     Ok(())
 }
 
@@ -82,7 +81,22 @@ fn run(cli: Cli) -> Result<()> {
                 eprintln!("Error: You must be root to run xtgeoip");
                 std::process::exit(EXIT_RUNTIME_ERROR);
             }
-            let cfg = load_config().map_err(|e| {
+            // The logger must be installed *before* `load_config` is
+            // attempted, not after — otherwise a config-load failure (bad
+            // TOML, missing file, unknown field, ...) propagates through
+            // `messages::error` in `main`'s catch-all while the global
+            // `log` logger is still unset, and the `log` crate silently
+            // drops every message rather than erroring. `log_file` is only
+            // known once config has loaded, so it's `None` (terminal-only)
+            // exactly when a load failure is what we're trying to report.
+            let cfg_result = load_config();
+            let log_file = cfg_result
+                .as_ref()
+                .ok()
+                .and_then(|c| c.logging.as_ref())
+                .map(|l| l.log_file.clone());
+            init_logger(log_file.as_deref())?;
+            let cfg = cfg_result.map_err(|e| {
                 log_early_error(&format!("Failed to load config: {}", e));
                 e
             })?;

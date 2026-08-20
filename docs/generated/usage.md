@@ -37,11 +37,12 @@ Build xt_geoip database
 - `xtgeoip build -b -c -f` → the --force option is ambiguous, you must specify exactly one of --backup or --clean (exit 1)
 
 ## conf
-xtgeoip conf <-s|-d|-e>
+xtgeoip conf <-s|-d|-e|-c>
 - `xtgeoip conf` → {command} requires {argument} (exit 1)
 - `xtgeoip conf -s` → show configuration
 - `xtgeoip conf -d` → show default configuration
 - `xtgeoip conf -e` → edit configuration
+- `xtgeoip conf -c` → prompt for and encrypt MaxMind credentials
 
 ## fetch
 Fetch GeoLite2 data files

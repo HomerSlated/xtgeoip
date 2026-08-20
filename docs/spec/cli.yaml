@@ -374,12 +374,13 @@ commands:
   conf:
     kind: SelectorCommand
     summary: Manage configuration
-    usage: "xtgeoip conf <-s|-d|-e>"
+    usage: "xtgeoip conf <-s|-d|-e|-c>"
     selector_flags:
       choices:
         s: { summary: "Show configuration" }
         d: { summary: "Show default (example) configuration" }
         e: { summary: "Edit configuration" }
+        c: { summary: "Encrypt and store MaxMind account_id/license_key (#103)" }
     constraints:
       exactly_one_required: true
     examples:
@@ -401,3 +402,7 @@ commands:
         cmd: "xtgeoip conf -e"
         valid: true
         outcome: "edit configuration"
+      - case_id: C-005
+        cmd: "xtgeoip conf -c"
+        valid: true
+        outcome: "prompt for and encrypt MaxMind credentials"

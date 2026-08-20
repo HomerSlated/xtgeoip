@@ -322,9 +322,12 @@ fn main() -> anyhow::Result<()> {
             continue;
         }
 
-        // Skip interactive editor — no way to drive it non-interactively
+        // Skip interactive editor / credential prompts — no way to drive
+        // either non-interactively (#103: `-c` prompts for account_id,
+        // license_key, and an encryption passphrase in three separate
+        // reads).
         if tc.cmd.get(1).is_some_and(|s| s == "conf")
-            && tc.cmd.iter().any(|s| s == "-e")
+            && tc.cmd.iter().any(|s| s == "-e" || s == "-c")
         {
             println!("[SKIP] [{id}] {}", tc.cmd.join(" "));
             skipped += 1;
@@ -660,7 +663,7 @@ mod tests {
 
     #[test]
     fn corpus_parses_with_expected_case_count() {
-        assert_eq!(load().len(), 51);
+        assert_eq!(load().len(), 52);
     }
 
     #[test]
@@ -720,7 +723,7 @@ mod tests {
 
         assert_eq!(
             groups,
-            vec![("TL", 15), ("B", 13), ("C", 4), ("F", 6), ("R", 13)],
+            vec![("TL", 15), ("B", 13), ("C", 5), ("F", 6), ("R", 13)],
             "emission order changed — top-level first, then commands \
              alphabetically (build, conf, fetch, run). See #77: do not sort \
              by case_id."
@@ -736,7 +739,7 @@ mod tests {
             .iter()
             .filter_map(|tc| tc.case_id.as_deref())
             .collect();
-        assert_eq!(ids.len(), 51, "every case needs a case_id");
+        assert_eq!(ids.len(), 52, "every case needs a case_id");
         let unique: std::collections::BTreeSet<&str> =
             ids.iter().copied().collect();
         assert_eq!(unique.len(), ids.len(), "duplicate case_id");

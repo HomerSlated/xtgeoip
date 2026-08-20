@@ -245,6 +245,13 @@ testcases:
   - conf
   - -e
   maps_to: null
+- case_id: C-005
+  key: p
+  cmd:
+  - xtgeoip
+  - conf
+  - -c
+  maps_to: null
 - case_id: F-001
   key: p
   cmd:

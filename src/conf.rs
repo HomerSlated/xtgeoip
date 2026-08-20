@@ -10,8 +10,13 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+use toml_edit::DocumentMut;
+use zeroize::Zeroize;
 
-use crate::config::{SYSTEM_CONFIG, system_config_path};
+use crate::{
+    config::{Credentials, SYSTEM_CONFIG, system_config_path},
+    secrets,
+};
 
 const DEFAULT_CONFIG: &str = "/usr/share/xt_geoip/xtgeoip.conf.example";
 
@@ -20,6 +25,7 @@ pub enum ConfAction {
     Show,
     Edit,
     Default,
+    SetCredentials,
 }
 
 impl ConfAction {
@@ -28,19 +34,27 @@ impl ConfAction {
         match self {
             ConfAction::Default => ensure_default_config_exists(),
             ConfAction::Show => ensure_system_config_exists(),
-            ConfAction::Edit => {
-                ensure_system_config_exists()?;
-                if !system_config_path().exists() {
-                    bail!(
-                        "Cannot edit: {SYSTEM_CONFIG} does not exist. Run \
-                         `xtgeoip conf -d` to view the default config, then \
-                         create {SYSTEM_CONFIG} manually."
-                    );
-                }
-                Ok(())
+            ConfAction::Edit => require_existing_system_config("edit"),
+            ConfAction::SetCredentials => {
+                require_existing_system_config("set credentials")
             }
         }
     }
+}
+
+/// Shared by `Edit` and `SetCredentials`: both need a real, already-existing
+/// config file to operate on (offering to create one from the default
+/// example first, same as every other action).
+fn require_existing_system_config(verb: &str) -> Result<()> {
+    ensure_system_config_exists()?;
+    if !system_config_path().exists() {
+        bail!(
+            "Cannot {verb}: {SYSTEM_CONFIG} does not exist. Run `xtgeoip conf \
+             -d` to view the default config, then create {SYSTEM_CONFIG} \
+             manually."
+        );
+    }
+    Ok(())
 }
 
 fn config_exists() -> bool {
@@ -140,6 +154,170 @@ pub fn run_conf(action: ConfAction) -> Result<()> {
                 bail!("Editor '{editor}' exited with {status}");
             }
         }
+        ConfAction::SetCredentials => set_credentials()?,
     }
+    Ok(())
+}
+
+/// Read a plainly-echoed line of input (used for `account_id`, which is not
+/// secret — MaxMind's dashboard is an independent source of truth for it,
+/// so a visible-as-typed entry is fine; see docs/design/103…md §9a).
+fn read_line_trimmed(prompt: &str) -> Result<String> {
+    print!("{prompt}");
+    io::stdout().flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    Ok(input.trim().to_string())
+}
+
+/// `true` if the operator confirmed overwriting existing credentials.
+fn confirm_overwrite_credentials() -> Result<bool> {
+    print!(
+        "MaxMind credentials are already set in {SYSTEM_CONFIG}. Overwrite? \
+         [y/N] "
+    );
+    io::stdout().flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    Ok(matches!(input.trim().to_lowercase().as_str(), "y" | "yes"))
+}
+
+/// Confirm `SYSTEM_CONFIG`'s directory is writable by trying to create (and
+/// immediately drop) a temp file in it. Used to fail fast, before any
+/// interactive prompt, rather than let an unprivileged operator answer every
+/// prompt — including typing their real MaxMind license_key — only to hit
+/// EACCES at the very last step.
+fn check_system_config_writable() -> Result<()> {
+    let dir = system_config_path().parent().ok_or_else(|| {
+        anyhow::anyhow!("{SYSTEM_CONFIG} has no parent directory")
+    })?;
+    tempfile::NamedTempFile::new_in(dir).with_context(|| {
+        format!(
+            "Cannot write to {}. Re-run as root (e.g. with sudo).",
+            dir.display()
+        )
+    })?;
+    Ok(())
+}
+
+/// Write `contents` to `SYSTEM_CONFIG` atomically: a temp file in the same
+/// directory, then an atomic rename, so a process killed mid-write cannot
+/// leave the one file this whole scheme depends on half-written.
+fn write_system_config_atomically(contents: &str) -> Result<()> {
+    let dir = system_config_path().parent().ok_or_else(|| {
+        anyhow::anyhow!("{SYSTEM_CONFIG} has no parent directory")
+    })?;
+    let mut tmp = tempfile::NamedTempFile::new_in(dir).with_context(|| {
+        format!("Failed to create a temp file in {}", dir.display())
+    })?;
+    tmp.write_all(contents.as_bytes())
+        .context("Failed to write new config contents")?;
+    tmp.persist(SYSTEM_CONFIG).with_context(|| {
+        format!("Failed to atomically replace {SYSTEM_CONFIG}")
+    })?;
+    Ok(())
+}
+
+/// Splice `creds` into `source` (the raw text of a config file) at
+/// `[maxmind.credentials]`, preserving every comment and every other
+/// section exactly as written — a full `serde`/`toml` round-trip of the
+/// whole file would silently reformat all of it for a change that only
+/// touches one table. Pure and side-effect-free (no filesystem, no
+/// prompts) precisely so it can be tested directly: see
+/// `secrets::tests::splice_then_parse_then_decrypt_round_trips`, which is
+/// the only place in this codebase that proves `toml_edit`'s write side and
+/// plain `toml`'s read side (`Config`'s `Deserialize`) actually agree on
+/// field names, types, and table nesting.
+pub(crate) fn splice_credentials(
+    source: &str,
+    creds: &Credentials,
+) -> Result<String> {
+    let mut doc: DocumentMut =
+        source.parse().context("Failed to parse config as TOML")?;
+
+    if doc.get("maxmind").is_none() {
+        doc["maxmind"] = toml_edit::table();
+    }
+
+    // Migration: a config written before #103 stores `account_id`/
+    // `license_key` as plaintext siblings of `url` under `[maxmind]`.
+    // Leaving them in place after encrypting would defeat the entire point
+    // of this feature — the operator's real credentials would still be
+    // sitting in cleartext right next to the ciphertext that was supposed
+    // to replace them.
+    if let Some(maxmind) = doc["maxmind"].as_table_mut() {
+        maxmind.remove("account_id");
+        maxmind.remove("license_key");
+    }
+
+    doc["maxmind"]["credentials"] = toml_edit::table();
+    doc["maxmind"]["credentials"]["m_cost"] =
+        toml_edit::value(i64::from(creds.m_cost));
+    doc["maxmind"]["credentials"]["t_cost"] =
+        toml_edit::value(i64::from(creds.t_cost));
+    doc["maxmind"]["credentials"]["p_cost"] =
+        toml_edit::value(i64::from(creds.p_cost));
+    doc["maxmind"]["credentials"]["salt"] =
+        toml_edit::value(creds.salt.clone());
+    doc["maxmind"]["credentials"]["nonce"] =
+        toml_edit::value(creds.nonce.clone());
+    doc["maxmind"]["credentials"]["ciphertext"] =
+        toml_edit::value(creds.ciphertext.clone());
+
+    Ok(doc.to_string())
+}
+
+/// `xtgeoip conf --set-credentials`: prompt for MaxMind `account_id` /
+/// `license_key` and an encryption passphrase, encrypt them (#103), and
+/// splice the result into `/etc/xtgeoip.conf` via [`splice_credentials`],
+/// then write it back atomically.
+fn set_credentials() -> Result<()> {
+    if !io::stdin().is_terminal() {
+        bail!(
+            "Setting MaxMind credentials requires interactive prompts \
+             (account_id, license_key, and an encryption passphrase), but \
+             stdin is not a terminal."
+        );
+    }
+    // SYSTEM_CONFIG itself is world-readable, so the read below succeeds
+    // even unprivileged — but writing the result back requires root. Check
+    // that now, before prompting for anything, so an unprivileged operator
+    // doesn't type their real license_key and wait on the KDF only to hit
+    // EACCES at the last step.
+    check_system_config_writable()?;
+
+    let raw = fs::read_to_string(SYSTEM_CONFIG)
+        .with_context(|| format!("Failed to read {SYSTEM_CONFIG}"))?;
+
+    let has_existing = raw
+        .parse::<DocumentMut>()
+        .with_context(|| format!("Failed to parse {SYSTEM_CONFIG} as TOML"))?
+        .get("maxmind")
+        .and_then(|m| m.get("credentials"))
+        .is_some();
+    if has_existing && !confirm_overwrite_credentials()? {
+        println!("Leaving existing MaxMind credentials unchanged.");
+        return Ok(());
+    }
+
+    let account_id = read_line_trimmed("MaxMind account_id: ")?;
+    if account_id.is_empty() {
+        bail!("account_id must not be empty");
+    }
+    let mut license_key = rpassword::prompt_password("MaxMind license_key: ")
+        .context("Failed to read license_key")?;
+    let mut trimmed = license_key.trim().to_string();
+    license_key.zeroize();
+    if trimmed.is_empty() {
+        bail!("license_key must not be empty");
+    }
+
+    let creds_result = secrets::encrypt(&account_id, &trimmed);
+    trimmed.zeroize();
+    let creds = creds_result?;
+
+    let spliced = splice_credentials(&raw, &creds)?;
+    write_system_config_atomically(&spliced)?;
+    println!("MaxMind credentials encrypted and saved to {SYSTEM_CONFIG}.");
     Ok(())
 }

@@ -11,7 +11,7 @@ use crate::{
     conf::ConfAction,
     config::Config,
     fetch::{FetchMode, fetch},
-    messages,
+    messages, secrets,
     version::Version,
 };
 
@@ -205,6 +205,27 @@ fn plan(action: &Action) -> Plan {
     }
 }
 
+/// Decrypt MaxMind credentials (prompting interactively) and fetch. Only
+/// `FetchMode::Remote` needs credentials at all — `Local` never reads
+/// `account_id`/`license_key` inside `fetch()`, so this skips the prompt
+/// entirely rather than asking for a passphrase a local-only run has no use
+/// for.
+fn fetch_step(cfg: &Config, mode: FetchMode) -> Result<(TempDir, Version)> {
+    match mode {
+        FetchMode::Remote => {
+            let creds = cfg.maxmind.credentials.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "MaxMind credentials not configured. Run `xtgeoip conf \
+                     --set-credentials` first."
+                )
+            })?;
+            let decrypted = secrets::decrypt(creds)?;
+            fetch(cfg, mode, decrypted.account_id(), decrypted.license_key())
+        }
+        FetchMode::Local => fetch(cfg, mode, "", ""),
+    }
+}
+
 fn execute_step(
     cfg: &Config,
     paths: &ResolvedPaths<'_>,
@@ -224,7 +245,7 @@ fn execute_step(
         // Standalone fetch: nothing downstream consumes the result, so the
         // extracted temp dir is dropped here.
         Step::Fetch { mode } => {
-            fetch(cfg, mode)?;
+            fetch_step(cfg, mode)?;
         }
 
         Step::PruneCsv => {
@@ -267,7 +288,8 @@ pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
             execute_steps(cfg, &paths, pre)?;
             // Owned, not an Option: the plan could not have described a build
             // without this fetch, so there is nothing to unwrap.
-            let (temp_dir, version): (TempDir, Version) = fetch(cfg, mode)?;
+            let (temp_dir, version): (TempDir, Version) =
+                fetch_step(cfg, mode)?;
             execute_steps(cfg, &paths, mid)?;
             messages::info("Building binary database...");
             build(temp_dir.path(), paths.output, &version, legacy)?;

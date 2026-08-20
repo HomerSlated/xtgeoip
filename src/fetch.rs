@@ -44,7 +44,22 @@ pub enum FetchMode {
     Local,
 }
 
-pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, Version)> {
+/// `account_id`/`license_key` are already-decrypted plaintext, supplied by
+/// the caller — decryption (with its interactive passphrase prompt) is
+/// deliberately not this function's job. See `action.rs`, which calls
+/// `secrets::decrypt` before this function for `FetchMode::Remote`, and
+/// passes empty strings for `FetchMode::Local` (never read below: the
+/// early return above happens before either is touched). Keeping this
+/// signature plaintext-in means `fetch.rs`'s existing mock-HTTP unit test
+/// suite is unaffected by #103 — it already constructs these as plain
+/// strings and runs under `cargo test`, with no terminal available for a
+/// passphrase prompt.
+pub fn fetch(
+    config: &Config,
+    mode: FetchMode,
+    account_id: &str,
+    license_key: &str,
+) -> Result<(TempDir, Version)> {
     let archive_dir = Path::new(&config.paths.archive_dir);
 
     // Local-only mode: skip remote entirely, use latest valid local archive
@@ -61,15 +76,8 @@ pub fn fetch(config: &Config, mode: FetchMode) -> Result<(TempDir, Version)> {
     }
 
     let maxmind_url = &config.maxmind.url;
-    let account_id = &config.maxmind.account_id;
-    let license_key = &config.maxmind.license_key;
 
-    // Skip if account_id or license_key are not set
-    if account_id.is_empty()
-        || account_id == "CHANGE ME"
-        || license_key.is_empty()
-        || license_key == "CHANGE ME"
-    {
+    if account_id.is_empty() || license_key.is_empty() {
         bail!("MaxMind account ID or license key not set in config.");
     }
 
@@ -1028,8 +1036,9 @@ mod tests {
     }
 
     /// A `Config` whose MaxMind URL points at `url` and whose archive dir is
-    /// `archive_dir`. Credentials are dummies that pass the not-configured
-    /// check in `fetch()`.
+    /// `archive_dir`. Credentials are no longer part of `Config` (#103) —
+    /// `fetch()` takes them as separate, already-decrypted arguments; tests
+    /// pass their own dummy `"123456"`/`"test-license-key"` directly.
     fn mock_config(url: &str, archive_dir: &Path) -> crate::config::Config {
         crate::config::Config {
             paths: crate::config::Paths {
@@ -1039,8 +1048,7 @@ mod tests {
             },
             maxmind: crate::config::MaxMind {
                 url: url.to_string(),
-                account_id: "123456".to_string(),
-                license_key: "test-license-key".to_string(),
+                credentials: None,
             },
             logging: None,
             processing: None,
@@ -1063,7 +1071,7 @@ mod tests {
         let server = MockServer::start(|_| MockReply::new(401));
         let cfg = mock_config(&server.url(), dir.path());
 
-        let _ = fetch(&cfg, FetchMode::Remote);
+        let _ = fetch(&cfg, FetchMode::Remote, "123456", "test-license-key");
 
         let reqs = server.requests();
         assert!(!reqs.is_empty(), "server saw no request");
@@ -1088,7 +1096,8 @@ mod tests {
         let server = MockServer::start(|_| MockReply::new(401));
         let cfg = mock_config(&server.url(), dir.path());
 
-        let err = fetch(&cfg, FetchMode::Remote).expect_err("must fail");
+        let err = fetch(&cfg, FetchMode::Remote, "123456", "test-license-key")
+            .expect_err("must fail");
         assert!(
             err.to_string().contains("401"),
             "error should name the status: {err}"
@@ -1104,7 +1113,7 @@ mod tests {
         let server = MockServer::start(|_| MockReply::new(429));
         let cfg = mock_config(&server.url(), dir.path());
 
-        let _ = fetch(&cfg, FetchMode::Remote);
+        let _ = fetch(&cfg, FetchMode::Remote, "123456", "test-license-key");
         assert_eq!(
             server.requests().len(),
             1,
@@ -1120,7 +1129,8 @@ mod tests {
         let server = MockServer::start(|_| MockReply::ok("body"));
         let cfg = mock_config(&server.url(), dir.path());
 
-        let err = fetch(&cfg, FetchMode::Remote).expect_err("must fail");
+        let err = fetch(&cfg, FetchMode::Remote, "123456", "test-license-key")
+            .expect_err("must fail");
         assert!(
             err.to_string().contains("Content-Disposition"),
             "unhelpful error: {err}"
@@ -1146,7 +1156,8 @@ mod tests {
             let cfg = mock_config(&server.url(), dir.path());
 
             assert!(
-                fetch(&cfg, FetchMode::Remote).is_err(),
+                fetch(&cfg, FetchMode::Remote, "123456", "test-license-key")
+                    .is_err(),
                 "accepted hostile Content-Disposition {hostile:?}"
             );
             // Nothing may be written outside the archive dir, and nothing
@@ -1175,7 +1186,8 @@ mod tests {
         });
         let cfg = mock_config(&server.url(), dir.path());
 
-        let err = fetch(&cfg, FetchMode::Remote).expect_err("must fail");
+        let err = fetch(&cfg, FetchMode::Remote, "123456", "test-license-key")
+            .expect_err("must fail");
         assert!(
             err.to_string().contains("Checksum verification failed"),
             "unexpected error: {err}"
@@ -1207,7 +1219,7 @@ mod tests {
         });
         let cfg = mock_config(&origin.url(), dir.path());
 
-        let _ = fetch(&cfg, FetchMode::Remote);
+        let _ = fetch(&cfg, FetchMode::Remote, "123456", "test-license-key");
 
         let followed = target.requests();
         assert_eq!(followed.len(), 1, "redirect was not followed");
@@ -1241,7 +1253,8 @@ mod tests {
 
         let cfg = mock_config(&server.url(), dir.path());
         assert!(
-            fetch(&cfg, FetchMode::Remote).is_err(),
+            fetch(&cfg, FetchMode::Remote, "123456", "test-license-key")
+                .is_err(),
             "an unbounded redirect chain must fail rather than loop"
         );
         assert!(

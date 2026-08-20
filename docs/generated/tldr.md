@@ -78,6 +78,10 @@
 
 `xtgeoip conf -e`
 
+- prompt for and encrypt MaxMind credentials:
+
+`xtgeoip conf -c`
+
 - fetch CSVs:
 
 `xtgeoip fetch`

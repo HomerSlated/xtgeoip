@@ -116,14 +116,20 @@ pub enum Commands {
         /// Open system configuration in $EDITOR
         #[arg(short = 'e', long = "edit", group = "conf_action")]
         edit: bool,
+
+        /// Encrypt and store MaxMind account_id/license_key (#103)
+        #[arg(short = 'c', long = "set-credentials", group = "conf_action")]
+        set_credentials: bool,
     },
 }
 
-fn conf_action(default: bool, show: bool) -> ConfAction {
+fn conf_action(default: bool, show: bool, set_credentials: bool) -> ConfAction {
     if default {
         ConfAction::Default
     } else if show {
         ConfAction::Show
+    } else if set_credentials {
+        ConfAction::SetCredentials
     } else {
         ConfAction::Edit
     }
@@ -182,16 +188,19 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
                 default,
                 show,
                 edit,
+                set_credentials,
             } => {
-                if !default && !show && !edit {
+                if !default && !show && !edit && !set_credentials {
                     return Err(keyed_err(
                         "conf_missing_flag",
                         "conf requires one of: --default (-d), --show (-s), \
-                         --edit (-e)",
+                         --edit (-e), --set-credentials (-c)",
                     ));
                 }
                 Ok(CliOutcome::Action(Action::Conf(conf_action(
-                    *default, *show,
+                    *default,
+                    *show,
+                    *set_credentials,
                 ))))
             }
 
@@ -305,7 +314,7 @@ mod snapshot {
             (&["fetch"], &["-p", "-b", "-c", "-f", "-l"]),
             (&["build"], &["-b", "-c", "-p", "-f", "-l"]),
             (&["run"], &["-b", "-c", "-p", "-f", "-l"]),
-            (&["conf"], &["-d", "-s", "-e"]),
+            (&["conf"], &["-d", "-s", "-e", "-c"]),
         ];
         let mut out = Vec::new();
         for (prefix, flags) in contexts {

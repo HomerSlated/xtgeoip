@@ -34,6 +34,7 @@ pub const CLI_MATRIX: &[CliExample] = &[
     CliExample { cmd: "xtgeoip conf -s", valid: true, outcome: "show configuration" },
     CliExample { cmd: "xtgeoip conf -d", valid: true, outcome: "show default configuration" },
     CliExample { cmd: "xtgeoip conf -e", valid: true, outcome: "edit configuration" },
+    CliExample { cmd: "xtgeoip conf -c", valid: true, outcome: "prompt for and encrypt MaxMind credentials" },
     CliExample { cmd: "xtgeoip fetch", valid: true, outcome: "fetch CSVs" },
     CliExample { cmd: "xtgeoip fetch -p", valid: true, outcome: "fetch then prune archives" },
     CliExample { cmd: "xtgeoip fetch -l", valid: false, outcome: "fetch does not support the --legacy option" },
