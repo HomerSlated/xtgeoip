@@ -14,7 +14,9 @@ use toml_edit::DocumentMut;
 use zeroize::Zeroize;
 
 use crate::{
-    config::{Credentials, SYSTEM_CONFIG, system_config_path},
+    config::{
+        Credentials, SYSTEM_CONFIG, sanitize_toml_error, system_config_path,
+    },
     secrets,
 };
 
@@ -218,6 +220,24 @@ fn write_system_config_atomically(contents: &str) -> Result<()> {
     Ok(())
 }
 
+/// Parse config text with `toml_edit`, reporting failures through
+/// [`sanitize_toml_error`].
+///
+/// `toml_edit::TomlError` quotes the offending source line from its
+/// `Display` exactly as `toml::de::Error` does — the same #104 leak, in the
+/// one module that is *only* ever reached while handling credentials. Both
+/// call sites here read `/etc/xtgeoip.conf`, so a stray quote on a
+/// hand-edited `license_key` line would otherwise print the key through
+/// `main`'s `{e:#}`.
+fn parse_document(source: &str) -> Result<DocumentMut> {
+    source.parse::<DocumentMut>().map_err(|e| {
+        anyhow::anyhow!(
+            "{}",
+            sanitize_toml_error(source, e.message(), e.span())
+        )
+    })
+}
+
 /// Splice `creds` into `source` (the raw text of a config file) at
 /// `[maxmind.credentials]`, preserving every comment and every other
 /// section exactly as written — a full `serde`/`toml` round-trip of the
@@ -232,8 +252,7 @@ pub(crate) fn splice_credentials(
     source: &str,
     creds: &Credentials,
 ) -> Result<String> {
-    let mut doc: DocumentMut =
-        source.parse().context("Failed to parse config as TOML")?;
+    let mut doc = parse_document(source)?;
 
     if doc.get("maxmind").is_none() {
         doc["maxmind"] = toml_edit::table();
@@ -289,9 +308,7 @@ fn set_credentials() -> Result<()> {
     let raw = fs::read_to_string(SYSTEM_CONFIG)
         .with_context(|| format!("Failed to read {SYSTEM_CONFIG}"))?;
 
-    let has_existing = raw
-        .parse::<DocumentMut>()
-        .with_context(|| format!("Failed to parse {SYSTEM_CONFIG} as TOML"))?
+    let has_existing = parse_document(&raw)?
         .get("maxmind")
         .and_then(|m| m.get("credentials"))
         .is_some();
@@ -320,4 +337,59 @@ fn set_credentials() -> Result<()> {
     write_system_config_atomically(&spliced)?;
     println!("MaxMind credentials encrypted and saved to {SYSTEM_CONFIG}.");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SENTINEL: &str = "LIVE_PLAINTEXT_KEY_DO_NOT_LEAK";
+
+    /// #104, second instance. `toml_edit::TomlError` quotes the offending
+    /// line just as `toml::de::Error` does, and both `conf.rs` call sites
+    /// read `/etc/xtgeoip.conf` — so a hand-edited config with a stray
+    /// quote on the `license_key` line printed the key through `main`'s
+    /// `{e:#}`. Asserting on `{:#}`, not `{}`, for the same reason as
+    /// `config::tests::errors_never_echo_config_source`.
+    #[test]
+    fn parse_errors_never_echo_config_source() {
+        let cases = [
+            // Unterminated string: the span lands on the secret's own line.
+            format!(
+                "[maxmind]\nurl = \"https://x/y\"\nlicense_key = \
+                 \"{SENTINEL}\n"
+            ),
+            // Unterminated string on the line above the secret.
+            format!(
+                "[maxmind]\nurl = \"https://x/y\nlicense_key = \
+                 \"{SENTINEL}\"\n"
+            ),
+        ];
+        for source in cases {
+            let err = parse_document(&source).expect_err("must not parse");
+            let full = format!("{err:#}");
+            assert!(
+                !full.contains(SENTINEL),
+                "config content leaked into the error chain:\n{full}"
+            );
+            assert!(full.contains("line"), "lost the position: {full}");
+        }
+    }
+
+    /// `splice_credentials` shares the parse, so it is covered too.
+    #[test]
+    fn splice_reports_bad_toml_without_quoting_it() {
+        let creds = Credentials {
+            m_cost: 19456,
+            t_cost: 2,
+            p_cost: 1,
+            salt: "aa".into(),
+            nonce: "bb".into(),
+            ciphertext: "cc".into(),
+        };
+        let source = format!("[maxmind]\nlicense_key = \"{SENTINEL}\n");
+        let err =
+            splice_credentials(&source, &creds).expect_err("must not parse");
+        assert!(!format!("{err:#}").contains(SENTINEL));
+    }
 }

@@ -185,7 +185,7 @@ path, consistent with the design's own "best-effort" framing).
    pty as non-root: fails immediately with "Cannot write to /etc. Re-run as
    root (e.g. with sudo)."
 
-### #104 — main.rs: top-level error handler can echo raw config source (incl. credentials) to stderr/log ⚑ FOUND BY GUARDIAN AUDIT (2026-07-20), NOT YET FIXED
+### #104 — main.rs: top-level error handler can echo raw config source (incl. credentials) to stderr/log ✅ DONE (2026-09-01)
 
 Found auditing `#103`. `main()`'s catch-all prints `{e:#}` (anyhow's full
 cause chain) on any unhandled error. `toml`'s parse-error `Display` embeds
@@ -223,6 +223,103 @@ Guardian's advisory (non-prescriptive) options:
 Worth doing (2) and (3) together: (2) closes the leak mechanically; (3)
 shortens the window it can ever fire in, and is a good UX nudge on its own
 merits post-upgrade.
+
+**Fixed 2026-09-01. Took (2) and (3), rejected (1).** Option (1) was the
+wrong lever: `main`'s catch-all cannot know how sensitive any link in a
+chain is, and downgrading it to `{}` would have stripped the `.context()`
+chains fetch/build/backup rely on to turn a bare syscall failure into an
+actionable message — a real usability regression in exchange for a narrower
+fix. The rule adopted instead is **errors are sanitized where they are
+made, not where they are printed**, documented at the `{e:#}` site in
+`main.rs` so the next person to look at that line finds the reasoning.
+
+Root cause, more precisely than the entry above had it: `toml::de::Error`
+holds an `Arc<str>` of the **entire input file** and quotes the offending
+line from its `Display`. The error object *is* a container for the config,
+so no formatting choice downstream could have been sufficient. New
+`config::parse_config` (split out of `load_config`, which can only ever
+read the hardcoded path, so the invariant is unit-testable) rebuilds the
+message from the two safe pieces — `err.message()` and `err.span()`, with
+line/column computed locally by `line_col` — and the toml error never
+enters the chain.
+
+`message()` turned out **not** to be categorically safe, which the original
+entry did not anticipate: serde builds type-mismatch text with `Debug`, so
+`m_cost = "<value>"` yields `invalid type: string "<value>", expected u32`.
+Every field we accept today holds something non-secret (paths, url,
+ciphertext/KDF params), so nothing reachable leaks — but that made safety a
+promise about fields not yet written. `redact_quoted_values` closes it
+instead: values are double-quoted, names and expected literals are
+backticked, so blanking double-quoted runs is precise. One carve-out, found
+by observing real output: a `"` *inside* backticks is the parser's expected
+literal (``expected `"` ``), not the start of a value.
+
+Also added the (3) nudge: `legacy_plaintext_credentials` detects a
+still-unmigrated `[maxmind]` and replaces the parser's symptom report with
+`"/etc/xtgeoip.conf still holds MaxMind credentials in plaintext
+(account_id and license_key). Run \`sudo xtgeoip conf --set-credentials\`
+…"`, including advice to treat the old key as exposed and rotate it. It
+returns empty when the file will not parse as TOML at all — a syntax error
+is not evidence of a migration state, so those fall through to the
+sanitized parse error.
+
+11 new tests (169 total, up from 158). The one that matters asserts on the
+**`{:#}`** rendering, not `{}`: `{}` printed only the outermost context and
+was already safe before this fix, so a test against `{}` would have passed
+on the bug. Verified by reverting `parse_config` to the old
+`.context("Failed to parse TOML configuration")` form — 4 of the new tests
+fail against it, including `errors_never_echo_config_source`; both new
+`conf.rs` tests fail against the pre-fix `.context(...)` form too.
+
+**Two corrections to this entry's original threat model:**
+- "`license_key` surfaces only in less-common orderings" is wrong. Field
+  order in the file is irrelevant: `toml` 1.0.7 deserializes through a
+  sorted map, so among unknown fields `account_id` is *always* reported
+  first — proved by reordering the file and getting the identical result.
+  `license_key` surfaces when `account_id` is **absent**, i.e. a partially
+  hand-migrated host. That is an incidental property of the crate's
+  internal map, not a guarantee, and the fix correctly does not depend on
+  it.
+- "stderr/log" understates reach. On a config-load failure `init_logger`
+  gets `None` (no log path is known yet), so there is no log *file* — but
+  stderr is captured into the journal under systemd and into any redirect,
+  so it is durable. The syslog line via `log_early_error` was already safe:
+  it uses `{}`, not `{:#}`.
+
+**A second instance, found by review rather than by the audit:** `conf.rs`
+parses the same file with `toml_edit`, whose `TomlError` quotes the source
+line exactly as `toml::de::Error` does. Two call sites — the
+`has_existing` probe in `set_credentials` and `splice_credentials` — both
+read `/etc/xtgeoip.conf`, in the one module that is only ever reached while
+handling credentials. Live-reproduced: an unterminated quote *on* the
+`license_key` line prints the key verbatim through `main`'s `{e:#}` (a
+syntax error one line earlier does not — the span decides). Fixed by
+routing both through a shared `conf::parse_document`, which reports via
+`config::sanitize_toml_error`; that function now takes a loose
+message + span rather than a `&toml::de::Error`, since the two crates'
+error types are distinct but structurally identical. Shipping the
+"sanitized where they are made" rule in `main.rs` while a sibling module
+still made unsanitized errors would have guaranteed the next audit re-filed
+this as new.
+
+Confirmed the nudge is followable: `run()` matches `Action::Conf(_)` before
+the arm that calls `load_config`, so `conf -d`/`-s`/`-c` all still work on
+a host whose config now fails to load — verified by running `conf -d`
+non-root against the real config. A nudge naming a command blocked by the
+same error would be worse than the raw parser output.
+
+Not fixed here, same class but non-secret: `Config::validate` echoes the
+configured URL in its https rejection (`got {:?}`). A URL is not a
+credential and the message is much less useful without it; noted so the
+next audit does not re-file it as new.
+
+Not verified end-to-end on a live host — AppArmor blocks unprivileged user
+namespaces (`kernel.apparmor_restrict_unprivileged_userns = 1`) and the
+config path is hardcoded, so shadowing `/etc/xtgeoip.conf` needs root. To
+check by hand:
+`sudo unshare -m sh -c 'mount --bind /path/to/legacy.conf /etc/xtgeoip.conf && xtgeoip fetch'`
+(the mount is private to that namespace; config load fails before any
+network call).
 
 ---
 

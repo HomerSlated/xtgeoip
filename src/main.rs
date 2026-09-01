@@ -137,6 +137,15 @@ fn main() -> Result<()> {
     };
 
     if let Err(e) = run(cli) {
+        // `{e:#}` prints anyhow's whole cause chain, and that is deliberate:
+        // fetch/build/backup rely on `.context()` to turn a bare syscall
+        // failure into something actionable, and `{e}` would drop all of it.
+        //
+        // The cost is that this funnel cannot know how sensitive any link in
+        // a chain is, so the rule is that errors are sanitized where they are
+        // *made*, not where they are printed — see `config::parse_config`,
+        // which #104 fixed after `toml::de::Error` was found carrying (and
+        // quoting) the raw config file, plaintext credentials included.
         messages::error(&format!("{e:#}"));
         process::exit(EXIT_RUNTIME_ERROR);
     }

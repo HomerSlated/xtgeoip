@@ -2,7 +2,7 @@
 /// xtgeoip configuration data and loading. Pure: no output, no
 /// subprocesses, no prompts — see `conf.rs` for the `conf` subcommand
 /// handler.
-use std::{fs, path::Path};
+use std::{fs, ops::Range, path::Path};
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
@@ -120,6 +120,166 @@ impl Config {
     }
 }
 
+/// The plaintext credential fields `#103` replaced with
+/// `[maxmind.credentials]`. Their presence means the host was upgraded to a
+/// post-`#103` binary but never migrated.
+const LEGACY_CREDENTIAL_FIELDS: [&str; 2] = ["account_id", "license_key"];
+
+/// 1-based (line, column) of byte `offset` within `source`.
+///
+/// `toml::de::Error` knows this too, but only computes it inside its
+/// `Display`, in the same breath as quoting the offending source line — the
+/// thing [`sanitize_toml_error`] exists to prevent. Iterating `char_indices`
+/// rather than slicing keeps a span landing mid-codepoint from panicking.
+fn line_col(source: &str, offset: usize) -> (usize, usize) {
+    let (mut line, mut column) = (1, 1);
+    for (i, c) in source.char_indices() {
+        if i >= offset {
+            break;
+        }
+        if c == '\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+    (line, column)
+}
+
+/// Render a TOML parser failure as a message that cannot contain config
+/// file content (#104).
+///
+/// `toml::de::Error` carries an `Arc<str>` of the *whole* input, and its
+/// `Display` quotes the offending line verbatim — value included. On an
+/// unmigrated host that line can be `license_key = "<the real key>"`. Since
+/// the error owns the file, no formatting choice at the printing end can
+/// help; the fix is to never let it into the chain. So take the two pieces
+/// that are safe — the message and the span — and build a fresh string.
+///
+/// Takes them loose rather than taking an error, because `toml::de::Error`
+/// and `toml_edit::TomlError` are distinct types with identical accessors
+/// that leak identically: `conf.rs` parses the same file with the other one.
+///
+/// The message is nearly structural — with `deny_unknown_fields` a plaintext
+/// credential is an *unknown field*, reported by name and never by value —
+/// but serde's type-mismatch text does embed the offending value, so it goes
+/// through [`redact_quoted_values`] first.
+pub(crate) fn sanitize_toml_error(
+    source: &str,
+    message: &str,
+    span: Option<Range<usize>>,
+) -> String {
+    let message = redact_quoted_values(message);
+    match span {
+        Some(span) => {
+            let (line, column) = line_col(source, span.start);
+            format!(
+                "Failed to parse {SYSTEM_CONFIG} at line {line}, column \
+                 {column}: {message}"
+            )
+        }
+        None => format!("Failed to parse {SYSTEM_CONFIG}: {message}"),
+    }
+}
+
+/// Blank out the contents of every double-quoted run in a parser message.
+///
+/// `toml::de::Error::message()` is *mostly* structural — field and key names
+/// arrive in backticks — but serde's own type-mismatch text is built with
+/// `Debug`, so it embeds the offending value: `invalid type: string "<the
+/// value>", expected u32`. Every known field today holds something
+/// non-secret, so nothing reachable leaks; relying on that would make this
+/// module's safety depend on a promise about fields not yet written.
+/// Redacting instead makes it a property of the code.
+///
+/// The split is by quoting style, which is why it holds: values are
+/// double-quoted, names and expected literals are backticked. Over-redaction
+/// is the failure direction, and it costs only detail in a message that
+/// still carries the error kind and an exact position.
+fn redact_quoted_values(message: &str) -> String {
+    let mut out = String::with_capacity(message.len());
+    let mut chars = message.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '"' {
+            out.push(c);
+            continue;
+        }
+        // A `"` *inside* backticks is one of those expected literals — the
+        // parser rendering `expected `"`` for an unterminated string — not
+        // the opening of a value. Redacting from there would swallow the
+        // rest of an otherwise clean message.
+        if out.ends_with('`') && chars.peek() == Some(&'`') {
+            out.push(c);
+            continue;
+        }
+        out.push_str("\"<redacted>\"");
+        // Consume through the closing quote, honouring `\"` escapes; an
+        // unterminated run simply redacts to end of message.
+        let mut escaped = false;
+        for c in chars.by_ref() {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                break;
+            }
+        }
+    }
+    out
+}
+
+/// Which `#103` legacy plaintext credential fields are still under
+/// `[maxmind]`, in `LEGACY_CREDENTIAL_FIELDS` order (not the file's — the
+/// untyped parse goes through a sorted map). Empty if the file will not parse
+/// as TOML at all, in which case the caller falls back to the sanitized parse
+/// error — a syntax error is not evidence of a migration state.
+fn legacy_plaintext_credentials(source: &str) -> Vec<&'static str> {
+    let Ok(doc) = source.parse::<toml::Table>() else {
+        return Vec::new();
+    };
+    let Some(maxmind) = doc.get("maxmind").and_then(|m| m.as_table()) else {
+        return Vec::new();
+    };
+    LEGACY_CREDENTIAL_FIELDS
+        .into_iter()
+        .filter(|field| maxmind.contains_key(*field))
+        .collect()
+}
+
+/// Parse and validate config text. Split out of [`load_config`] — which can
+/// only ever read the hardcoded `/etc/xtgeoip.conf` — so the invariant that
+/// matters here is directly testable: no error this returns contains any
+/// content from `source`. See `errors_never_echo_config_source`.
+fn parse_config(source: &str) -> Result<Config> {
+    let cfg: Config = toml::from_str(source).map_err(|e| {
+        // A parse failure on an unmigrated host is not a typo, it is a
+        // missed migration step — nothing else detects that state, and the
+        // raw parser error ("unknown field `account_id`") describes the
+        // symptom rather than the action. Say what to run instead.
+        let legacy = legacy_plaintext_credentials(source);
+        if legacy.is_empty() {
+            anyhow::anyhow!(
+                "{}",
+                sanitize_toml_error(source, e.message(), e.span())
+            )
+        } else {
+            anyhow::anyhow!(
+                "{SYSTEM_CONFIG} still holds MaxMind credentials in plaintext \
+                 ({}). Run `sudo xtgeoip conf --set-credentials` to encrypt \
+                 them; it removes the plaintext as it writes. Treat the old \
+                 key as exposed and consider rotating it at MaxMind.",
+                legacy.join(" and ")
+            )
+        }
+    })?;
+
+    cfg.validate()?;
+
+    Ok(cfg)
+}
+
 /// Load the TOML configuration into a Config struct
 pub fn load_config() -> Result<Config> {
     let path = system_config_path();
@@ -135,12 +295,7 @@ pub fn load_config() -> Result<Config> {
         anyhow::bail!("{} is empty", SYSTEM_CONFIG);
     }
 
-    let cfg: Config = toml::from_str(&contents)
-        .context("Failed to parse TOML configuration")?;
-
-    cfg.validate()?;
-
-    Ok(cfg)
+    parse_config(&contents)
 }
 
 #[cfg(test)]
@@ -251,5 +406,175 @@ mod tests {
             err.to_string().contains("must not be empty"),
             "empty url should report emptiness, not scheme: {err}"
         );
+    }
+
+    // ---- #104: config-load errors must not echo config content ----
+
+    /// A value no real config would contain, so `contains` is a sound test.
+    const SENTINEL: &str = "SuPeRsEcReT_KEY_abcdef0123456789";
+
+    fn legacy_config(maxmind_body: &str) -> String {
+        format!(
+            "[paths]\narchive_dir = \"/var/lib/xt_geoip\"\narchive_prune = \
+             3\noutput_dir = \
+             \"/usr/share/xt_geoip\"\n\n[maxmind]\n{maxmind_body}"
+        )
+    }
+
+    /// The finding this closes (#104). `toml::de::Error` owns the whole
+    /// input and quotes the offending line from `Display`, so `main`'s
+    /// `{e:#}` catch-all printed the operator's plaintext key to stderr.
+    ///
+    /// Asserting on the `{:#}` (full-chain) rendering is the whole point:
+    /// `{}` showed only the outermost context and was already safe before
+    /// this fix, so a test against `{}` would have passed on the bug.
+    #[test]
+    fn errors_never_echo_config_source() {
+        let cases = [
+            // Unmigrated host, both legacy fields (#103's own migration path).
+            format!(
+                "url = \"https://x.example/y\"\naccount_id = \
+                 \"123456\"\nlicense_key = \"{SENTINEL}\"\n"
+            ),
+            // Partially hand-migrated: license_key alone. `account_id` sorts
+            // first in toml's map, so while it is present it is the field
+            // reported; remove it and the key's own line is what gets quoted.
+            format!(
+                "url = \"https://x.example/y\"\nlicense_key = \"{SENTINEL}\"\n"
+            ),
+            // Unknown non-credential field, adjacent to a secret-looking line.
+            format!("url = \"https://x.example/y\"\nbogus = \"{SENTINEL}\"\n"),
+            // Syntax error whose reported span lands on the secret's line.
+            format!(
+                "url = \"https://x.example/y\"\nlicense_key = \"{SENTINEL}\n"
+            ),
+            // Type mismatch: serde's own message embeds the offending value.
+            format!("url = {SENTINEL}\n"),
+        ];
+
+        for source in cases {
+            let text = legacy_config(&source);
+            let err = parse_config(&text).expect_err("must not parse");
+            let full = format!("{err:#}");
+            assert!(
+                !full.contains(SENTINEL),
+                "config content leaked into the error chain:\n{full}"
+            );
+        }
+    }
+
+    /// An unmigrated host gets an actionable instruction, not the parser's
+    /// symptom report. Nothing else in the codebase detects this state.
+    #[test]
+    fn legacy_plaintext_credentials_prompt_migration() {
+        let text = legacy_config(&format!(
+            "url = \"https://x.example/y\"\naccount_id = \
+             \"123456\"\nlicense_key = \"{SENTINEL}\"\n"
+        ));
+        let err = parse_config(&text).expect_err("must not parse");
+        let full = format!("{err:#}");
+        assert!(
+            full.contains("--set-credentials"),
+            "should say what to run: {full}"
+        );
+        assert!(
+            full.contains("account_id") && full.contains("license_key"),
+            "should name both stale fields: {full}"
+        );
+        assert!(!full.contains(SENTINEL), "leaked the key: {full}");
+    }
+
+    /// Sanitizing must not cost diagnosability: an ordinary typo still gets
+    /// the field name and a position to look at.
+    #[test]
+    fn sanitized_error_keeps_field_name_and_position() {
+        let text = legacy_config("url = \"https://x.example/y\"\nbogus = 1\n");
+        let err = parse_config(&text).expect_err("must not parse");
+        let full = format!("{err:#}");
+        assert!(full.contains("bogus"), "lost the field name: {full}");
+        assert!(full.contains("line 8"), "lost the position: {full}");
+    }
+
+    /// A syntax error carries a span but no field name; it must still
+    /// report where, and still not quote the line.
+    #[test]
+    fn syntax_error_reports_position_only() {
+        let text = legacy_config("url = \"https://x.example/y\n");
+        let err = parse_config(&text).expect_err("must not parse");
+        let full = format!("{err:#}");
+        assert!(full.contains("line 7"), "lost the position: {full}");
+        assert!(!full.contains("x.example"), "quoted the line: {full}");
+    }
+
+    #[test]
+    fn a_valid_config_still_parses() {
+        let text = legacy_config(
+            "url = \"https://x.example/y\"\n\n[maxmind.credentials]\nm_cost = \
+             19456\nt_cost = 2\np_cost = 1\nsalt = \"aabb\"\nnonce = \
+             \"ccdd\"\nciphertext = \"eeff\"\n",
+        );
+        let cfg = parse_config(&text).expect("valid config must parse");
+        assert_eq!(cfg.paths.archive_prune, 3);
+        assert!(cfg.maxmind.credentials.is_some());
+    }
+
+    /// `validate()` still runs after a successful parse.
+    #[test]
+    fn parse_config_still_validates() {
+        let text = legacy_config("url = \"http://x.example/y\"\n");
+        assert!(parse_config(&text).is_err(), "http url must be rejected");
+    }
+
+    /// serde builds type-mismatch text with `Debug`, so the offending value
+    /// is embedded in `message()` itself — the one value-bearing path the
+    /// span-stripping alone does not close.
+    #[test]
+    fn type_mismatch_value_is_redacted() {
+        let text = legacy_config(&format!(
+            "url = \"https://x.example/y\"\n\n[maxmind.credentials]\nm_cost = \
+             \"{SENTINEL}\"\nt_cost = 2\np_cost = 1\nsalt = \"a\"\nnonce = \
+             \"b\"\nciphertext = \"c\"\n"
+        ));
+        let err = parse_config(&text).expect_err("must not parse");
+        let full = format!("{err:#}");
+        assert!(!full.contains(SENTINEL), "value leaked: {full}");
+        assert!(full.contains("<redacted>"), "should mark the gap: {full}");
+        assert!(full.contains("expected u32"), "lost the reason: {full}");
+    }
+
+    #[test]
+    fn redaction_leaves_backticked_literals_intact() {
+        // The parser renders an unterminated string as ``expected `"` `` —
+        // a quote character inside backticks, not the start of a value.
+        assert_eq!(
+            redact_quoted_values("invalid basic string, expected `\"`"),
+            "invalid basic string, expected `\"`"
+        );
+        assert_eq!(
+            redact_quoted_values("unknown field `account_id`, expected `url`"),
+            "unknown field `account_id`, expected `url`"
+        );
+        assert_eq!(
+            redact_quoted_values(
+                r#"invalid type: string "secret", expected u32"#
+            ),
+            r#"invalid type: string "<redacted>", expected u32"#
+        );
+        // Escaped quotes inside the value must not end the run early.
+        assert_eq!(
+            redact_quoted_values(r#"got "a\"b" here"#),
+            r#"got "<redacted>" here"#
+        );
+        // An unterminated run redacts to the end rather than emitting it.
+        assert_eq!(redact_quoted_values(r#"got "abc"#), r#"got "<redacted>""#);
+    }
+
+    #[test]
+    fn line_col_is_one_based_and_utf8_safe() {
+        assert_eq!(line_col("abc", 0), (1, 1));
+        assert_eq!(line_col("abc\ndef", 4), (2, 1));
+        assert_eq!(line_col("abc\ndef", 6), (2, 3));
+        // A span landing inside a multi-byte codepoint must not panic.
+        assert_eq!(line_col("é\nx", 1), (1, 2));
     }
 }
