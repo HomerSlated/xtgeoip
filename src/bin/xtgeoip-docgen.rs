@@ -160,6 +160,9 @@ struct ManpageTemplate {
     commands: String,
     options: String,
     execution_order: String,
+    /// The manifest-based ownership model (#98). General, so it precedes
+    /// LEGACY MODE, which is one specific case of stale-owned files.
+    file_ownership: String,
     legacy_mode: String,
     configuration: String,
     files: String,
@@ -1150,12 +1153,13 @@ fn generate_manpage(
     }
     out.push_str(&format!(".B {}\n\\fIcommand\\fR [\\fIoptions\\fR]\n", prog));
 
-    // DESCRIPTION, COMMANDS, OPTIONS, EXECUTION ORDER, LEGACY MODE,
-    // CONFIGURATION from template
+    // DESCRIPTION, COMMANDS, OPTIONS, EXECUTION ORDER, FILE OWNERSHIP,
+    // LEGACY MODE, CONFIGURATION from template
     push_section(&mut out, "DESCRIPTION", &tmpl.description);
     push_section(&mut out, "COMMANDS", &tmpl.commands);
     push_section(&mut out, "OPTIONS", &tmpl.options);
     push_section(&mut out, "EXECUTION ORDER", &tmpl.execution_order);
+    push_section(&mut out, "FILE OWNERSHIP", &tmpl.file_ownership);
     push_section(&mut out, "LEGACY MODE", &tmpl.legacy_mode);
     push_section(&mut out, "CONFIGURATION", &tmpl.configuration);
 

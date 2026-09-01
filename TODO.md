@@ -76,6 +76,21 @@ The `Action` enum is explicit, type-safe, and easy to extend — keep this shape
 
 Note [#32]: Preserve the `Action` construction pattern — the change is in the source of the construction logic, not its shape.
 
+**⚑ The remaining enabler has no entry.** Of the four named above, #22 is
+closed (subsumed), #29 is closed, and #93 is done — leaving **#27**, which
+is cited here and nowhere else in this file. It has no scope, no acceptance
+criteria, and no status. As written, the project's largest open item has no
+definition of done.
+
+**Dangling ticket references (audited 2026-09-01).** These numbers are
+cited across this file as dependencies or enablers but have **no `###`
+entry anywhere**: **#9, #12, #17, #18, #26, #27, #32, #34, #61**. They
+carry real weight in prose — "#12/#18 configurability is the enabler"
+(#88), "execution planner (#17) is the right place" (#24), "ties into #61"
+(#76) — while carrying no scope. Listed here so the gap is visible rather
+than implied. Deliberately *not* invented into entries: what each covers is
+the user's to define, and guessing would be worse than the blank.
+
 ---
 
 ## CONFIG AND CONF SUBCOMMAND
@@ -474,7 +489,7 @@ Optional hardening: a unique suffix (PID, or `tempfile::NamedTempFile` in `archi
 
 ⚠ Touching `fetch.rs` invalidates its guardian signature and needs a re-audit.
 
-### #101 — fetch.rs: no explicit HTTP redirect policy
+### #101 — fetch.rs: no explicit HTTP redirect policy ✅ DONE (2026-07-18)
 
 Guardian finding **F-2**, same audit. **LOW — CVSS 3.7** (`CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:N/A:N`).
 
@@ -802,6 +817,35 @@ The note was also internally inconsistent: it rejected implicit backups as an un
 
 **Still open, and each needing its own decision** (none depends on restore): documenting the ownership model and the two orphan-clean paths; rejecting unknown flags in `xtgeoip-tests`; #24 stage 1 (reorder `Clean` after `Fetch`); #89 integration cases. See §12.
 
+✅ **Documentation residual DONE (2026-09-01)** — §4's ownership model and
+the two orphan-clean paths are now written down, which was the item with the
+best value-to-cost ratio in this whole area. Evidence it was needed: the
+design note's own author got the `build -c` vs `build -c -f` distinction
+wrong from reading the code.
+
+- New man-page section **FILE OWNERSHIP** (`docs/spec/manpage-template.toml`
+  → `file_ownership`, wired into `xtgeoip-docgen` between EXECUTION ORDER
+  and LEGACY MODE): the three categories (owned / unowned / stale-owned),
+  the manifest as the ownership record, and the point that the unowned
+  guarantee is **structural** — eligibility requires extension `iv4`/`iv6`
+  *and* a two-character `[A-Z0-9]` stem, so `xtgeoip.conf.example` cannot be
+  selected by any clean, `--force` included.
+- **LEGACY MODE** extended with the timing distinction: `build -c` during
+  the switch back (manifest still lists `EU`, still owned), `build -c -f`
+  after the fact (stale-owned, needs the glob). Re-verified against
+  `action.rs` before writing it: the pipeline is `pre` → `fetch_step` →
+  `mid` (which holds `Clean`) → `build`, so #24 stage 1's reorder moved
+  `Clean` after `Fetch` **but still before** `Build` regenerates the
+  manifest. The claim survives that change.
+- `src/cli.rs` long help for `-l` and `-f` carries the same distinction, so
+  it is reachable from `--help` without opening the man page. Left out of
+  `-h`, which stays a one-liner.
+- Man page verified with `groff -ww` (no warnings) and read back rendered.
+
+Remaining under #98: precondition checks that fail fast rather than grinding
+to a confusing failure. The setup/teardown lifecycle itself is unresolved and
+#89 (which shared the assertion-vocabulary cost) is now closed.
+
 Split out of #87 (2026-07-18) because it is a behaviour change to an order-dependent suite, not documentation, and bundling the two would have made a cheap verifiable change risky.
 
 `xtgeoip-tests` has no setup or teardown phase. Cases run in file order against whatever system state the previous case left, so a failure mid-run leaves the system in an arbitrary state and the next full run starts from it. `--rebuild` is a partial, opt-in mitigation rather than a guarantee.
@@ -830,7 +874,50 @@ Flags are now documented in the file header, which partly overlaps #87.
 
 Verified root-free by running the release binary with `--case NOSUCH` under both override forms: all 51 cases skipped, exit 0, no `sudo` spawned — confirming the new argv parsing doesn't disturb `--case`/`--failed`/`--rebuild`.
 
-### #89 — tests: orphaned file scenarios not covered ⚑ SEE DESIGN NOTE #98
+### #89 — tests: orphaned file scenarios not covered ❌ CLOSED — not worth the mechanism (2026-09-01)
+
+**Closed 2026-09-01 without implementing.** The scenarios would cost a new
+mechanism to guard a path that already has two guards, one of them
+structural.
+
+- **The bug it would regression-test is in deleted code.** `b4ec1db`'s data
+  loss came from the atomic swap, which was reverted; #24 stages 2–3 are
+  permanently rejected. The regression test would guard a feature on a
+  do-not-implement list.
+- **The unowned-file guarantee is already asserted, twice.**
+  `build::tests::detect_orphans_foreign_file_untouched` tests it directly,
+  root-free, in milliseconds. And `iv_files` enforces it *structurally* —
+  extension `iv4`/`iv6` **and** a two-character `[A-Z0-9]` stem — so
+  `xtgeoip.conf.example` cannot match whatever the clean logic does. A
+  structural impossibility does not need an integration test.
+- **The cost is a mechanism, not a case.** Nothing in the harness can
+  express any assertion these scenarios need: `check_output` does substring-
+  contains plus empty-means-empty, and `Testcase` carries only `maps_to`,
+  `exit_status`, `expected_stdout`/`stderr`, `rebuild`, `timeout_secs`.
+  There are no filesystem, negative, or count assertions, and no ordering
+  between cases. Adding them also needs a decision about *where* such cases
+  live: `testcases.yaml` is generated from `cli.yaml`, which is a spec of
+  **flag semantics** and has no notion of scenarios or filesystem state.
+- **It would be the most destructive case in the suite**, running
+  `build -c -f` against the real `output_dir`.
+
+Two smaller findings from the assessment, recorded so they are not
+rediscovered:
+
+- **These scenarios are network-free.** `action.rs` maps
+  `FetchMode::Local => fetch(cfg, mode, "", "")` — no credentials read at
+  all — so the whole `build -l` → `build` → `build -c -f` cycle runs against
+  a pre-existing local archive. The suite's rate-cap warning applies to
+  `fetch`/`run`, not to these. Cost was never the blocker; value was.
+- **The counts in the design note (§8) are observations, not invariants.**
+  "254 countries" / "506 `.iv4`/`.iv6`" is what MaxMind's data held on
+  2026-07-18. Asserting them exactly would fail whenever MaxMind adds a
+  country — a false positive shaped like a regression.
+
+**What was kept instead:** #98's documentation residual, which is the real
+gap here — see below. The design note's own author got the `build -c` vs
+`build -c -f` distinction wrong from reading the code, which is direct
+evidence the behaviour is confusing. Documented 2026-09-01.
 
 **Premise partly wrong.** The *detection* exists (`detect_orphans`, called after every build, 6 unit tests) and the full legacy→default→clean cycle was demonstrated working on 2026-07-18. What is missing is an *integration* case and documentation of which clean form applies when (`build -c` during the switch back, `build -c -f` after the fact — see §4 of the design note). Concrete scenarios in §8; the final assertion (`xtgeoip.conf.example` survives) is the regression test for the `b4ec1db` data-loss bug.
 
@@ -908,7 +995,9 @@ Two directories exist, and this ticket only named one: `private/agents-in/` hold
 
 Original ticket text follows.
 
-### #95 (original) — import generic agents from private/agents-out/
+### #95 (original) — import generic agents from private/agents-out/ ✅ SUPERSEDED — original text, kept for provenance
+
+*(The ticket as first written. Delivered and closed at `#95 … ✅ COMPLETE (2026-07-18)` above; this copy is history, not open work. Marked 2026-09-01 — it was the last `###` heading that read as open without being so.)*
 
 The seven project-agnostic agent role descriptions in `private/agents-out/` (bug-hunter, data-flow-tracer, deep-research-collector, docs-auditor, flow-doc-generator, optimisation-advisor, guardian-security) are to be imported as actual project agents, adapting each by filling its `[bracketed]` placeholders for xtgeoip (`[language]` = Rust, `[source-dir]` = `src/`, `[output-dir]` under `private/`, etc.).
 
@@ -921,7 +1010,13 @@ Priority / notes:
 
 ## LOW PRIORITY / LARGE SCOPE
 
-### #24 — pipelines: no rollback on mid-pipeline failure ⚑ SEE DESIGN NOTE #98
+### #24 — pipelines: no rollback on mid-pipeline failure ✅ CLOSED (2026-07-18) — stage 1 done, stages 2–3 rejected
+
+**Nothing actionable remains.** Stage 1 (reorder `Clean` after `Fetch`) and
+the ephemeral-cleanup half both shipped; stages 2 (rollback) and 3 (atomic
+swap) are rejected, the latter twice — it was implemented once as `b4ec1db`
+and caused data loss. Closed 2026-09-01 after a cross-check found the
+heading still flagged open while every part of the body had resolved.
 
 Design note [`98-state-ownership-recovery.md`](design/98-state-ownership-recovery.md) **REJECTED** (§0). **Stage 2 (rollback) is rejected with it** — it was `restore` under another name, and restoring a backup means adopting responsibility for a problem you have not diagnosed. **Stage 3** (atomic swap) stays rejected.
 
@@ -1002,7 +1097,7 @@ Unmeasured alternative, left open: a parallel gzip implementation could use both
 
 Measured: parallelises well (4.61× cold) but verification is only 1.5–4% of a backup, so it saves 0.6–3.3%; and it would make integrity-failure reporting nondeterministic. The real bottleneck is gzip → **#99**. Full measurement under **ARCHITECTURE: ANALYSIS AND SMALL REFACTORS → #71**.
 
-### #88 — unit testing: mock the HTTP layer in fetch.rs
+### #88 — unit testing: mock the HTTP layer in fetch.rs ✅ DONE (2026-07-18)
 
 *(Retitled 2026-07-18. Was: "unit testing: no unit tests exist ⚑ HIGH PRIORITY (next after spec-driven architecture)". The original gap is closed — 93 unit tests exist; what remains is the network path alone, so the HIGH PRIORITY flag was dropped with it.)*
 

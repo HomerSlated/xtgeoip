@@ -277,11 +277,89 @@ and
 These are listed in the
 .I orphaned
 file in the output directory and are safe to remove.
-To clean them up, run:
 .PP
-.RS
+Which clean form removes them depends on
+.B when
+you act, because
+.B \-\-clean
+runs before
+.B build
+regenerates the manifest:
+.TP
+.B xtgeoip build \-c
+Use this
+.I during
+the switch back \(em in the same invocation that leaves legacy mode. The
+manifest on disk still lists
+.BR EU ,
+so the files are still owned and a plain clean removes them.
+No
+.B \-\-force
+is required.
+.TP
 .B xtgeoip build \-c \-f
-.RE
+Use this
+.I after the fact
+\(em once a default-mode build has already rewritten the manifest. The
+manifest no longer lists
+.BR EU ,
+so the files are stale-owned and
+.B \-\-force
+is needed to remove them.
+This is the form the orphan warning advises, because by the time it prints
+you are already in this case.
+'''
+
+file_ownership = '''
+.B xtgeoip
+does not own the output directory; it owns the files its manifest lists.
+The manifest is the ownership record, and it defines three categories:
+.TP
+.B Owned
+Listed in the current manifest \(em the
+.IR *.iv4 / *.iv6
+data files, the
+.I version
+file, and the manifest itself.
+These are backed up, cleaned, and overwritten freely.
+.TP
+.B Unowned
+Everything else in the directory, for example
+.BR xtgeoip.conf.example .
+These are
+.B never
+touched, by any operation, including
+.BR "build \-c \-f" .
+.TP
+.B Stale\-owned
+Listed in a
+.I previous
+manifest but not the current one \(em typically
+.I EU.iv4
+and
+.I EU.iv6
+after switching out of legacy mode.
+These are detected and written to the
+.I orphaned
+file, then left in place for you to remove.
+They are never deleted automatically.
+.PP
+The unowned guarantee is enforced structurally, not by convention: a file is
+eligible for cleaning only if its extension is
+.I iv4
+or
+.I iv6
+.B and
+its stem is exactly two characters from
+.BR [A\-Z0\-9] .
+A name such as
+.B xtgeoip.conf.example
+cannot satisfy that test, so no clean operation can select it.
+.PP
+Stale manifests
+.RI ( *.blake3 ", " *.sha256
+from an earlier build) are the one exception to "left for the user": they
+are unconditionally superseded by the new manifest and are removed silently.
 '''
 
 configuration = '''

@@ -25,10 +25,24 @@ pub struct CommonFlags {
     pub clean: bool,
 
     /// Force the operation (overrides safety checks)
+    ///
+    /// With `build -c`, extends the clean to stale-owned files — those left
+    /// by a previous manifest, such as EU.iv4/EU.iv6 after leaving legacy
+    /// mode. It does not widen the clean to files xtgeoip did not create:
+    /// eligibility is structural (extension iv4/iv6 and a two-character
+    /// [A-Z0-9] stem), so --force cannot reach an unowned file.
     #[arg(short, long)]
     pub force: bool,
 
     /// Enable legacy mode (historical compatibility only)
+    ///
+    /// Switching back to default mode leaves EU.iv4/EU.iv6 behind; they are
+    /// listed in the `orphaned` file. Which clean form removes them depends
+    /// on when you act, because --clean runs before build regenerates the
+    /// manifest: `build -c` in the same invocation that leaves legacy mode
+    /// (still owned), or `build -c -f` afterwards (stale-owned, needs the
+    /// glob). Files xtgeoip did not create are never touched by either. See
+    /// xtgeoip(1), FILE OWNERSHIP and LEGACY MODE.
     #[arg(short = 'l', long)]
     pub legacy: bool,
 }
