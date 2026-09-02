@@ -66,7 +66,8 @@ test.
 - **Cached-archive fallback on failed fetch: REJECTED.** Rebuilding the same version over an intact install is a guaranteed no-op with real risk. `build` already spells that request
 - **Unattended cron: removed by design (#103).** Do not restore it by stashing the passphrase anywhere
 - **Fuzzing/proptest for CLI semantics: dropped.** 136 total combinations; `cli::snapshot` already enumerates all of them exhaustively
-- **Toolchain is pinned in `rust-toolchain.toml` (2026-09-02), and `sync.py` refuses to run unless the active toolchain matches it.** Do not reintroduce `dtolnay/rust-toolchain@stable` or `cargo +stable` in CI — both bypass the pin. Bump the pin deliberately and read the new lints then. `rustfmt` is intentionally not a pinned component, so a bare `cargo fmt` fails rather than formatting with a stable rustfmt that ignores the four nightly-only options in `rustfmt.toml`; use `cargo +nightly fmt`
+- **Both toolchains are pinned (2026-09-02), and `sync.py` refuses to run unless the local ones match.** Stable in `rust-toolchain.toml`; the rustfmt nightly, by date, in `rustfmt-toolchain` — CI and `sync.py` both read that file. Do not reintroduce `dtolnay/rust-toolchain@stable`, `@nightly`, `cargo +stable` or `cargo +nightly`: all four float and reopen the drift. Bump deliberately and read the new lints then
+- **Do not add `rustfmt` to the stable toolchain.** A stable rustfmt discards all five nightly-only options in `rustfmt.toml` — including `ignore` — and so rewrites `src/generated/`, failing docgen-check rather than the lint job. There is no stable escape: file-level `#![rustfmt::skip]` does not compile (E0658). Measured: stable and nightly agree on every hand-written file, and differ only on generated ones
 
 ---
 

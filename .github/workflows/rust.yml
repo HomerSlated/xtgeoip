@@ -14,8 +14,12 @@ env:
 # resolves through it. Do not reintroduce `dtolnay/rust-toolchain@stable` or
 # `cargo +stable` for these jobs — both bypass the pin and reopen the drift
 # between CI and local development that kept this workflow red for 30 runs.
-# rustfmt is the deliberate exception: rustfmt.toml needs nightly-only
-# options, so the format check installs nightly and calls it explicitly.
+# rustfmt is the deliberate exception: rustfmt.toml needs nightly-only options
+# (wrap_comments, format_strings, imports_granularity, group_imports, ignore),
+# so the format check runs under nightly. That nightly is pinned by date in
+# `rustfmt-toolchain`, read by both this workflow and scripts/sync.py — do not
+# replace it with `@nightly` or `cargo +nightly`, which float and would
+# reintroduce the same drift on the formatting half.
 
 jobs:
   build:
@@ -34,14 +38,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install pinned toolchain
         run: rustup show
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt
+      - name: Install pinned nightly (rustfmt only)
+        run: rustup toolchain install "$(cat rustfmt-toolchain)" --profile minimal -c rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
       - name: Format check
-        run: cargo +nightly fmt -- --check
+        run: cargo "+$(cat rustfmt-toolchain)" fmt -- --check
 
   test:
     runs-on: ubuntu-latest

@@ -11,13 +11,21 @@
 # Bump this deliberately, and read the new lints when you do — a scheduled
 # bump is a better trigger for that review than a surprise red build.
 #
-# `rustfmt` is deliberately NOT listed as a component. rustfmt.toml uses four
-# nightly-only options (wrap_comments, format_strings, imports_granularity,
-# group_imports) that a stable rustfmt silently ignores, so a bare
-# `cargo fmt` would format the tree differently and CI's
-# `cargo +nightly fmt -- --check` would then fail. Omitting the component
-# makes `cargo fmt` fail loudly instead of formatting wrongly. Always use
-# `cargo +nightly fmt`, as `scripts/sync.py` does.
+# `rustfmt` is deliberately NOT listed as a component, and installing it here
+# is a mistake. rustfmt.toml uses five nightly-only options — wrap_comments,
+# format_strings, imports_granularity, group_imports, and `ignore`. A stable
+# rustfmt discards all five with a warning and formats anyway; because `ignore`
+# is among them it then rewrites `src/generated/`, which fails the
+# docgen-check job rather than the lint job it came from. Measured 2026-09-02:
+# stable and nightly rustfmt agree on every hand-written file in this tree, and
+# disagree only about the generated ones.
+#
+# Omitting the component makes a bare `cargo fmt` fail loudly instead. The
+# formatter runs under the dated nightly named in `rustfmt-toolchain`, which
+# CI and `scripts/sync.py` both read. There is no stable escape: file-level
+# `#![rustfmt::skip]` satisfies rustfmt but does not compile (E0658, custom
+# inner attributes are unstable), and the per-item form would mean docgen
+# emitting an attribute before every generated item.
 
 [toolchain]
 channel = "1.98.0"
