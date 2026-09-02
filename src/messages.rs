@@ -7,6 +7,23 @@ use syslog::{Facility, Formatter3164};
 ///
 /// stdout/stderr output is always installed so the tool is never silent on
 /// the terminal; file logging is added only when `log_file` is `Some`.
+/// Which file the log should go to, if any — the CLI overrides the config.
+///
+/// `--no-log` wins over `--log-file` (clap rejects the pair, so this only
+/// matters if they are ever both set programmatically), and either wins over
+/// `[logging]`. The #1 core fix made terminal output independent of file
+/// logging, so "no file" here means exactly that and not "no output".
+pub fn resolve_log_file(
+    no_log: bool,
+    cli_log_file: Option<&str>,
+    config_log_file: Option<&str>,
+) -> Option<String> {
+    if no_log {
+        return None;
+    }
+    cli_log_file.or(config_log_file).map(str::to_owned)
+}
+
 pub fn init_logger(log_file: Option<&str>) -> Result<()> {
     let base_dispatch = fern::Dispatch::new().level(log::LevelFilter::Info);
 
@@ -84,4 +101,46 @@ pub fn warn(msg: &str) {
 #[allow(dead_code)]
 pub fn error(msg: &str) {
     log_print(msg, Level::Error);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The #1 residual in one line: the flag wins.
+    #[test]
+    fn cli_log_file_overrides_the_config() {
+        assert_eq!(
+            resolve_log_file(false, Some("/tmp/cli.log"), Some("/var/log/x")),
+            Some("/tmp/cli.log".to_string())
+        );
+    }
+
+    #[test]
+    fn config_is_used_when_no_flag_is_given() {
+        assert_eq!(
+            resolve_log_file(false, None, Some("/var/log/x")),
+            Some("/var/log/x".to_string())
+        );
+    }
+
+    /// `--no-log` beats both, including an explicit path. clap rejects that
+    /// pair at parse time, so this pins the behaviour for any caller that
+    /// constructs the arguments directly.
+    #[test]
+    fn no_log_wins_over_everything() {
+        assert_eq!(resolve_log_file(true, None, Some("/var/log/x")), None);
+        assert_eq!(
+            resolve_log_file(true, Some("/tmp/cli.log"), Some("/var/log/x")),
+            None
+        );
+    }
+
+    /// No flag and no `[logging]` is the pre-existing default, and must stay
+    /// "no file" rather than becoming "no output" — that conflation was the
+    /// original #1 bug.
+    #[test]
+    fn absent_everywhere_is_none() {
+        assert_eq!(resolve_log_file(false, None, None), None);
+    }
 }

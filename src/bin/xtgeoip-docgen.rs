@@ -20,6 +20,13 @@ pub struct Spec {
     #[serde(default)]
     pub flags: BTreeMap<String, FlagDef>,
 
+    /// Options that apply to every command and carry no combination
+    /// semantics. Kept out of `flags` on purpose: that map is the universe
+    /// the guard bitmask is built from, and a bit no guard can reference
+    /// would fail `every_flag_is_referenced_by_some_guard`.
+    #[serde(default)]
+    pub global_options: BTreeMap<String, FlagDef>,
+
     #[serde(default)]
     pub error_cases: Option<BTreeMap<String, ErrorCase>>,
 
@@ -1258,6 +1265,7 @@ mod tests {
             version: "3.1".into(),
             proof: None,
             flags: BTreeMap::new(),
+            global_options: BTreeMap::new(),
             error_cases: None,
             top_level: Some(CommandSpec::FlagCommand {
                 summary: "test".into(),

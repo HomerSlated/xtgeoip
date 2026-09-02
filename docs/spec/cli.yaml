@@ -30,6 +30,25 @@ flags:
     kind: bool
     summary: Enable legacy mode.
 
+# Options that apply to every command and carry no combination semantics.
+#
+# Deliberately NOT in `flags:` above. That map is the universe the guard
+# bitmask is built from, and every entry in it must be referenced by some
+# guard (`cli::contradiction::every_flag_is_referenced_by_some_guard`). These
+# two constrain nothing and conflict with nothing except each other, so a bit
+# in that mask would be a bit no guard could ever mention. They are declared
+# here so the spec still describes the whole CLI surface, and checked against
+# the man page by `cli::tests::global_options_are_documented`.
+global_options:
+  log_file:
+    long: log-file
+    kind: path
+    summary: Write the log to PATH, overriding [logging] in the config.
+  no_log:
+    long: no-log
+    kind: bool
+    summary: Disable file logging, overriding [logging] in the config.
+
 reason_templates:
   no_argument:
     text: "you must specify at least one argument"

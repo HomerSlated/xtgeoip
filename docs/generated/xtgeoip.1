@@ -217,6 +217,32 @@ in a context where both fetch and backup are active
 is an error: the prune target is ambiguous.
 To prune both, run the program twice.
 .RE
+.TP
+.BR \-\-log\-file " " \fIPATH\fR
+Write the log to
+.IR PATH ,
+overriding
+.I log_file
+in the
+.B [logging]
+section of the configuration.
+Because the override is known before the configuration is read, it also
+captures a failure to load that configuration \(em which the configured path
+cannot, since it is not known until the load has succeeded.
+Applies to every command.
+Give it after the subcommand
+.RB ( "xtgeoip build \-\-log\-file /tmp/x.log" ):
+top-level options and subcommands are mutually exclusive, so placing it before
+one is rejected.
+.TP
+.B \-\-no\-log
+Disable file logging, overriding the
+.B [logging]
+section.
+Terminal output is unaffected \(em only the file sink is conditional, so
+messages still reach stdout and stderr.
+Conflicts with
+.BR \-\-log\-file .
 .SH EXECUTION ORDER
 The order in which flags are given on the command line is always ignored.
 The execution order is fixed and determined by the most logical sequence for

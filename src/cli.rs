@@ -64,6 +64,22 @@ pub struct Cli {
     #[arg(short, long)]
     pub prune: bool,
 
+    /// Write the log to PATH, overriding [logging] in the config
+    ///
+    /// Takes precedence over `log_file` in `/etc/xtgeoip.conf`. Because the
+    /// override is known before the config is read, it also captures a
+    /// config-load failure — which the configured path cannot, since that
+    /// path is only known once the load has succeeded.
+    #[arg(long, value_name = "PATH", global = true, conflicts_with = "no_log")]
+    pub log_file: Option<String>,
+
+    /// Disable file logging, overriding [logging] in the config
+    ///
+    /// Terminal output is unaffected: `init_logger` always installs the
+    /// stdout/stderr dispatches, and only the file sink is conditional (#1).
+    #[arg(long, global = true)]
+    pub no_log: bool,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
@@ -420,7 +436,7 @@ mod snapshot {
 ///    the spec and docs as if it were live.
 #[cfg(test)]
 mod contradiction {
-    use clap::{Parser, error::ErrorKind};
+    use clap::{CommandFactory, Parser, error::ErrorKind};
 
     use super::*;
     use crate::generated::{
@@ -430,6 +446,88 @@ mod contradiction {
             TOP_LEVEL_GUARDS,
         },
     };
+
+    // ── global options (#1 residual) ─────────────────────────────────────
+
+    /// Every global option clap knows about must appear in the man page.
+    ///
+    /// `--log-file`/`--no-log` are deliberately absent from `cli.yaml`'s
+    /// `flags:` map — that is the universe the guard bitmask is built from,
+    /// and `every_flag_is_referenced_by_some_guard` below would reject a bit
+    /// no guard can mention. Being outside that map means they are also
+    /// outside every check that reads it, so this is the one that keeps them
+    /// documented. Derived from clap rather than from a hardcoded list, so a
+    /// third global option is covered the day it is added.
+    #[test]
+    fn global_options_are_documented() {
+        let man = std::fs::read_to_string("docs/generated/xtgeoip.1")
+            .expect("docs/generated/xtgeoip.1 missing — run docgen");
+
+        let cmd = Cli::command();
+        let globals: Vec<String> = cmd
+            .get_arguments()
+            .filter(|a| a.is_global_set())
+            .filter_map(|a| a.get_long().map(str::to_owned))
+            .collect();
+
+        assert!(
+            !globals.is_empty(),
+            "no global options found — has the flag model changed?"
+        );
+
+        for opt in &globals {
+            // roff escapes every literal hyphen.
+            let roff = format!("\\-\\-{}", opt.replace('-', "\\-"));
+            assert!(
+                man.contains(&roff),
+                "--{opt} is not documented in the man page (looked for \
+                 {roff:?} in OPTIONS)"
+            );
+        }
+    }
+
+    /// The two overrides are mutually exclusive, and the conflict is enforced
+    /// by clap rather than by a hand-written guard — they carry no
+    /// combination semantics with the other five flags, which is exactly why
+    /// they are not in the mask.
+    #[test]
+    fn log_file_and_no_log_conflict() {
+        assert!(
+            Cli::try_parse_from([
+                "xtgeoip",
+                "-b",
+                "--log-file",
+                "/tmp/x",
+                "--no-log"
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from(["xtgeoip", "-b", "--log-file", "/tmp/x"])
+                .is_ok()
+        );
+        assert!(Cli::try_parse_from(["xtgeoip", "-b", "--no-log"]).is_ok());
+    }
+
+    /// Where the flags may appear. `args_conflicts_with_subcommands` makes
+    /// any top-level argument conflict with a subcommand, and a `global` arg
+    /// is not exempt — so the override must follow the subcommand. Pinned
+    /// because it is a real wart: the rejected form is the one a user is most
+    /// likely to type, and the man page documents the working position.
+    #[test]
+    fn global_options_follow_the_subcommand() {
+        assert!(
+            Cli::try_parse_from(["xtgeoip", "build", "--log-file", "/tmp/x"])
+                .is_ok(),
+            "after the subcommand must work"
+        );
+        assert!(
+            Cli::try_parse_from(["xtgeoip", "--log-file", "/tmp/x", "build"])
+                .is_err(),
+            "before the subcommand is rejected by \
+             args_conflicts_with_subcommands"
+        );
+    }
 
     /// Every guard table, with the context name used in failure messages.
     fn all_contexts() -> [(&'static str, &'static [Guard]); 4] {

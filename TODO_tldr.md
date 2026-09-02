@@ -20,7 +20,6 @@ listing thirteen already-closed items as open.
 
 ## OPEN
 
-- **[#1 residual]** messages.rs/config.rs: CLI flag to override `[logging]` (flag takes precedence). Core of #1 is done — small, self-contained
 - **[#92 remainder]** docgen: spec validator on the *generation* side — catch contradictions at codegen time, not just test time. Test-time checks (`cli::contradiction`, 4 tests) landed 2026-07-18. The motivating case is **closed** (2026-09-02): examples carry a `steps:` list, checked against the real `plan()` by `action::tests::spec_steps_agree_with_plan`, which also rejects a plan-bearing example that omits the field. What remains is genuinely generation-side work — and note the structural limit found doing it: docgen is a separate binary with no `lib` target, so it can never call `plan()`; anything needing the program's own semantics must be checked in the main binary's tests
 - **[#98 residual]** tests: the setup/teardown lifecycle — a known-good initial state, and a teardown that survives a mid-run failure. Two of three halves are now done: documentation (2026-09-01, man-page `FILE OWNERSHIP` + the `build -c` vs `build -c -f` timing distinction) and **fail-fast preconditions** (2026-09-02: `HELP`'s REQUIREMENTS were enforced by nothing; now checked before the first case, all faults reported at once). The `restore`-based plan is **rejected** — see below
 
@@ -86,7 +85,7 @@ test.
 #81, #87, #88, #92 (test-time part), #93, #94, #95, #96, #97, #99, #101,
 #102. 2026-07-20 — #103 (`c2be6a3`). 2026-09-01 — #104 (`b804fa2`), #89
 (closed unimplemented — guarded by a structural invariant already, see
-`TODO.md`), #98 documentation half. 2026-09-02 — man-page corrections
+`TODO.md`), #98 documentation half. 2026-09-02 — #1 (residual: `--log-file`/`--no-log`), #100, #98 preconditions, #92's motivating case; man-page corrections
 (step ordering vs `plan()`; `conf -c` / encrypted-credential workflow, a
 #103 documentation residual; the config-section list), the `#27` trace, and
 CI unblocked after 30 red runs (`clippy::byte_char_slices` under a stable

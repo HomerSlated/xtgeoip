@@ -27,7 +27,7 @@ use crate::{
     action::{Action, run_action},
     cli::{Cli, CliOutcome},
     config::load_config,
-    messages::{init_logger, log_early_error},
+    messages::{init_logger, log_early_error, resolve_log_file},
 };
 
 const EXIT_CLI_ERROR: i32 = 2;
@@ -70,9 +70,14 @@ fn run(cli: Cli) -> Result<()> {
 
     match outcome {
         CliOutcome::Action(Action::Conf(conf_action)) => {
-            // conf runs before config load, so it has no log-file path;
-            // install a terminal-only logger so its errors still report.
-            init_logger(None)?;
+            // conf runs before config load, so it has no configured
+            // log-file path — but an explicit `--log-file` is known already
+            // and takes precedence, so honour it here too rather than
+            // silently ignoring the flag on one subcommand.
+            init_logger(
+                resolve_log_file(cli.no_log, cli.log_file.as_deref(), None)
+                    .as_deref(),
+            )?;
             conf::run_conf(conf_action)?;
         }
 
@@ -90,11 +95,20 @@ fn run(cli: Cli) -> Result<()> {
             // known once config has loaded, so it's `None` (terminal-only)
             // exactly when a load failure is what we're trying to report.
             let cfg_result = load_config();
-            let log_file = cfg_result
+            let configured = cfg_result
                 .as_ref()
                 .ok()
                 .and_then(|c| c.logging.as_ref())
                 .map(|l| l.log_file.clone());
+            // `--log-file`/`--no-log` override `[logging]` (#1 residual). The
+            // override is also the only path that can log a *failed* load:
+            // `configured` is `None` in exactly that case, because the
+            // configured path is not known until the load succeeds.
+            let log_file = resolve_log_file(
+                cli.no_log,
+                cli.log_file.as_deref(),
+                configured.as_deref(),
+            );
             init_logger(log_file.as_deref())?;
             let cfg = cfg_result.map_err(|e| {
                 log_early_error(&format!("Failed to load config: {}", e));

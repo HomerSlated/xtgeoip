@@ -155,7 +155,7 @@ the user's to define, and guessing would be worse than the blank.
 
 ## CONFIG AND CONF SUBCOMMAND
 
-### #1 — messages.rs / config.rs: file logging not optional ✅ CORE DONE
+### #1 — messages.rs / config.rs: file logging not optional ✅ DONE (2026-09-02)
 
 **Root cause found:** terminal output was welded to file logging. `init_logger` built
 the stdout/stderr *and* file dispatches together and was only called when `[logging]`
@@ -167,8 +167,46 @@ when a path is configured. `main` calls `init_logger(cfg.logging…map(log_file)
 unconditionally (and `init_logger(None)` on the `conf` path). Resolves the "TBD":
 when file logging is disabled, output still goes to stdout/stderr. Done with #94.
 
-**Remaining (smaller follow-up):** CLI flag to override `[logging]` (flag takes
-precedence). Not yet implemented.
+✅ **Residual DONE (2026-09-02).** Two global options, `--log-file <PATH>` and
+`--no-log`, with `messages::resolve_log_file` holding the precedence: `--no-log`
+beats `--log-file` beats `[logging]`. Both apply to every command, including
+`conf`, which previously forced `init_logger(None)` and so would have ignored
+an explicit flag.
+
+A useful side effect: the override is known *before* the config is read, so
+`--log-file` captures a **config-load failure** — which the configured path
+structurally cannot, since that path is only known once the load has succeeded.
+That is the same ordering constraint the #1 core fix was about, now with an
+escape hatch.
+
+**Spec placement — a deliberate choice.** These are declared in a new
+`global_options:` block in `cli.yaml`, *not* in `flags:`. That map is the
+universe the guard bitmask is built from (`cli_rules.rs`, 5 bits over
+B/C/F/L/P), and every entry must be referenced by some guard — so a sixth bit
+for an option with no combination semantics would fail
+`every_flag_is_referenced_by_some_guard` immediately. Being outside that map
+means being outside every check that reads it, so
+`cli::contradiction::global_options_are_documented` covers the gap: it derives
+the list from clap itself and asserts each appears in the generated man page.
+Verified to have teeth by deleting `--no-log` from the template.
+
+**A known wart, pinned by a test rather than hidden.** `args_conflicts_with_
+subcommands` makes any top-level argument conflict with a subcommand, and a
+clap `global` arg is not exempt — so `xtgeoip build --log-file X` works while
+`xtgeoip --log-file X build` is rejected. The rejected form is the one a user
+is more likely to type. Removing that setting would change the whole CLI's
+semantics (it is what makes `xtgeoip -b build` an error), which is far too
+large a blast radius for this; `global_options_follow_the_subcommand` pins
+both directions and the man page documents the working position.
+
+Verified live: `xtgeoip conf -d --log-file /tmp/xt-override.log` creates the
+file, and the same command without the flag does not. Seven tests in total
+(4 precedence, 3 clap/doc).
+
+**Not addressed:** `logging.verbose` ships in `xtgeoip.conf.example` and no
+code reads it. `Logging` has no such field and no `deny_unknown_fields`, so it
+is accepted and ignored. Whether it is a dead key to delete or an
+unimplemented feature is a decision, not a cleanup — left in HOUSEKEEPING.
 
 ---
 
