@@ -44,6 +44,7 @@
 use std::{
     env, fs,
     io::Read,
+    path::PathBuf,
     process::{self, Command, Stdio},
     thread,
     time::{Duration, Instant},
@@ -87,11 +88,14 @@ otherwise do nothing and surface later as a false \"Nothing to back up\".
 BINARY RESOLUTION:
     --bin <path>, then $XTGEOIP_BIN, then target/release/<program>.
 
-REQUIREMENTS:
-    * root (cases are spawned via sudo)
+REQUIREMENTS (all but the last are checked before the first case runs):
+    * root, or passwordless sudo (cases are spawned via sudo)
     * a release build (cargo build --release)
     * run from the repository root
-    * network access to MaxMind, which is fetch-capped — do not run in a loop
+    * /etc/xtgeoip.conf present
+    * network access to MaxMind, which is fetch-capped — do not run in a loop.
+      Not checked: the only honest probe is a request, and spending part of a
+      capped budget to find out whether the budget exists is a poor trade.
 
 Cases are generated into docs/generated/testcases.yaml by xtgeoip-docgen from
 docs/spec/cli.yaml. Case order is significant and is pinned by tests; do not
@@ -188,6 +192,119 @@ fn resolve_bin(program: &str, bin_override: Option<&str>) -> String {
 /// Must match `TESTCASES_SCHEMA_VERSION` in `xtgeoip-docgen.rs`. Validated on
 /// load rather than merely recorded — an unrecognised version aborts instead
 /// of running cases whose meaning may have changed.
+const TESTCASES_PATH: &str = "docs/generated/testcases.yaml";
+const SYSTEM_CONFIG: &str = "/etc/xtgeoip.conf";
+
+/// The environment facts a precondition check needs, gathered separately from
+/// the check itself so the logic is unit-testable without a root shell, a
+/// release build, or a real `/etc/xtgeoip.conf`.
+struct Preconditions {
+    testcases: PathBuf,
+    binary: PathBuf,
+    system_config: PathBuf,
+    privileged: bool,
+}
+
+/// Everything wrong with the environment — not just the first thing.
+///
+/// `HELP`'s REQUIREMENTS block has always listed these, and nothing enforced
+/// any of them. A missing release build or a non-root shell surfaced as every
+/// case failing in turn, each reporting an error about `xtgeoip` rather than
+/// about the runner, and the real cause sat in whichever line scrolled past
+/// first. Collecting all failures means one round of fixing rather than four.
+///
+/// Network reachability to MaxMind is deliberately *not* checked: the only
+/// honest probe is a request, and the API is rate-capped — spending part of
+/// the budget to discover whether the budget exists is the wrong trade.
+fn precondition_failures(p: &Preconditions) -> Vec<String> {
+    let mut problems = Vec::new();
+
+    if !p.testcases.exists() {
+        problems.push(format!(
+            "{} not found — run from the repository root (cwd: {})",
+            p.testcases.display(),
+            env::current_dir()
+                .map(|d| d.display().to_string())
+                .unwrap_or_else(|_| "?".into()),
+        ));
+    }
+
+    if !p.binary.exists() {
+        problems.push(format!(
+            "binary under test not found at {} — `cargo build --release`, or \
+             point at one with --bin/$XTGEOIP_BIN",
+            p.binary.display(),
+        ));
+    }
+
+    if !p.privileged {
+        problems.push(
+            "not running as root and `sudo -n true` failed — every case is \
+             spawned via sudo, so all of them would fail on the password \
+             prompt"
+                .to_string(),
+        );
+    }
+
+    if !p.system_config.exists() {
+        problems.push(format!(
+            "{} not found — copy the documented default from \
+             /usr/share/xt_geoip/xtgeoip.conf.example",
+            p.system_config.display(),
+        ));
+    }
+
+    problems
+}
+
+/// True when the runner can spawn `sudo` without a password prompt.
+///
+/// Duplicated from `main.rs` rather than shared: this is a separate binary and
+/// the crate has no `lib` target, so there is nowhere for one copy to live.
+fn is_root() -> bool {
+    fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("Uid:"))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|uid| uid.parse::<u32>().ok())
+        })
+        .is_some_and(|uid| uid == 0)
+}
+
+fn sudo_is_passwordless() -> bool {
+    Command::new("sudo")
+        .args(["-n", "true"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|st| st.success())
+}
+
+/// Fail before the first case rather than during it.
+fn check_preconditions(binary: &str) -> anyhow::Result<()> {
+    let problems = precondition_failures(&Preconditions {
+        testcases: PathBuf::from(TESTCASES_PATH),
+        binary: PathBuf::from(binary),
+        system_config: PathBuf::from(SYSTEM_CONFIG),
+        privileged: is_root() || sudo_is_passwordless(),
+    });
+
+    if problems.is_empty() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "{} unmet precondition(s) — see REQUIREMENTS in --help:\n{}",
+        problems.len(),
+        problems
+            .iter()
+            .map(|p| format!("  * {p}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
 const TESTCASES_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Deserialize)]
@@ -294,7 +411,11 @@ fn main() -> anyhow::Result<()> {
         .map(String::as_str);
     let bin_override = resolve_bin_override(&argv, env::var(BIN_ENV_VAR).ok());
 
-    let yaml_str = fs::read_to_string("docs/generated/testcases.yaml")?;
+    // Before anything is read or spawned: the REQUIREMENTS in HELP used to be
+    // a promise nothing kept.
+    check_preconditions(&resolve_bin("xtgeoip", bin_override.as_deref()))?;
+
+    let yaml_str = fs::read_to_string(TESTCASES_PATH)?;
     let testcases = load_testcases(&yaml_str)?;
 
     if testcases.is_empty() {
@@ -460,7 +581,76 @@ fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
+
+    // ── preconditions (#98 residual) ─────────────────────────────────────
+
+    /// Build a `Preconditions` where everything is satisfied, then let each
+    /// test break exactly one thing. Written this way round so a test names
+    /// the single fault it is about.
+    fn all_met(dir: &Path) -> Preconditions {
+        let testcases = dir.join("testcases.yaml");
+        let binary = dir.join("xtgeoip");
+        let config = dir.join("xtgeoip.conf");
+        for f in [&testcases, &binary, &config] {
+            fs::write(f, b"x").unwrap();
+        }
+        Preconditions {
+            testcases,
+            binary,
+            system_config: config,
+            privileged: true,
+        }
+    }
+
+    #[test]
+    fn a_satisfied_environment_reports_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(precondition_failures(&all_met(dir.path())).is_empty());
+    }
+
+    /// The point of the check: an operator with three things wrong should be
+    /// told all three, not sent round the loop once per fault.
+    #[test]
+    fn every_unmet_precondition_is_reported_not_just_the_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = Preconditions {
+            testcases: dir.path().join("absent-testcases.yaml"),
+            binary: dir.path().join("absent-binary"),
+            system_config: dir.path().join("absent.conf"),
+            privileged: false,
+        };
+        assert_eq!(precondition_failures(&p).len(), 4);
+    }
+
+    /// Each failure must name its own remedy — the reason this exists at all
+    /// is that the previous symptom ("Nothing to back up", 20 times over) did
+    /// not point at the cause.
+    #[test]
+    fn each_failure_names_its_remedy() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let mut p = all_met(dir.path());
+        p.testcases = dir.path().join("gone.yaml");
+        assert!(precondition_failures(&p)[0].contains("repository root"));
+
+        let mut p = all_met(dir.path());
+        p.binary = dir.path().join("gone");
+        assert!(precondition_failures(&p)[0].contains("cargo build --release"));
+
+        let mut p = all_met(dir.path());
+        p.privileged = false;
+        assert!(precondition_failures(&p)[0].contains("sudo"));
+
+        let mut p = all_met(dir.path());
+        p.system_config = dir.path().join("gone.conf");
+        assert!(
+            precondition_failures(&p)[0].contains("xtgeoip.conf.example"),
+            "the config failure should point at the shipped example"
+        );
+    }
 
     /// The committed corpus this suite runs. Parsing it is otherwise only
     /// exercised by a full root + live-MaxMind run, so a deserialiser change

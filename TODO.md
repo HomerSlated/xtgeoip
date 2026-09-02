@@ -970,9 +970,39 @@ wrong from reading the code.
   `-h`, which stays a one-liner.
 - Man page verified with `groff -ww` (no warnings) and read back rendered.
 
-Remaining under #98: precondition checks that fail fast rather than grinding
-to a confusing failure. The setup/teardown lifecycle itself is unresolved and
-#89 (which shared the assertion-vocabulary cost) is now closed.
+✅ **Precondition checks DONE (2026-09-02).** `HELP`'s REQUIREMENTS block had
+listed root, a release build and the repo root since #87, and nothing enforced
+any of them — so a non-root shell or a missing `cargo build --release` surfaced
+as every case failing in turn, each reporting an error about `xtgeoip` rather
+than about the runner, with the real cause in whichever line scrolled past
+first.
+
+`check_preconditions()` now runs after argument validation and before anything
+is read or spawned. It reports *all* faults at once rather than the first, so
+an operator with three things wrong fixes them in one pass:
+
+    Error: 3 unmet precondition(s) — see REQUIREMENTS in --help:
+      * docs/generated/testcases.yaml not found — run from the repository root (cwd: /tmp)
+      * binary under test not found at target/release/xtgeoip — `cargo build --release`, …
+      * not running as root and `sudo -n true` failed — every case is spawned via sudo, …
+
+`/etc/xtgeoip.conf` was added to the list (it is needed and was never
+documented as a requirement). MaxMind reachability is deliberately **not**
+checked: the only honest probe is a request, and spending part of a
+rate-capped budget to discover whether the budget exists is the wrong trade —
+recorded in `HELP` so the omission reads as a decision rather than an
+oversight.
+
+The environment facts are gathered into a `Preconditions` struct and the
+judgement is a pure function over it, so the logic is unit-testable without a
+root shell or a release build (3 tests). Verified live from `/tmp` as non-root:
+three faults reported, exit 1, before any case ran. `--help` and the
+unknown-argument check still precede it, both re-checked.
+
+Still open under #98: the setup/teardown lifecycle itself — a known-good
+initial state and a teardown that survives a mid-run failure. Unresolved, and
+not addressed here; the `restore` framing was rejected (§0 above) and #89,
+which shared the assertion-vocabulary cost, is closed.
 
 Split out of #87 (2026-07-18) because it is a behaviour change to an order-dependent suite, not documentation, and bundling the two would have made a cheap verifiable change risky.
 

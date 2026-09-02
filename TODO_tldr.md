@@ -22,7 +22,7 @@ listing thirteen already-closed items as open.
 
 - **[#1 residual]** messages.rs/config.rs: CLI flag to override `[logging]` (flag takes precedence). Core of #1 is done — small, self-contained
 - **[#92 remainder]** docgen: spec validator on the *generation* side — catch contradictions at codegen time, not just test time. Test-time checks (`cli::contradiction`, 4 tests) landed 2026-07-18. **Concrete case now on file:** `cli.yaml`'s `outcome:` strings are unchecked free text that ships into the man page; three had been wrong since 2026-07-18 (fixed 2026-09-02). Asserting them against `action.rs`'s `steps()` helper closes the class
-- **[#98 residual]** tests: precondition checks that fail fast rather than grinding to a confusing failure. The documentation half is **done** (2026-09-01: man-page `FILE OWNERSHIP` section + the `build -c` vs `build -c -f` timing distinction in LEGACY MODE and `--help`). The `restore`-based plan is **rejected** — see below
+- **[#98 residual]** tests: the setup/teardown lifecycle — a known-good initial state, and a teardown that survives a mid-run failure. Two of three halves are now done: documentation (2026-09-01, man-page `FILE OWNERSHIP` + the `build -c` vs `build -c -f` timing distinction) and **fail-fast preconditions** (2026-09-02: `HELP`'s REQUIREMENTS were enforced by nothing; now checked before the first case, all faults reported at once). The `restore`-based plan is **rejected** — see below
 
 ---
 
