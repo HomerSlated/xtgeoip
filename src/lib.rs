@@ -32,4 +32,5 @@ pub mod fetch;
 pub mod generated;
 pub mod messages;
 pub mod secrets;
+pub mod spec;
 pub mod version;
