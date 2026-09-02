@@ -82,6 +82,7 @@ fn main() -> anyhow::Result<()> {
     validate_spec(&spec)?;
     validate_examples(&spec)?;
     validate_rules(&spec)?;
+    validate_plan(&spec)?;
 
     let toml_str = fs::read_to_string("docs/spec/manpage-template.toml")?;
     let tmpl: ManpageTemplate = toml::from_str(&toml_str)?;
@@ -187,6 +188,164 @@ fn validate_examples(spec: &Spec) -> anyhow::Result<()> {
         problems.join("\n")
     );
     Ok(())
+}
+
+/// Spec-internal consistency of the `plan:` section (#92, generation side).
+///
+/// **Why these checks and not others.** docgen links the library, and the
+/// library is built from the *previously generated* sources — so anything that
+/// compares the spec against the program's behaviour is inherently one
+/// generation behind: change a guard, and docgen validates the new spec
+/// against the old rules. Those comparisons therefore stay at test time
+/// (`spec_examples_agree_with_parser`, `spec_steps_agree_with_plan`), which
+/// runs after compilation and cannot lag.
+///
+/// What *is* sound here is everything decidable from the spec alone. That is
+/// the boundary: **generation time owns spec-internal contradictions, test
+/// time owns spec-versus-program agreement.**
+fn validate_plan(spec: &Spec) -> anyhow::Result<()> {
+    let Some(plan) = &spec.plan else {
+        anyhow::bail!("cli.yaml has no `plan:` section");
+    };
+
+    let mut problems: Vec<String> = Vec::new();
+
+    // Ranks must be unique: two steps at one rank leave the order between them
+    // undefined, and the generator would pick arbitrarily.
+    let mut by_rank: BTreeMap<u32, Vec<&str>> = BTreeMap::new();
+    for (name, step) in &plan.steps {
+        by_rank.entry(step.rank).or_default().push(name);
+        if step.why.trim().is_empty() {
+            problems.push(format!("step `{name}` has an empty `why:`"));
+        }
+    }
+    for (rank, names) in &by_rank {
+        if names.len() > 1 {
+            problems.push(format!(
+                "rank {rank} is shared by {names:?} — the order between them \
+                 is undefined"
+            ));
+        }
+    }
+
+    let mut used: BTreeSet<&str> = BTreeSet::new();
+    for (ctx_name, ctx) in &plan.contexts {
+        let mut runs: BTreeSet<&str> = BTreeSet::new();
+        for name in &ctx.always {
+            runs.insert(name.as_str());
+        }
+        for (letter, name) in &ctx.selects {
+            runs.insert(name.as_str());
+            if !spec.flags.contains_key(letter) {
+                problems.push(format!(
+                    "context `{ctx_name}` selects on flag `{letter}`, which \
+                     is not in `flags:`"
+                ));
+            }
+        }
+        for name in &runs {
+            if !plan.steps.contains_key(*name) {
+                problems.push(format!(
+                    "context `{ctx_name}` runs step `{name}`, which is not \
+                     declared in `plan.steps`"
+                ));
+            }
+            used.insert(name);
+        }
+
+        // The spec-level half of Fetch-before-Build. The type system enforces
+        // it in the generated code (`Plan::Pipeline` cannot be named without a
+        // fetch), so a violation here fails to compile rather than misbehaving
+        // — but failing in the generator, by name, beats failing in rustc.
+        if runs.contains("build") {
+            if !runs.contains("fetch") {
+                problems.push(format!(
+                    "context `{ctx_name}` runs `build` without `fetch`; a \
+                     build consumes a fetch result"
+                ));
+            }
+            if ctx.fetch_mode.is_none() {
+                problems.push(format!(
+                    "context `{ctx_name}` builds but declares no `fetch_mode`"
+                ));
+            }
+        }
+        match ctx.fetch_mode.as_deref() {
+            None => {
+                if runs.contains("fetch") {
+                    problems.push(format!(
+                        "context `{ctx_name}` fetches but declares no \
+                         `fetch_mode`"
+                    ));
+                }
+            }
+            Some("remote" | "local") => {
+                if !runs.contains("fetch") {
+                    problems.push(format!(
+                        "context `{ctx_name}` declares a `fetch_mode` but \
+                         never fetches"
+                    ));
+                }
+            }
+            Some(other) => problems.push(format!(
+                "context `{ctx_name}` has fetch_mode `{other}`; expected \
+                 `remote` or `local`"
+            )),
+        }
+    }
+
+    // A declared step no context runs is dead: it can never appear in a plan,
+    // yet its rank still participates in the ordering. The analogue of
+    // `every_flag_is_referenced_by_some_guard` for the plan model.
+    for name in plan.steps.keys() {
+        if !used.contains(name.as_str()) {
+            problems.push(format!(
+                "step `{name}` is declared but no context runs it"
+            ));
+        }
+    }
+
+    // Example step lists must use declared step names.
+    let mut check_examples = |exs: &[Example]| {
+        for ex in exs {
+            let Some(steps) = &ex.steps else { continue };
+            if !ex.valid {
+                problems.push(format!(
+                    "invalid example {:?} declares `steps:`; an invocation \
+                     that is rejected has no plan",
+                    ex.cmd
+                ));
+            }
+            for s in steps {
+                if !plan.steps.contains_key(s) {
+                    problems.push(format!(
+                        "example {:?} names step `{s}`, which is not declared \
+                         in `plan.steps`",
+                        ex.cmd
+                    ));
+                }
+            }
+        }
+    };
+    if let Some(cmd) = &spec.top_level {
+        check_examples(examples_of(cmd));
+    }
+    for cmd in spec.commands.values() {
+        check_examples(examples_of(cmd));
+    }
+
+    if problems.is_empty() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "{} contradiction(s) in the `plan:` section:\n{}",
+        problems.len(),
+        problems
+            .iter()
+            .map(|p| format!("  * {p}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
 }
 
 fn validate_spec(spec: &Spec) -> anyhow::Result<()> {
@@ -1381,6 +1540,108 @@ mod tests {
             expected_stderr: None,
             steps: None,
         }
+    }
+
+    // ── plan validation (#92, generation side) ───────────────────────────
+
+    fn step(rank: u32) -> PlanStep {
+        PlanStep {
+            rank,
+            param: None,
+            why: "because".into(),
+        }
+    }
+
+    /// A minimal but *consistent* plan, so each test can break exactly one
+    /// thing and name the fault it is about.
+    fn sound_plan() -> PlanSpec {
+        PlanSpec {
+            steps: BTreeMap::from([
+                ("backup".to_string(), step(10)),
+                ("fetch".to_string(), step(30)),
+                ("build".to_string(), step(60)),
+            ]),
+            contexts: BTreeMap::from([(
+                "build".to_string(),
+                PlanContext {
+                    always: vec!["fetch".into(), "build".into()],
+                    selects: BTreeMap::from([(
+                        "b".to_string(),
+                        "backup".to_string(),
+                    )]),
+                    fetch_mode: Some("local".into()),
+                },
+            )]),
+        }
+    }
+
+    fn spec_with_plan(plan: PlanSpec) -> Spec {
+        let mut spec = spec_with(conforming_valid());
+        spec.flags.insert(
+            "b".to_string(),
+            FlagDef {
+                long: "backup".into(),
+                kind: "bool".into(),
+                summary: "b".into(),
+            },
+        );
+        spec.plan = Some(plan);
+        spec
+    }
+
+    #[test]
+    fn a_sound_plan_validates() {
+        assert!(validate_plan(&spec_with_plan(sound_plan())).is_ok());
+    }
+
+    /// Two steps at one rank leave the order between them undefined, and the
+    /// generator would pick arbitrarily.
+    #[test]
+    fn duplicate_ranks_are_rejected() {
+        let mut plan = sound_plan();
+        plan.steps.insert("fetch".to_string(), step(10));
+        let err = validate_plan(&spec_with_plan(plan))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("rank 10 is shared"), "{err}");
+    }
+
+    /// The spec-level half of Fetch-before-Build. The generated code could not
+    /// express this anyway — `Plan::Pipeline` cannot be named without a fetch —
+    /// but failing here names the context instead of failing in rustc.
+    #[test]
+    fn a_context_that_builds_must_fetch() {
+        let mut plan = sound_plan();
+        plan.contexts.get_mut("build").unwrap().always =
+            vec!["build".to_string()];
+        let err = validate_plan(&spec_with_plan(plan))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("without `fetch`"), "{err}");
+    }
+
+    /// A step no context runs can never appear in a plan, yet its rank still
+    /// participates in the ordering. The plan-model analogue of
+    /// `every_flag_is_referenced_by_some_guard`.
+    #[test]
+    fn a_step_no_context_runs_is_rejected() {
+        let mut plan = sound_plan();
+        plan.steps.insert("prune_csv".to_string(), step(50));
+        let err = validate_plan(&spec_with_plan(plan))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no context runs it"), "{err}");
+    }
+
+    #[test]
+    fn selecting_on_an_undeclared_flag_is_rejected() {
+        let mut plan = sound_plan();
+        plan.contexts.get_mut("build").unwrap().selects =
+            BTreeMap::from([("z".to_string(), "backup".to_string())]);
+        let err = validate_plan(&spec_with_plan(plan))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not in `flags:`"), "{err}");
     }
 
     /// Minimal spec carrying one example in the top-level command.

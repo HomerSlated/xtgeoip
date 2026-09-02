@@ -899,7 +899,31 @@ Verified to have teeth by reverting the spec, twice:
 The first is the *actual* historical bug — R-004's order between `0712783` and
 2026-09-02 — so the check demonstrably catches the thing that motivated it.
 
-⚑ **Still open, and now with a structural reason.** #92 asks for the validator
+✅ **The generation-side validator landed 2026-09-02** — `validate_plan()`,
+running before any output is written. It covers the `plan:` section added by
+#26/#27, which drove execution with no generation-time checks at all: duplicate
+ranks (the order between two steps at one rank is undefined), a context that
+builds without fetching, a `fetch_mode` on a context that never fetches, a step
+declared but run by no context (the plan-model analogue of
+`every_flag_is_referenced_by_some_guard`), selecting on a flag absent from
+`flags:`, an empty `why:`, and example `steps:` naming undeclared steps.
+Five unit tests plus a live demonstration of three classes being refused.
+
+**The boundary this settled is the more useful result.** docgen links the
+library, and the library is built from the *previously generated* sources — so
+any check comparing the spec against the program's behaviour is inherently one
+generation behind: change a guard and docgen validates the new spec against the
+old rules. (Observed directly: a broken `src/generated/plan.rs` stops docgen
+itself from building.) So the split is not a matter of taste —
+
+> **generation time owns spec-internal contradictions; test time owns
+> spec-versus-program agreement.**
+
+That is why `spec_examples_agree_with_parser` and `spec_steps_agree_with_plan`
+stay where they are rather than moving into docgen, and it retires the framing
+below.
+
+~~⚑ **Still open, and now with a structural reason.**~~ #92 asks for the validator
 on the **generation** side, and this class cannot go there: `xtgeoip-docgen` is
 a separate binary and the crate has no `lib` target, so docgen cannot call
 `plan()`, `normalize_cli_to_action`, or anything else it would need to know
