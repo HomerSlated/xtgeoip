@@ -10,24 +10,12 @@ use std::process;
 
 use anyhow::Result;
 use clap::{CommandFactory, Parser, error::ErrorKind};
-
-mod action;
-mod backup;
-mod build;
-mod cli;
-mod conf;
-mod config;
-mod fetch;
-mod generated;
-mod messages;
-mod secrets;
-mod version;
-
-use crate::{
+use xtgeoip::{
     action::{Action, run_action},
-    cli::{Cli, CliOutcome},
+    cli::{self, Cli, CliOutcome},
+    conf, config,
     config::load_config,
-    messages::{init_logger, log_early_error, resolve_log_file},
+    messages::{self, init_logger, log_early_error, resolve_log_file},
 };
 
 const EXIT_CLI_ERROR: i32 = 2;
