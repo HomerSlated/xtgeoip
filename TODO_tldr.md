@@ -43,7 +43,19 @@ of `#27/#31`, trimmed at `2baa194` when #31 landed (full trace in
 in the `TODO.md` OVERVIEW and the two design notes, so the next step is a
 decision, not an investigation.
 
-**If it is ever taken up** (2026-09-02 finding): all 76 `Action` values yield
+**Stages 1-3 landed 2026-09-02** — design:
+`docs/design/26-spec-derived-planning.md`. `cli.yaml` now carries a `plan:`
+section (rank per step, membership per context, mandatory `why:`); docgen emits
+`src/generated/plan.rs` with `plan_generated()`; and
+`generated_planner_matches_the_hand_written_one` proves the two agree exactly
+across all 76 `Action` values, *including* step parameters. Teeth verified:
+moving `clean`'s rank before `fetch` fails 32 of 76 with the exact diff.
+
+**⚑ Stage 4 needs sign-off.** Deleting `action::plan()` is the irreversible
+step and the running code is still the hand-written planner. Everything landed
+so far is additive.
+
+**Background** (2026-09-02 finding): all 76 `Action` values yield
 plans that are subsequences of one fixed order — Backup → PruneBin → Fetch →
 Clean → PruneCsv → Build — with a single data dependency (Fetch → Build). So
 it needs a rank per step, not a dependency graph. Caveats: that order is an

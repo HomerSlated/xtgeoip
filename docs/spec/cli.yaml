@@ -49,6 +49,71 @@ global_options:
     kind: bool
     summary: Disable file logging, overriding [logging] in the config.
 
+# Execution planning (#26/#27). Design: docs/design/26-spec-derived-planning.md
+#
+# Every plan the program can produce is a subsequence of one fixed order, so
+# this is a rank per step plus membership per context — not a dependency graph.
+# Verified over all 76 Action values. That is an observation about today's six
+# steps, not an invariant: a future step that runs at different points in
+# different commands would break the model.
+plan:
+  steps:
+    backup:
+      rank: 10
+      param: backup_mode
+      why: >-
+        The one step that must precede everything else: it runs before
+        anything is disturbed, so a failure later leaves a copy behind.
+    prune_bin:
+      rank: 20
+      why: >-
+        Prunes old binary tarballs, which only makes sense once the new backup
+        exists — otherwise the retention count is off by one.
+    fetch:
+      rank: 30
+      why: >-
+        Acquire before destroying. Everything downstream depends on the
+        archive being in hand.
+    clean:
+      rank: 40
+      param: backup_mode
+      why: >-
+        Runs after the fetch (#24 stage 1, 2026-07-18). Cleaning first meant a
+        network outage left output_dir empty with no replacement to install;
+        fetching first means a failed run leaves the existing install intact.
+    prune_csv:
+      rank: 50
+      why: >-
+        Prunes old CSV archives once the current one has been fetched, for the
+        same off-by-one reason as prune_bin.
+    build:
+      rank: 60
+      why: >-
+        Last: it consumes the fetch result and regenerates the manifest, which
+        is what makes the newly written files owned.
+
+  contexts:
+    # No `always`: which steps run is entirely flag-driven, which is what
+    # unifies Action::TopLevelBackup and Action::TopLevelClean under one entry.
+    top_level:
+      always: []
+      selects: { b: backup, p: prune_bin, c: clean }
+    fetch:
+      always: [fetch]
+      fetch_mode: remote
+      selects: { p: prune_csv }
+    build:
+      always: [fetch, build]
+      fetch_mode: local
+      selects: { b: backup, p: prune_bin, c: clean }
+    run:
+      always: [fetch, build]
+      fetch_mode: remote
+      selects: { b: backup, c: clean, p: prune_csv }
+    conf:
+      always: []
+      selects: {}
+
 reason_templates:
   no_argument:
     text: "you must specify at least one argument"

@@ -34,6 +34,11 @@ pub struct Spec {
     #[serde(default)]
     pub global_options: BTreeMap<String, FlagDef>,
 
+    /// Execution planning (#26/#27). See
+    /// `docs/design/26-spec-derived-planning.md`.
+    #[serde(default)]
+    pub plan: Option<PlanSpec>,
+
     #[serde(default)]
     pub error_cases: Option<BTreeMap<String, ErrorCase>>,
 
@@ -177,4 +182,42 @@ pub struct Reason {
 #[serde(deny_unknown_fields)]
 pub struct ReasonTemplate {
     pub text: String,
+}
+
+/// The execution plan model: a rank per step, membership per context.
+///
+/// Not a dependency graph. Every plan the program can produce is a
+/// subsequence of one fixed order, and there is exactly one data dependency
+/// (fetch → build), which `Plan::Pipeline` already encodes in the type system.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanSpec {
+    pub steps: BTreeMap<String, PlanStep>,
+    pub contexts: BTreeMap<String, PlanContext>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanStep {
+    /// Position in the single canonical order. Lower runs first.
+    pub rank: u32,
+    /// A runtime parameter the step takes, if any (currently `backup_mode`).
+    pub param: Option<String>,
+    /// Why the step sits where it does. Mandatory, and emitted into the
+    /// generated source as a comment: a bare rank keeps the conclusion and
+    /// discards the reasoning, which is how `action.rs`'s #24-stage-1 note
+    /// would otherwise evaporate on migration.
+    pub why: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanContext {
+    /// Steps that run regardless of flags.
+    pub always: Vec<String>,
+    /// Flag letter → step name.
+    #[serde(default)]
+    pub selects: BTreeMap<String, String>,
+    /// `remote` or `local`; absent when the context never fetches.
+    pub fetch_mode: Option<String>,
 }

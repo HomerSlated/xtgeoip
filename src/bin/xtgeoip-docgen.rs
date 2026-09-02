@@ -94,7 +94,8 @@ fn main() -> anyhow::Result<()> {
     fs::write("docs/generated/xtgeoip.1", generate_manpage(&spec, &tmpl)?)?;
     fs::write(
         "src/generated/mod.rs",
-        "pub mod cli_matrix;\npub mod cli_rules;\npub mod error_text;\n",
+        "pub mod cli_matrix;\npub mod cli_rules;\npub mod error_text;\npub \
+         mod plan;\n",
     )?;
     fs::write(
         "src/generated/error_text.rs",
@@ -105,6 +106,7 @@ fn main() -> anyhow::Result<()> {
         generate_cli_matrix_rs(&spec)?,
     )?;
     fs::write("src/generated/cli_rules.rs", generate_cli_rules_rs(&spec)?)?;
+    fs::write("src/generated/plan.rs", generate_plan_rs(&spec)?)?;
     fs::write(
         "docs/generated/testcases.yaml",
         generate_testcases_yaml(&spec)?,
@@ -863,6 +865,298 @@ fn generate_error_text_rs(spec: &Spec) -> anyhow::Result<String> {
     Ok(out)
 }
 
+/* ---------------- EXECUTION PLAN (#26/#27) ---------------- */
+
+/// How each `Action` variant yields a context and a value for each flag.
+///
+/// This is the one piece of knowledge that lives in the emitter rather than in
+/// the spec, and deliberately so: it is a fact about the Rust `Action` type,
+/// not about `cli.yaml`. See §4 of docs/design/26-spec-derived-planning.md.
+/// `top_level` appears twice because the variant split (`TopLevelBackup` /
+/// `TopLevelClean`) is exactly what the rank model unifies — the first has `b`
+/// true by construction, the second has `c` true by construction.
+/// A flag letter and the Rust expression yielding its value in a match arm.
+type FlagBinding = (&'static str, &'static str);
+
+/// `(match pattern, spec context name, flag bindings)`.
+type ActionBinding = (&'static str, &'static str, &'static [FlagBinding]);
+
+const ACTION_BINDINGS: &[ActionBinding] = &[
+    (
+        "Action::TopLevelBackup { clean, force, prune }",
+        "top_level",
+        &[
+            ("b", "true"),
+            ("c", "*clean"),
+            ("p", "*prune"),
+            ("f", "*force"),
+        ],
+    ),
+    (
+        "Action::TopLevelClean { force }",
+        "top_level",
+        &[
+            ("b", "false"),
+            ("c", "true"),
+            ("p", "false"),
+            ("f", "*force"),
+        ],
+    ),
+    ("Action::Fetch { prune }", "fetch", &[("p", "*prune")]),
+    (
+        "Action::Run { backup, clean, force, prune, legacy }",
+        "run",
+        &[
+            ("b", "*backup"),
+            ("c", "*clean"),
+            ("p", "*prune"),
+            ("f", "*force"),
+            ("l", "*legacy"),
+        ],
+    ),
+    (
+        "Action::Build { backup, clean, force, prune, legacy }",
+        "build",
+        &[
+            ("b", "*backup"),
+            ("c", "*clean"),
+            ("p", "*prune"),
+            ("f", "*force"),
+            ("l", "*legacy"),
+        ],
+    ),
+    ("Action::Conf(_)", "conf", &[]),
+];
+
+/// The `Step` variant a spec step name constructs, with its parameter.
+fn step_ctor(name: &str, param: Option<&str>) -> anyhow::Result<String> {
+    let arg = match param {
+        Some("backup_mode") => " { mode }",
+        Some(other) => anyhow::bail!("unknown step param {other:?}"),
+        None => "",
+    };
+    Ok(match name {
+        "backup" => format!("Step::Backup{arg}"),
+        "clean" => format!("Step::Clean{arg}"),
+        "prune_bin" => "Step::PruneBin".to_string(),
+        "prune_csv" => "Step::PruneCsv".to_string(),
+        other => anyhow::bail!("step {other:?} has no Step variant"),
+    })
+}
+
+/// Emit `src/generated/plan.rs`: `plan_generated(&Action) -> Plan`.
+///
+/// Rust, not a data table, and that is the whole point. `Plan::Pipeline`
+/// cannot be constructed without naming the fetch that feeds the build, so a
+/// spec that selected `build` without `fetch` would emit code that does not
+/// compile. A runtime-evaluated table could express that combination and would
+/// downgrade a compile-time guarantee to a runtime check.
+fn generate_plan_rs(spec: &Spec) -> anyhow::Result<String> {
+    let plan = spec
+        .plan
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("cli.yaml has no `plan:` section"))?;
+
+    let rank = |name: &str| -> anyhow::Result<u32> {
+        plan.steps
+            .get(name)
+            .map(|s| s.rank)
+            .ok_or_else(|| anyhow::anyhow!("step {name:?} has no rank"))
+    };
+    let fetch_rank = rank("fetch")?;
+    let build_rank = rank("build")?;
+
+    // A raw string: rustfmt's `format_strings` reflows ordinary literals and
+    // would bake its own indentation into the file this emits.
+    let mut out = String::from(
+        r#"// auto-generated — see docs/design/26-spec-derived-planning.md
+//
+// Ordering comes from `plan.steps[*].rank` in docs/spec/cli.yaml; membership
+// from `plan.contexts`. Each step's `why` is carried through from the spec, so
+// the reasoning survives the migration instead of becoming a bare integer.
+//
+// `dead_code` because stages 1-3 run this *alongside* the hand-written
+// `action::plan()`: nothing calls it but the differential test. Stage 4
+// (deleting `plan()`) is the sign-off point and removes the need for it.
+#![allow(dead_code)]
+
+use crate::{
+    action::{Action, Plan, Step, backup_mode},
+    fetch::FetchMode,
+};
+
+pub(crate) fn plan_generated(action: &Action) -> Plan {
+    match action {
+"#,
+    );
+
+    for (pattern, ctx_name, bindings) in ACTION_BINDINGS {
+        let ctx = plan.contexts.get(*ctx_name).ok_or_else(|| {
+            anyhow::anyhow!("plan.contexts has no {ctx_name:?}")
+        })?;
+        let flag = |letter: &str| -> Option<&str> {
+            bindings.iter().find(|(l, _)| l == &letter).map(|(_, e)| *e)
+        };
+
+        // Every step this context can run, as (rank, name, guard-expression).
+        let mut selected: Vec<(u32, &str, Option<String>)> = Vec::new();
+        for name in &ctx.always {
+            selected.push((rank(name)?, name.as_str(), None));
+        }
+        for (letter, name) in &ctx.selects {
+            if let Some(expr) = flag(letter) {
+                selected.push((rank(name)?, name.as_str(), Some(expr.into())));
+            }
+        }
+        selected.sort_by_key(|(r, _, _)| *r);
+
+        let builds = selected.iter().any(|(_, n, _)| *n == "build");
+        let needs_mode = selected.iter().any(|(_, n, _)| {
+            plan.steps.get(*n).and_then(|s| s.param.as_deref())
+                == Some("backup_mode")
+        });
+
+        out.push_str(&format!(
+            "        {pattern} => {{
+"
+        ));
+        if needs_mode {
+            let f = flag("f").unwrap_or("false");
+            out.push_str(&format!(
+                "            let mode = backup_mode({f});
+"
+            ));
+        }
+
+        let emit = |out: &mut String,
+                    list: &[(u32, &str, Option<String>)],
+                    var: &str|
+         -> anyhow::Result<()> {
+            let m = if list.is_empty() { "" } else { "mut " };
+            out.push_str(&format!(
+                "            let {m}{var} = Vec::new();
+"
+            ));
+            for (_, name, guard) in list {
+                let why = &plan.steps[*name].why;
+                for line in why.trim().lines() {
+                    out.push_str(&format!(
+                        "            // {name}: {}
+",
+                        line.trim()
+                    ));
+                }
+                let ctor = step_ctor(name, plan.steps[*name].param.as_deref())?;
+                match guard {
+                    Some(g) => out.push_str(&format!(
+                        "            if {g} {{ {var}.push({ctor}); }}
+"
+                    )),
+                    None => out.push_str(&format!(
+                        "            {var}.push({ctor});
+"
+                    )),
+                }
+            }
+            Ok(())
+        };
+
+        if builds {
+            let mode = ctx.fetch_mode.as_deref().ok_or_else(|| {
+                anyhow::anyhow!("{ctx_name} builds but declares no fetch_mode")
+            })?;
+            let fetch_variant = match mode {
+                "remote" => "FetchMode::Remote",
+                "local" => "FetchMode::Local",
+                other => anyhow::bail!("unknown fetch_mode {other:?}"),
+            };
+            let pre: Vec<_> = selected
+                .iter()
+                .filter(|(r, _, _)| *r < fetch_rank)
+                .cloned()
+                .collect();
+            let mid: Vec<_> = selected
+                .iter()
+                .filter(|(r, _, _)| *r > fetch_rank && *r < build_rank)
+                .cloned()
+                .collect();
+            emit(&mut out, &pre, "pre")?;
+            emit(&mut out, &mid, "mid")?;
+            let legacy = flag("l").unwrap_or("false");
+            out.push_str(&format!(
+                "            Plan::Pipeline {{ pre, fetch: {fetch_variant}, \
+                 mid, legacy: {legacy} }}
+"
+            ));
+        } else {
+            let simple: Vec<_> = selected
+                .iter()
+                .filter(|(_, n, _)| *n != "build")
+                .cloned()
+                .collect();
+            // A context that fetches without building keeps the fetch inline;
+            // nothing consumes its result, so it is an ordinary step.
+            let mut body = Vec::new();
+            for item in &simple {
+                if item.1 == "fetch" {
+                    let mode = ctx.fetch_mode.as_deref().unwrap_or("remote");
+                    let v = if mode == "local" {
+                        "FetchMode::Local"
+                    } else {
+                        "FetchMode::Remote"
+                    };
+                    body.push((item.0, "fetch", item.2.clone(), v.to_string()));
+                } else {
+                    body.push((item.0, item.1, item.2.clone(), String::new()));
+                }
+            }
+            let m = if body.is_empty() { "" } else { "mut " };
+            out.push_str(&format!("            let {m}steps = Vec::new();\n"));
+            for (_, name, guard, fetch_variant) in &body {
+                let why = &plan.steps[*name].why;
+                for line in why.trim().lines() {
+                    out.push_str(&format!(
+                        "            // {name}: {}
+",
+                        line.trim()
+                    ));
+                }
+                let ctor = if *name == "fetch" {
+                    format!("Step::Fetch {{ mode: {fetch_variant} }}")
+                } else {
+                    step_ctor(name, plan.steps[*name].param.as_deref())?
+                };
+                match guard {
+                    Some(g) => out.push_str(&format!(
+                        "            if {g} {{ steps.push({ctor}); }}
+"
+                    )),
+                    None => out.push_str(&format!(
+                        "            steps.push({ctor});
+"
+                    )),
+                }
+            }
+            out.push_str(
+                "            Plan::Simple(steps)
+",
+            );
+        }
+        out.push_str(
+            "        }
+
+",
+        );
+    }
+
+    out.push_str(
+        "    }
+}
+",
+    );
+    Ok(out)
+}
+
 /* ---------------- CLI MATRIX ---------------- */
 
 fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
@@ -1105,6 +1399,7 @@ mod tests {
             proof: None,
             flags: BTreeMap::new(),
             global_options: BTreeMap::new(),
+            plan: None,
             error_cases: None,
             top_level: Some(CommandSpec::FlagCommand {
                 summary: "test".into(),

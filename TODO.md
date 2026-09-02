@@ -134,6 +134,24 @@ Two further constraints on any implementation:
   `output_dir` with no replacement. `rank: 40` keeps the conclusion and
   discards the reasoning; the spec would need a `why:` field per step.
 
+**Stages 1-3 landed 2026-09-02.** Design note:
+`docs/design/26-spec-derived-planning.md`. `cli.yaml` gained a `plan:` section
+(rank per step, membership per context, and a **mandatory `why:`** so the
+reasoning behind each position survives instead of becoming a bare integer);
+`xtgeoip-docgen` emits `src/generated/plan.rs`; and a differential test proves
+`plan_generated()` reproduces `plan()` exactly over all 76 `Action` values,
+parameters included — which the `steps:` examples deliberately do not cover.
+Verified to have teeth: moving `clean`'s rank before `fetch`'s (the
+pre-#24-stage-1 order) fails 32 of 76 with the precise diff.
+
+The generator emits **Rust constructing `Plan`**, not a data table, so a spec
+selecting `build` without `fetch` produces code that does not compile — the
+Fetch-before-Build guarantee stays in the type system rather than degrading to
+a runtime check.
+
+⚑ **Stage 4 — deleting `plan()` — awaits sign-off.** The running code is still
+the hand-written planner; everything landed is additive and reversible.
+
 Two pieces are worth doing whether or not the codegen ever happens:
 
 - assert `outcome:` against `plan()` (the **#92 remainder**) — the oracle,

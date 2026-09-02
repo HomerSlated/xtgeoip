@@ -69,7 +69,7 @@ fn resolve_paths(cfg: &Config) -> ResolvedPaths<'_> {
 /// and expressing that as a peer step is what forced the old runtime
 /// `.expect("Build step requires prior Fetch")`. See [`Plan`].
 #[derive(Clone, Copy, Debug)]
-enum Step {
+pub(crate) enum Step {
     Backup { mode: BackupMode },
     Clean { mode: BackupMode },
     Fetch { mode: FetchMode },
@@ -85,7 +85,7 @@ enum Step {
 /// two are not adjacent — `run --prune` prunes CSVs between fetching and
 /// building — so fusing them into one step would silently reorder that prune.
 #[derive(Debug)]
-enum Plan {
+pub(crate) enum Plan {
     /// Steps only; nothing consumes a fetch result. Note this still covers
     /// plans that *contain* a `Fetch` (`xtgeoip fetch`), whose result is
     /// simply discarded.
@@ -98,7 +98,7 @@ enum Plan {
     },
 }
 
-fn backup_mode(force: bool) -> BackupMode {
+pub(crate) fn backup_mode(force: bool) -> BackupMode {
     if force {
         BackupMode::Force
     } else {
@@ -436,6 +436,80 @@ mod tests {
             }),
             "[Backup { mode: Force }, Fetch { mode: Remote }, Clean { mode: \
              Force }, PruneCsv, Build { legacy: true }]"
+        );
+    }
+
+    // ── spec-derived planning (#26/#27), stage 3 ────────────────────────
+
+    /// Every `Action` the program can hold, including combinations the CLI
+    /// guards reject — `plan()` is total over the type, so the comparison
+    /// should be too.
+    fn all_actions() -> Vec<Action> {
+        let mut all = Vec::new();
+        for i in 0..8u8 {
+            all.push(Action::TopLevelBackup {
+                clean: i & 1 != 0,
+                force: i & 2 != 0,
+                prune: i & 4 != 0,
+            });
+        }
+        for i in 0..2u8 {
+            all.push(Action::TopLevelClean { force: i & 1 != 0 });
+            all.push(Action::Fetch { prune: i & 1 != 0 });
+        }
+        for i in 0..32u8 {
+            let (p, l, b, c, f) =
+                (i & 1 != 0, i & 2 != 0, i & 4 != 0, i & 8 != 0, i & 16 != 0);
+            all.push(Action::Run {
+                prune: p,
+                legacy: l,
+                backup: b,
+                clean: c,
+                force: f,
+            });
+            all.push(Action::Build {
+                prune: p,
+                legacy: l,
+                backup: b,
+                clean: c,
+                force: f,
+            });
+        }
+        all
+    }
+
+    /// The generated planner must reproduce the hand-written one *exactly*.
+    ///
+    /// Stage 3 of `docs/design/26-spec-derived-planning.md`: prove the
+    /// transcription before any runtime swap, which is the method §7 of the
+    /// validator note used for the validity half. Compared through `Debug`, so
+    /// this covers step **parameters** too — `BackupMode`, `FetchMode` and
+    /// `legacy` — which `cli.yaml`'s `steps:` lists deliberately omit.
+    ///
+    /// While both exist, `plan()` is what runs; `plan_generated()` is a
+    /// candidate. Deleting `plan()` is the sign-off point, not this test.
+    #[test]
+    fn generated_planner_matches_the_hand_written_one() {
+        use crate::generated::plan::plan_generated;
+
+        let mut disagreements = Vec::new();
+        let actions = all_actions();
+        for action in &actions {
+            let hand = format!("{:?}", plan(action));
+            let generated = format!("{:?}", plan_generated(action));
+            if hand != generated {
+                disagreements.push(format!(
+                    "  {action:?}\n      hand-written: {hand}\n      \
+                     generated:    {generated}"
+                ));
+            }
+        }
+        assert!(
+            disagreements.is_empty(),
+            "{} of {} actions plan differently:\n{}",
+            disagreements.len(),
+            actions.len(),
+            disagreements.join("\n")
         );
     }
 
