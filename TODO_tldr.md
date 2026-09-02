@@ -23,7 +23,6 @@ listing thirteen already-closed items as open.
 - **[#1 residual]** messages.rs/config.rs: CLI flag to override `[logging]` (flag takes precedence). Core of #1 is done — small, self-contained
 - **[#92 remainder]** docgen: spec validator on the *generation* side — catch contradictions at codegen time, not just test time. Test-time checks (`cli::contradiction`, 4 tests) landed 2026-07-18. **Concrete case now on file:** `cli.yaml`'s `outcome:` strings are unchecked free text that ships into the man page; three had been wrong since 2026-07-18 (fixed 2026-09-02). Asserting them against `action.rs`'s `steps()` helper closes the class
 - **[#98 residual]** tests: precondition checks that fail fast rather than grinding to a confusing failure. The documentation half is **done** (2026-09-01: man-page `FILE OWNERSHIP` section + the `build -c` vs `build -c -f` timing distinction in LEGACY MODE and `--help`). The `restore`-based plan is **rejected** — see below
-- **[#100]** fetch.rs: shared `.part` path lets concurrent fetches collide. LOW (CVSS 3.3) and **fails closed** — SHA-256 rejects any corruption. Costs a `fetch.rs` guardian re-audit; concurrent fetches are not an expected usage pattern
 
 ---
 
@@ -74,7 +73,7 @@ test.
 ## HOUSEKEEPING
 
 - **Nothing keeps Rust current on the dev machine.** `/usr/bin/{cargo,rustc}` are symlinks to `/usr/bin/rustup` (Ubuntu's apt `rustup` package); the toolchains live in `~/.rustup` and move *only* when `rustup update` is run by hand. No timer, no cron, no auto-update setting. That is why `stable` sat at 1.94.0 for six months. `sync.py` now catches the divergence from the pin, but nothing yet reports that the pin itself, `rustup` (1.26.0 vs 1.29.1 upstream), the 153 pending crate updates, or dependency advisories have gone stale — see the maintenance question in `TODO.md`
-- Guardian coverage is thin: only `fetch.rs` and `secrets.rs` are signed. `config.rs` and `conf.rs` are unsigned and changed substantially in #103/#104 — the credential-handling path
+- Guardian coverage is thin: only `fetch.rs` and `secrets.rs` are signed. `config.rs` and `conf.rs` are unsigned and changed substantially in #103/#104 — the credential-handling path. **`fetch.rs`'s signature is now stale too** (#100, 2026-09-02): the `.sig` was left in place so the next pre-flight raises it, and a row is in `private/guardian/needs_reverification.md`
 - `tests/` is an empty directory; there is no `lib` target, so nothing can live there
 - Man-page prose in `docs/spec/manpage-template.toml` is hand-written and unchecked against the code. Three drifts found on 2026-09-02 (step ordering; the whole `conf -c` credential workflow missing since #103; a `[maxmind]` `timeout` key that does not exist and that `deny_unknown_fields` would reject). Nothing prevents a fourth
 - `logging.verbose` is in the shipped `xtgeoip.conf.example` but **no code reads it**. `Logging` has no such field and no `deny_unknown_fields`, so it is silently ignored. Either a dead key to delete or an unimplemented feature — likely related to the #1 residual

@@ -551,7 +551,7 @@ extract_archive()  → unpack to temp, flatten, move into place (#54)
   lands, this logic moves into `extract_archive()` verbatim. See
   `private/guardian/guardian_remediation_M-1_20260716_100638.md`.
 
-### #100 — fetch.rs: shared `.part` path allows concurrent-fetch interference
+### #100 — fetch.rs: shared `.part` path allows concurrent-fetch interference ✅ DONE (2026-09-02)
 
 Guardian finding **F-1**, audit `guardian_report_20260718_214129.md`. **LOW — CVSS 3.3** (`CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:N/A:L`). Pre-existing; *not* introduced by the `PartialDownload` guard.
 
@@ -562,6 +562,33 @@ Guardian finding **F-1**, audit `guardian_report_20260718_214129.md`. **LOW — 
 Optional hardening: a unique suffix (PID, or `tempfile::NamedTempFile` in `archive_dir`), or an advisory lock on `archive_dir` for the duration of a fetch. Weigh against the fact that concurrent fetches are not an expected usage pattern for this tool.
 
 ⚠ Touching `fetch.rs` invalidates its guardian signature and needs a re-audit.
+
+**Fixed 2026-09-02.** The path is now `part_path()`, which appends the PID:
+`…_20260714.zip.<pid>.part`. A PID is exactly the right amount of uniqueness
+for this finding — the failure requires two processes running *at once*, and
+two live processes cannot share one. It is deliberately not a general-purpose
+unique name: a PID repeats after the original exits, and separate PID
+namespaces sharing an `archive_dir` could collide. Neither of those is the
+concurrent-writer problem, and both remain caught by SHA-256 downstream.
+
+`NamedTempFile` was considered and rejected. It gives unconditional
+uniqueness, but only by replacing `PartialDownload` — 45 lines of documented
+Drop-guard plus six tests — inside guardian-signed code, for a LOW finding
+that already fails closed. Not worth the audit surface. (The usual argument
+for it, that a crashed process leaves a stale file behind, does not separate
+the two: on SIGKILL neither `Drop` runs.)
+
+Two tests, both verified to fail against the pre-fix code:
+`part_path_is_not_shared_between_processes` (asserts the path is *not*
+`archive_path.with_extension("zip.part")` — the exact old derivation — and
+that the rename stays same-filesystem) and
+`part_path_is_neither_discoverable_nor_prunable` (a `.part` name must stay
+invisible to both archive discovery and pruning, the combination that made
+the pre-#99 leaks immortal).
+
+Signature: `src/fetch.rs.sig` is now stale and was **left in place**, with a
+row added to `private/guardian/needs_reverification.md`, so the next guardian
+pre-flight raises the BAD signature itself rather than taking my word for it.
 
 ### #101 — fetch.rs: no explicit HTTP redirect policy ✅ DONE (2026-07-18)
 

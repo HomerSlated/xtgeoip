@@ -3,7 +3,7 @@ use std::{
     fs::{self, File},
     io::{self, Read, Write},
     path::{Path, PathBuf},
-    thread,
+    process, thread,
     time::Duration,
 };
 
@@ -287,6 +287,29 @@ impl Drop for PartialDownload<'_> {
     }
 }
 
+/// The temporary path an in-progress download is written to, before it is
+/// renamed over `archive_path`.
+///
+/// The PID is in the name deliberately (#100, guardian F-1). This used to be
+/// `archive_path.with_extension("zip.part")` — derived from the version alone,
+/// so two `xtgeoip fetch` processes resolving the same version shared a single
+/// temp file. Their `io::copy` writes could interleave, and either process's
+/// [`PartialDownload`] guard could remove a path the other was still writing.
+///
+/// A PID is exactly the right amount of uniqueness for that: the failure needs
+/// two processes running *at once*, and two live processes cannot share one.
+/// It is not a general-purpose unique name — a PID can repeat after the
+/// original exits, and separate PID namespaces sharing one `archive_dir` could
+/// collide — but neither case is the concurrent-writer problem this addresses,
+/// and both are still caught downstream by SHA-256 verification.
+///
+/// `NamedTempFile` would give unconditional uniqueness, at the cost of
+/// replacing `PartialDownload` and its six tests inside guardian-signed code,
+/// for a LOW finding that already fails closed. Not worth the audit surface.
+fn part_path(archive_path: &Path) -> PathBuf {
+    archive_path.with_extension(format!("zip.{}.part", process::id()))
+}
+
 fn acquire_remote_archive(
     client: &Client,
     resp: reqwest::blocking::Response,
@@ -296,8 +319,8 @@ fn acquire_remote_archive(
     archive_path: &Path,
     checksum_path: &Path,
 ) -> Result<()> {
-    // Download to a .part file; rename atomically on success
-    let tmp_path = archive_path.with_extension("zip.part");
+    // Download to a per-process .part file; rename atomically on success.
+    let tmp_path = part_path(archive_path);
     // Armed from here on: every early return below removes the .part file.
     let mut partial = PartialDownload::new(&tmp_path);
 
@@ -1262,6 +1285,50 @@ mod tests {
             "followed more than {MAX_REDIRECTS} redirects: {} requests",
             server.requests().len()
         );
+    }
+
+    // ── concurrent-fetch safety (#100) ───────────────────────────────────────
+
+    /// The temp path must not be derivable from the version alone. That was
+    /// guardian F-1: two `xtgeoip fetch` processes resolving the same version
+    /// shared one `.part` file, so their writes could interleave and either
+    /// one's guard could delete a path the other was still writing.
+    #[test]
+    fn part_path_is_not_shared_between_processes() {
+        let archive =
+            Path::new("/var/lib/xt_geoip/GeoLite2-Country-CSV_20260714.zip");
+        let shared = archive.with_extension("zip.part");
+        let mine = part_path(archive);
+
+        assert_ne!(mine, shared, "the .part path is still version-derived");
+        assert!(
+            mine.to_string_lossy().contains(&process::id().to_string()),
+            "expected this process's id in {mine:?}"
+        );
+        // Same directory, so renaming onto archive_path stays an atomic
+        // same-filesystem operation rather than a cross-device copy.
+        assert_eq!(mine.parent(), archive.parent());
+    }
+
+    /// A `.part` file must stay invisible to archive discovery *and* to
+    /// pruning. That combination is what made the pre-#99 leaks immortal, and
+    /// changing the name must not disturb either half.
+    #[test]
+    fn part_path_is_neither_discoverable_nor_prunable() {
+        let archive =
+            Path::new("/var/lib/xt_geoip/GeoLite2-Country-CSV_20260714.zip");
+        let mine = part_path(archive);
+        let name = mine.file_name().unwrap().to_string_lossy().into_owned();
+
+        assert!(
+            !name.ends_with(".zip"),
+            "{name} would be found as an archive"
+        );
+        assert!(
+            !name.ends_with(".zip.sha256"),
+            "{name} looks like a checksum"
+        );
+        assert!(name.ends_with(".part"), "{name} lost its .part suffix");
     }
 
     // ── partial-download cleanup ─────────────────────────────────────────────
