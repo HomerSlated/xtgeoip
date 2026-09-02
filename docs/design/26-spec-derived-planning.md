@@ -1,6 +1,6 @@
 # Design: Spec-Derived Planning (#26/#27)
 
-Status: **PROPOSED** — stages 1–3 implemented, stage 4 awaiting sign-off
+Status: **IMPLEMENTED** (all four stages; stage 4 signed off 2026-09-02)
 Date: 2026-09-02
 Related: TODO.md OVERVIEW (Spec-Driven Architecture), `spec-driven-validator.md`
 (the *validity* half, APPROVED 2026-06-08 and landed), `29-ambiguity-planner-vs-guards.md`
@@ -111,6 +111,13 @@ code fails to compile — loudly, at build time, which is the acceptable failure
    **exactly**, including step parameters (`BackupMode`, `FetchMode`, `legacy`)
    that the `steps:` examples deliberately omit.
 4. **Sign-off point.** Only once 3 is green: delete `plan()`, rename.
+   ✅ Done 2026-09-02. `action.rs` lost 98 lines and gained
+   `use crate::generated::plan::plan_generated as plan;`, so every call site
+   and every test kept working unchanged. The differential test was migration
+   scaffolding and went with the code it compared against; it was replaced by
+   `every_plan_is_a_subsequence_of_one_canonical_order`, which pins the
+   property §1 says the rank model rests on — the thing that has to keep
+   holding once the proof is gone.
 
 Stages 1–3 are reversible and add no risk to the execution path — the running
 code is still the hand-written planner. Stage 4 is the irreversible one and is
@@ -124,7 +131,7 @@ A test that has only ever passed is not evidence.
 
 `action.rs` is unsigned, so none of this touches a guardian signature.
 
-## 7. Open question for sign-off
+## 7. Resolved: the question that was open at sign-off
 
 Is generating the planner worth it, given that stage 3's differential test
 already makes drift a build failure? The honest case against: declaring and

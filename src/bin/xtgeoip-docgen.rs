@@ -974,11 +974,6 @@ fn generate_plan_rs(spec: &Spec) -> anyhow::Result<String> {
 // Ordering comes from `plan.steps[*].rank` in docs/spec/cli.yaml; membership
 // from `plan.contexts`. Each step's `why` is carried through from the spec, so
 // the reasoning survives the migration instead of becoming a bare integer.
-//
-// `dead_code` because stages 1-3 run this *alongside* the hand-written
-// `action::plan()`: nothing calls it but the differential test. Stage 4
-// (deleting `plan()`) is the sign-off point and removes the need for it.
-#![allow(dead_code)]
 
 use crate::{
     action::{Action, Plan, Step, backup_mode},

@@ -51,9 +51,11 @@ section (rank per step, membership per context, mandatory `why:`); docgen emits
 across all 76 `Action` values, *including* step parameters. Teeth verified:
 moving `clean`'s rank before `fetch` fails 32 of 76 with the exact diff.
 
-**⚑ Stage 4 needs sign-off.** Deleting `action::plan()` is the irreversible
-step and the running code is still the hand-written planner. Everything landed
-so far is additive.
+**Stage 4 done 2026-09-02** — `action::plan()` is deleted; the generated
+planner drives execution. A perturbed `rank:` is now caught by five independent
+tests (two goldens, `clean_never_precedes_fetch`, the canonical-order
+invariant, and `spec_steps_agree_with_plan`). **The spec-driven arc is
+complete: validity and ordering both derive from `cli.yaml`.**
 
 **Background** (2026-09-02 finding): all 76 `Action` values yield
 plans that are subsequences of one fixed order — Backup → PruneBin → Fetch →

@@ -106,104 +106,14 @@ pub(crate) fn backup_mode(force: bool) -> BackupMode {
     }
 }
 
-fn plan(action: &Action) -> Plan {
-    match action {
-        Action::TopLevelBackup {
-            clean,
-            force,
-            prune,
-        } => {
-            let mode = backup_mode(*force);
-            let mut steps = vec![Step::Backup { mode }];
-            if *prune {
-                steps.push(Step::PruneBin);
-            }
-            if *clean {
-                steps.push(Step::Clean { mode });
-            }
-            Plan::Simple(steps)
-        }
-
-        Action::TopLevelClean { force } => Plan::Simple(vec![Step::Clean {
-            mode: backup_mode(*force),
-        }]),
-
-        Action::Fetch { prune } => {
-            let mut steps = vec![Step::Fetch {
-                mode: FetchMode::Remote,
-            }];
-            if *prune {
-                steps.push(Step::PruneCsv);
-            }
-            Plan::Simple(steps)
-        }
-
-        Action::Run {
-            backup,
-            clean,
-            force,
-            prune,
-            legacy,
-        } => {
-            let mode = backup_mode(*force);
-            let mut pre = vec![];
-            if *backup {
-                pre.push(Step::Backup { mode });
-            }
-            // Clean runs *after* the fetch (#24 stage 1). The fetch is the
-            // failure-prone step — it depends on the network — and cleaning
-            // first meant an outage left `output_dir` empty with no
-            // replacement. Fetching first means a failed run leaves the
-            // existing install untouched.
-            let mut mid = vec![];
-            if *clean {
-                mid.push(Step::Clean { mode });
-            }
-            if *prune {
-                mid.push(Step::PruneCsv);
-            }
-            Plan::Pipeline {
-                pre,
-                fetch: FetchMode::Remote,
-                mid,
-                legacy: *legacy,
-            }
-        }
-
-        Action::Build {
-            backup,
-            clean,
-            force,
-            prune,
-            legacy,
-        } => {
-            let mode = backup_mode(*force);
-            let mut pre = vec![];
-            if *backup {
-                pre.push(Step::Backup { mode });
-            }
-            if *prune {
-                pre.push(Step::PruneBin);
-            }
-            // As in Run (#24 stage 1): clean only once the archive is in
-            // hand. A local fetch fails less often than a remote one, but it
-            // still can — missing archive, failed magic check, extraction cap
-            // — and the same reasoning applies.
-            let mut mid = vec![];
-            if *clean {
-                mid.push(Step::Clean { mode });
-            }
-            Plan::Pipeline {
-                pre,
-                fetch: FetchMode::Local,
-                mid,
-                legacy: *legacy,
-            }
-        }
-
-        Action::Conf(_) => Plan::Simple(vec![]),
-    }
-}
+/// The execution planner, generated from `plan:` in `docs/spec/cli.yaml`.
+///
+/// Hand-written until 2026-09-02; see
+/// `docs/design/26-spec-derived-planning.md`. The rationale for each
+/// step's position now lives in the spec's `why:` fields and is carried
+/// into `src/generated/plan.rs` as comments, so editing the order means
+/// editing the declaration rather than the code.
+use crate::generated::plan::plan_generated as plan;
 
 /// Decrypt MaxMind credentials (prompting interactively) and fetch. Only
 /// `FetchMode::Remote` needs credentials at all — `Local` never reads
@@ -478,39 +388,43 @@ mod tests {
         all
     }
 
-    /// The generated planner must reproduce the hand-written one *exactly*.
+    /// Every plan is a subsequence of one fixed order.
     ///
-    /// Stage 3 of `docs/design/26-spec-derived-planning.md`: prove the
-    /// transcription before any runtime swap, which is the method §7 of the
-    /// validator note used for the validity half. Compared through `Debug`, so
-    /// this covers step **parameters** too — `BackupMode`, `FetchMode` and
-    /// `legacy` — which `cli.yaml`'s `steps:` lists deliberately omit.
+    /// This is the assumption `plan:` in `cli.yaml` is built on: ordering is a
+    /// **rank per step**, not a dependency graph, which is only sound while a
+    /// single total order covers every context. The differential test that
+    /// proved the generated planner reproduced the hand-written one was
+    /// migration scaffolding and went with it; this is the property that has
+    /// to keep holding afterwards.
     ///
-    /// While both exist, `plan()` is what runs; `plan_generated()` is a
-    /// candidate. Deleting `plan()` is the sign-off point, not this test.
+    /// `docs/design/26-spec-derived-planning.md` §1 records that this is an
+    /// observation about today's six steps, not an invariant — so it is worth
+    /// a test rather than a comment. A step that ran at different points in
+    /// different contexts would break the model, and this is what would say so.
     #[test]
-    fn generated_planner_matches_the_hand_written_one() {
-        use crate::generated::plan::plan_generated;
+    fn every_plan_is_a_subsequence_of_one_canonical_order() {
+        const CANON: &[&str] = &[
+            "backup",
+            "prune_bin",
+            "fetch",
+            "clean",
+            "prune_csv",
+            "build",
+        ];
 
-        let mut disagreements = Vec::new();
         let actions = all_actions();
         for action in &actions {
-            let hand = format!("{:?}", plan(action));
-            let generated = format!("{:?}", plan_generated(action));
-            if hand != generated {
-                disagreements.push(format!(
-                    "  {action:?}\n      hand-written: {hand}\n      \
-                     generated:    {generated}"
-                ));
+            let got = step_names(action);
+            let mut canon = CANON.iter();
+            for step in &got {
+                assert!(
+                    canon.any(|c| c == step),
+                    "{action:?} plans {got:?}, which is not a subsequence of \
+                     {CANON:?} — the rank model in cli.yaml no longer holds"
+                );
             }
         }
-        assert!(
-            disagreements.is_empty(),
-            "{} of {} actions plan differently:\n{}",
-            disagreements.len(),
-            actions.len(),
-            disagreements.join("\n")
-        );
+        assert_eq!(actions.len(), 76, "the Action space changed shape");
     }
 
     // ── spec ↔ plan agreement (#92) ──────────────────────────────────────
