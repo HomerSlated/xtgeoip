@@ -66,12 +66,13 @@ test.
 - **Cached-archive fallback on failed fetch: REJECTED.** Rebuilding the same version over an intact install is a guaranteed no-op with real risk. `build` already spells that request
 - **Unattended cron: removed by design (#103).** Do not restore it by stashing the passphrase anywhere
 - **Fuzzing/proptest for CLI semantics: dropped.** 136 total combinations; `cli::snapshot` already enumerates all of them exhaustively
-- **Toolchain is pinned in `rust-toolchain.toml` (2026-09-02).** Do not reintroduce `dtolnay/rust-toolchain@stable` or `cargo +stable` in CI — both bypass the pin. Bump the pin deliberately and read the new lints then. `rustfmt` is intentionally not a pinned component, so a bare `cargo fmt` fails rather than formatting with a stable rustfmt that ignores the four nightly-only options in `rustfmt.toml`; use `cargo +nightly fmt`
+- **Toolchain is pinned in `rust-toolchain.toml` (2026-09-02), and `sync.py` refuses to run unless the active toolchain matches it.** Do not reintroduce `dtolnay/rust-toolchain@stable` or `cargo +stable` in CI — both bypass the pin. Bump the pin deliberately and read the new lints then. `rustfmt` is intentionally not a pinned component, so a bare `cargo fmt` fails rather than formatting with a stable rustfmt that ignores the four nightly-only options in `rustfmt.toml`; use `cargo +nightly fmt`
 
 ---
 
 ## HOUSEKEEPING
 
+- **Nothing keeps Rust current on the dev machine.** `/usr/bin/{cargo,rustc}` are symlinks to `/usr/bin/rustup` (Ubuntu's apt `rustup` package); the toolchains live in `~/.rustup` and move *only* when `rustup update` is run by hand. No timer, no cron, no auto-update setting. That is why `stable` sat at 1.94.0 for six months. `sync.py` now catches the divergence from the pin, but nothing yet reports that the pin itself, `rustup` (1.26.0 vs 1.29.1 upstream), the 153 pending crate updates, or dependency advisories have gone stale — see the maintenance question in `TODO.md`
 - Guardian coverage is thin: only `fetch.rs` and `secrets.rs` are signed. `config.rs` and `conf.rs` are unsigned and changed substantially in #103/#104 — the credential-handling path
 - `tests/` is an empty directory; there is no `lib` target, so nothing can live there
 - Man-page prose in `docs/spec/manpage-template.toml` is hand-written and unchecked against the code. Three drifts found on 2026-09-02 (step ordering; the whole `conf -c` credential workflow missing since #103; a `[maxmind]` `timeout` key that does not exist and that `deny_unknown_fields` would reject). Nothing prevents a fourth
