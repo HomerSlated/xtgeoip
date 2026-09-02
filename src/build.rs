@@ -707,18 +707,12 @@ mod tests {
 
     #[test]
     fn country_code_parse_iso_uppercase() {
-        assert_eq!(
-            CountryCode::parse("US"),
-            Some(CountryCode::Iso([b'U', b'S']))
-        );
+        assert_eq!(CountryCode::parse("US"), Some(CountryCode::Iso(*b"US")));
     }
 
     #[test]
     fn country_code_parse_iso_lowercase_normalised() {
-        assert_eq!(
-            CountryCode::parse("us"),
-            Some(CountryCode::Iso([b'U', b'S']))
-        );
+        assert_eq!(CountryCode::parse("us"), Some(CountryCode::Iso(*b"US")));
     }
 
     #[test]
@@ -753,7 +747,7 @@ mod tests {
 
     #[test]
     fn country_code_display_iso() {
-        assert_eq!(CountryCode::Iso([b'G', b'B']).to_string(), "GB");
+        assert_eq!(CountryCode::Iso(*b"GB").to_string(), "GB");
     }
 
     #[test]
@@ -875,7 +869,7 @@ mod tests {
 
     #[test]
     fn resolve_proxy_returns_a1() {
-        let m = make_map(&[("1", CountryCode::Iso([b'U', b'S']))]);
+        let m = make_map(&[("1", CountryCode::Iso(*b"US"))]);
         assert_eq!(
             resolve_country_code(true, false, "1", "", &m),
             CountryCode::A1
@@ -902,14 +896,14 @@ mod tests {
 
     #[test]
     fn resolve_id_lookup() {
-        let de = CountryCode::Iso([b'D', b'E']);
+        let de = CountryCode::Iso(*b"DE");
         let m = make_map(&[("42", de)]);
         assert_eq!(resolve_country_code(false, false, "42", "", &m), de);
     }
 
     #[test]
     fn resolve_rid_fallback_when_id_empty() {
-        let fr = CountryCode::Iso([b'F', b'R']);
+        let fr = CountryCode::Iso(*b"FR");
         let m = make_map(&[("99", fr)]);
         assert_eq!(resolve_country_code(false, false, "", "99", &m), fr);
     }
