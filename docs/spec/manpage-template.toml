@@ -74,13 +74,14 @@ is used with
 .BR run ,
 CSV archives (not binary tarballs) are pruned, after the fetch step.
 .TP
-.BI "conf " "\fB\-d\fR|\fB\-e\fR|\fB\-s\fR"
+.BI "conf " "\fB\-d\fR|\fB\-e\fR|\fB\-s\fR|\fB\-c\fR"
 Manage system configuration.
 Exactly one of
 .BR \-d ,
 .BR \-e ,
+.BR \-s ,
 or
-.B \-s
+.B \-c
 must be given.
 .RS
 .TP
@@ -93,6 +94,12 @@ Open the system configuration file in
 .TP
 .B \-s
 Show the current system configuration.
+.TP
+.B \-c
+Prompt for a MaxMind account ID and license key, encrypt them under a
+passphrase, and store the result in
+.BR /etc/xtgeoip.conf .
+Any plaintext credentials already in the file are removed as it is written.
 .RE
 '''
 
@@ -211,7 +218,8 @@ execution_order = '''
 The order in which flags are given on the command line is always ignored.
 The execution order is fixed and determined by the most logical sequence for
 the operations requested.
-The invariant is: \fIback up before modifying; clean before building\fR.
+The invariant is: \fIback up before modifying; acquire before destroying;
+clean before building\fR.
 .PP
 Representative fixed orderings:
 .RS
@@ -223,11 +231,21 @@ backup \(-> clean
 backup \(-> prune binary archives
 .TP
 .B "xtgeoip build \-b \-c \-p"
-backup \(-> prune binary archives \(-> clean \(-> build
+backup \(-> prune binary archives \(-> read local archive \(-> clean \(-> build
 .TP
 .B "xtgeoip run \-c \-p"
-clean \(-> fetch \(-> prune CSV archives \(-> build
+fetch \(-> clean \(-> prune CSV archives \(-> build
 .RE
+.PP
+Note that
+.B \-\-clean
+runs
+.I after
+the archive is in hand, never before it.
+Cleaning first would mean a failed download left
+.I output_dir
+empty with nothing to install in its place; acquiring the new data first means
+a failed run leaves the existing database untouched.
 .PP
 This means
 .B "xtgeoip \-b \-c"
@@ -373,15 +391,31 @@ copy it to
 and edit as required.
 .PP
 To download GeoLite2 databases, a free MaxMind account is required.
-The following two parameters must be configured:
-.TP
-.B account_id
-Your MaxMind account ID.
 Obtain one at
-.IR https://www.maxmind.com/en/geolite2/signup .
-.TP
+.IR https://www.maxmind.com/en/geolite2/signup ,
+then create a license key from the account dashboard.
+.PP
+Credentials are never written to the configuration file in plaintext.
+Run
+.B "xtgeoip conf \-c"
+and supply the account ID, the license key, and a passphrase.
+The pair is encrypted and stored as
+.B [maxmind.credentials]
+in
+.BR /etc/xtgeoip.conf ;
+any plaintext
+.B account_id
+or
 .B license_key
-A license key created from your MaxMind account dashboard.
+already present in the file is removed as the ciphertext is written.
+.PP
+The passphrase is requested again on every operation that contacts MaxMind
+.RB ( fetch
+and
+.BR run ).
+It is stored nowhere, so those commands cannot run unattended.
+.B build
+rebuilds from the cached archive and needs no passphrase.
 .PP
 Additional configuration sections:
 .RS

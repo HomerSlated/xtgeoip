@@ -21,23 +21,41 @@ listing thirteen already-closed items as open.
 ## OPEN
 
 - **[#1 residual]** messages.rs/config.rs: CLI flag to override `[logging]` (flag takes precedence). Core of #1 is done — small, self-contained
-- **[#92 remainder]** docgen: spec validator on the *generation* side — catch contradictions at codegen time, not just test time. Test-time checks (`cli::contradiction`, 4 tests) landed 2026-07-18
+- **[#92 remainder]** docgen: spec validator on the *generation* side — catch contradictions at codegen time, not just test time. Test-time checks (`cli::contradiction`, 4 tests) landed 2026-07-18. **Concrete case now on file:** `cli.yaml`'s `outcome:` strings are unchecked free text that ships into the man page; three had been wrong since 2026-07-18 (fixed 2026-09-02). Asserting them against `action.rs`'s `steps()` helper closes the class
 - **[#98 residual]** tests: precondition checks that fail fast rather than grinding to a confusing failure. The documentation half is **done** (2026-09-01: man-page `FILE OWNERSHIP` section + the `build -c` vs `build -c -f` timing distinction in LEGACY MODE and `--help`). The `restore`-based plan is **rejected** — see below
 - **[#100]** fetch.rs: shared `.part` path lets concurrent fetches collide. LOW (CVSS 3.3) and **fails closed** — SHA-256 rejects any corruption. Costs a `fetch.rs` guardian re-audit; concurrent fetches are not an expected usage pattern
 
 ---
 
-## ARCHITECTURE (large, and currently undefined)
+## ARCHITECTURE (large; described, not scoped)
 
 Spec-Driven Architecture [#9, #26, #27, #34] — collapse the three sources of
 CLI truth (clap struct, `normalize_cli_to_action`, `cli.yaml`) into one
 data-driven semantics layer. `Action`'s shape is right; generate its
 construction from the spec rather than hand-writing it.
 
-**⚑ Blocked on an undefined ticket.** Of the four named enablers, #22, #29
-and #93 are all closed — leaving **#27**, which has no entry in `TODO.md`.
-Nine numbers are cited as dependencies with no entry at all: **#9, #12,
-#17, #18, #26, #27, #32, #34, #61**. Scoping #27 is the next real step here.
+**Half of it has landed.** *Validity* is spec-driven: `cli.yaml` `guards:` →
+`src/generated/cli_rules.rs` → `first_guard(flags, …)`. *Ordering* is not:
+`action.rs::plan()` is hand-written and the spec says nothing about steps or
+`FetchMode`.
+
+**Not blocked — undecided.** #27 was never a ticket. It is the orphaned half
+of `#27/#31`, trimmed at `2baa194` when #31 landed (full trace in
+`TODO.md`); #26 is in the same state. The remaining work is fully described
+in the `TODO.md` OVERVIEW and the two design notes, so the next step is a
+decision, not an investigation.
+
+**If it is ever taken up** (2026-09-02 finding): all 76 `Action` values yield
+plans that are subsequences of one fixed order — Backup → PruneBin → Fetch →
+Clean → PruneCsv → Build — with a single data dependency (Fetch → Build). So
+it needs a rank per step, not a dependency graph. Caveats: that order is an
+observation about today's six steps, not an invariant; and docgen must emit
+*Rust constructing `Plan`*, not a flat step list, or the type-enforced
+Fetch-before-Build guarantee degrades to a runtime check.
+
+Worth doing regardless of that decision: assert `outcome:` against `plan()`
+(the #92 remainder), and make the canonical-order enumeration a permanent
+test.
 
 ---
 
@@ -55,6 +73,7 @@ Nine numbers are cited as dependencies with no entry at all: **#9, #12,
 
 - Guardian coverage is thin: only `fetch.rs` and `secrets.rs` are signed. `config.rs` and `conf.rs` are unsigned and changed substantially in #103/#104 — the credential-handling path
 - `tests/` is an empty directory; there is no `lib` target, so nothing can live there
+- Man-page prose in `docs/spec/manpage-template.toml` is hand-written and unchecked against the code. Two drifts found on 2026-09-02 (step ordering; the whole `conf -c` credential workflow missing since #103). Nothing prevents a third
 
 ---
 
@@ -64,7 +83,9 @@ Nine numbers are cited as dependencies with no entry at all: **#9, #12,
 #81, #87, #88, #92 (test-time part), #93, #94, #95, #96, #97, #99, #101,
 #102. 2026-07-20 — #103 (`c2be6a3`). 2026-09-01 — #104 (`b804fa2`), #89
 (closed unimplemented — guarded by a structural invariant already, see
-`TODO.md`), #98 documentation half.
+`TODO.md`), #98 documentation half. 2026-09-02 — man-page corrections
+(step ordering vs `plan()`; `conf -c` / encrypted-credential workflow, a
+#103 documentation residual) and the `#27` trace.
 
 Several were closed as **premise-invalidated** after checking against
 source: #38, #54, #88 and #96 described code that no longer existed.

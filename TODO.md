@@ -72,19 +72,79 @@ CLI → parsed args
     → execution
 ```
 
-The `Action` enum is explicit, type-safe, and easy to extend — keep this shape. The Action construction blocks (e.g. `Ok(Some(Action::Build { legacy, backup, ... }))`) are the right pattern; the change needed is that they should be generated from the semantics layer rather than hand-written. The individual items in this TODO are stepping stones toward this architecture; items #22, #27, #29, #93 are the remaining structural enablers.
+The `Action` enum is explicit, type-safe, and easy to extend — keep this shape. The Action construction blocks (e.g. `Ok(Some(Action::Build { legacy, backup, ... }))`) are the right pattern; the change needed is that they should be generated from the semantics layer rather than hand-written. The individual items in this TODO are stepping stones toward this architecture; #22, #29 and #93 were the structural enablers and are all closed. What remains is the second half of the arc — spec-derived *planning* — which has never had a ticket of its own (see below).
 
 Note [#32]: Preserve the `Action` construction pattern — the change is in the source of the construction logic, not its shape.
 
-**⚑ The remaining enabler has no entry.** Of the four named above, #22 is
-closed (subsumed), #29 is closed, and #93 is done — leaving **#27**, which
-is cited here and nowhere else in this file. It has no scope, no acceptance
-criteria, and no status. As written, the project's largest open item has no
-definition of done.
+**⚑ #27 is not a ticket — it is an editing artifact (traced 2026-09-02).**
+Of the four named above, #22 is closed (subsumed), #29 is closed and #93 is
+done, which left **#27** looking like the last live enabler. It is not one.
+It has never been an entry in any revision of this file. In the first
+numbered `TODO.md` (`d50e56f`, 2026-04-19) it appeared exactly twice: in the
+header above, and in this sentence —
+
+> items #5, #17, #19, #20, #22, **#27/#31**, #28, #29 are the key structural
+> enablers
+
+`#31` was *"cli.rs: validation error strings are hand-written and
+inconsistent — wire them to the spec's `reason_templates`."* At `2baa194`
+(2026-05-02, "Spec rewrite, wire error constants") that work landed: the
+same commit deleted the `### #31` entry and rewrote `#27/#31` to `#27`. The
+surviving half has read as an independent undefined ticket ever since.
+
+**Nothing is blocked on a missing ticket.** The remaining work is described
+in three places — the OVERVIEW body above, `docs/design/spec-driven-validator.md`,
+and `docs/design/29-ambiguity-planner-vs-guards.md` §5–6 ("spec-derived
+planning ... remains the #26/#27 endpoint"). What is missing is scope and
+acceptance criteria, not knowledge. The next step is a *decision*, not an
+investigation. Note also that #26 is in exactly the same state; #27 only
+looked singular because of which sentence happened to get pruned.
+
+**Finding (2026-09-02): the ordering has a rank, not a graph.** Enumerating
+all 76 `Action` values and computing `plan()` for each shows every plan is a
+subsequence of one fixed order:
+
+    Backup → PruneBin → Fetch → Clean → PruneCsv → Build
+
+Ten of the eleven step pairs co-occur in some command and all agree with it;
+the one exception, `PruneBin`/`PruneCsv`, never co-occurs (bin pruning
+belongs to top-level and `build`, CSV pruning to `fetch` and `run`). There is
+exactly one data dependency in the system, `Fetch → Build`. So a spec would
+need an integer rank per step plus membership rules — a topological sort over
+one edge is machinery in search of a problem. This is the ordering analogue
+of the validator's finding that all 17 guards were pure conjunctions.
+
+**This is an observation about today's six steps, not an invariant.** Nothing
+makes the total order hold. A future step that runs at different points in
+different commands (an install or module-reload step) would break the rank
+model and force the dependency graph the finding says is unnecessary.
+
+Two further constraints on any implementation:
+
+- **Generate Rust, not a data table.** `Plan::Pipeline` cannot be constructed
+  without naming the fetch that feeds the build, so the Fetch-before-Build
+  invariant is enforced by the type system. A flat `steps:` list can express
+  `[Build]` with no fetch, which would trade that compile-time guarantee for a
+  runtime check — a regression under the INVARIANTS precedence order. If
+  docgen emits `plan()` as code constructing the existing `Plan` type, a spec
+  that violates the invariant produces output that does not compile, exactly
+  as a missing `error_text::` constant does today.
+- **A rank integer has nowhere to put the *why*.** `action.rs:150-155` records
+  that `Clean` follows `Fetch` because a failed download otherwise emptied
+  `output_dir` with no replacement. `rank: 40` keeps the conclusion and
+  discards the reasoning; the spec would need a `why:` field per step.
+
+Two pieces are worth doing whether or not the codegen ever happens:
+
+- assert `outcome:` against `plan()` (the **#92 remainder**) — the oracle,
+  the role `cli::snapshot` played for the validator;
+- make the canonical-order enumeration a permanent test — it pins a property
+  the man page's EXECUTION ORDER section promises users.
 
 **Dangling ticket references (audited 2026-09-01).** These numbers are
 cited across this file as dependencies or enablers but have **no `###`
-entry anywhere**: **#9, #12, #17, #18, #26, #27, #32, #34, #61**. They
+entry anywhere**: **#9, #12, #17, #18, #26, #27, #32, #34, #61**. (#27 is
+traced above: it is the orphaned half of `#27/#31`, not a lost ticket.) They
 carry real weight in prose — "#12/#18 configurability is the enabler"
 (#88), "execution planner (#17) is the right place" (#24), "ties into #61"
 (#76) — while carrying no scope. Listed here so the gap is visible rather
@@ -199,6 +259,20 @@ path, consistent with the design's own "best-effort" framing).
    right after the terminal check, before any prompt — verified live over a
    pty as non-root: fails immediately with "Cannot write to /etc. Re-run as
    root (e.g. with sudo)."
+
+**Documentation residual — found and fixed 2026-09-02.** The man page was
+never updated for this ticket. `docs/spec/manpage-template.toml` still told
+operators that `account_id` and `license_key` "must be configured" in
+`/etc/xtgeoip.conf`, and its `conf` entry listed only `-d|-e|-s`, so
+`--set-credentials` appeared nowhere in `docs/generated/` at all. The shipped
+documentation was therefore instructing users into precisely the state
+`#104`'s migration path treats as an exposed credential. Fixed: CONFIGURATION
+now describes the `conf -c` workflow (encrypted under a passphrase, stored as
+`[maxmind.credentials]` in the config file, plaintext removed on write, and
+the passphrase re-prompted on every `fetch`/`run` — hence no unattended
+operation); COMMANDS documents `-c`. The example config's comment was also
+tightened: it said credentials are "not in this file", but the *ciphertext*
+is written there — only the plaintext is not.
 
 ### #104 — main.rs: top-level error handler can echo raw config source (incl. credentials) to stderr/log ✅ DONE (2026-09-01)
 
@@ -718,6 +792,24 @@ Both substantive tests were **verified to have teeth** by injecting the fault ea
 **Finding — `CliOutcome::ShowHelp` is misnamed.** Writing the oracle surfaced it: `ShowHelp` is produced at exactly one site (`cli.rs`, bare invocation, `flags == 0`) and `main.rs` renders it as `Error [top_level_no_args]` with a non-zero exit. An explicit `-h` never reaches it — clap intercepts that as a `DisplayHelp` error first. So the variant means "no args: print usage and **fail**", the opposite of what its name suggests, and the validity distinction lives in `main.rs` rather than in the outcome type. Not a bug; a naming trap that cost one wrong oracle. Consider renaming to `NoArgs` — filed as a note here rather than a ticket, since it is cosmetic.
 
 Still open under #92: expanding the *docgen-side* spec validator (contradictions detectable at generation time rather than test time).
+
+**A concrete case for it, found 2026-09-02.** `cli.yaml`'s `outcome:` strings
+are free text that docgen copies verbatim into the man page, and their
+*content* is never checked — `xtgeoip-docgen.rs` asserts only that a valid
+example has one, and `xtgeoip-tests.rs` never reads the field. Three of them
+had been wrong since `0712783` (#24 stage 1, 2026-07-18) moved `Clean` after
+`Fetch`: R-004 `run -c -p`, R-005 `run -c -f` and R-010 `run -b -c` all still
+claimed clean-before-fetch, as did the man page's EXECUTION ORDER section —
+i.e. the shipped docs described the behaviour that change was written to
+eliminate. Corrected 2026-09-02, along with the build example (which had
+omitted the local fetch entirely) and the invariant sentence, which now
+states *acquire before destroying* with its reason.
+
+The fix for the *class* is cheap and belongs here: `action.rs`'s test helper
+`steps()` already flattens a `Plan` into exactly the linear sequence these
+strings describe, so asserting `outcome:` against it would turn this drift
+into a build failure. That check is also the oracle any spec-derived planning
+work would need first — see the OVERVIEW.
 
 ---
 

@@ -1,7 +1,8 @@
 [maxmind]
 url = "https://download.maxmind.com/geoip/databases/GeoLite2-Country-CSV/download"
 # Run `xtgeoip conf --set-credentials` to configure your MaxMind account_id
-# and license_key. They are stored encrypted, not in this file.
+# and license_key. They are encrypted under a passphrase and written back
+# here as [maxmind.credentials]; never put them in this file as plaintext.
 
 [paths]
 archive_dir = "/var/lib/xt_geoip"

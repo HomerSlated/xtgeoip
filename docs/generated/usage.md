@@ -58,13 +58,13 @@ Run full pipeline
 - `xtgeoip run` → fetch then build
 - `xtgeoip run -l` → fetch then build (legacy)
 - `xtgeoip run -p` → fetch then prune then build
-- `xtgeoip run -c -p` → clean then fetch then prune then build
-- `xtgeoip run -c -f` → force clean then fetch then build
+- `xtgeoip run -c -p` → fetch then clean then prune then build
+- `xtgeoip run -c -f` → fetch then force clean then build
 - `xtgeoip run -b -p -f` → --prune does not support the --force option (exit 1)
 - `xtgeoip run -b -c -p` → you must specify fetch or build separately, for the --prune option (exit 1)
 - `xtgeoip run -f` → run does not support the --force option (exit 1)
 - `xtgeoip run -b` → backup then fetch then build
-- `xtgeoip run -b -c` → backup then clean then fetch then build
+- `xtgeoip run -b -c` → backup then fetch then clean then build
 - `xtgeoip run -b -f` → force backup then fetch then build
 - `xtgeoip run -b -p` → backup then fetch then prune then build
 - `xtgeoip run -b -c -f` → the --force option is ambiguous, you must specify exactly one of --backup or --clean (exit 1)

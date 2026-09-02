@@ -325,11 +325,11 @@ commands:
       - case_id: R-004
         cmd: "xtgeoip run -c -p"
         valid: true
-        outcome: "clean then fetch then prune then build"
+        outcome: "fetch then clean then prune then build"
       - case_id: R-005
         cmd: "xtgeoip run -c -f"
         valid: true
-        outcome: "force clean then fetch then build"
+        outcome: "fetch then force clean then build"
       - case_id: R-006
         cmd: "xtgeoip run -b -p -f"
         valid: false
@@ -355,7 +355,7 @@ commands:
       - case_id: R-010
         cmd: "xtgeoip run -b -c"
         valid: true
-        outcome: "backup then clean then fetch then build"
+        outcome: "backup then fetch then clean then build"
       - case_id: R-011
         cmd: "xtgeoip run -b -f"
         valid: true

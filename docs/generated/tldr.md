@@ -102,11 +102,11 @@
 
 `xtgeoip run -p`
 
-- clean then fetch then prune then build:
+- fetch then clean then prune then build:
 
 `xtgeoip run -c -p`
 
-- force clean then fetch then build:
+- fetch then force clean then build:
 
 `xtgeoip run -c -f`
 
@@ -114,7 +114,7 @@
 
 `xtgeoip run -b`
 
-- backup then clean then fetch then build:
+- backup then fetch then clean then build:
 
 `xtgeoip run -b -c`
 
