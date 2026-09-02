@@ -818,7 +818,35 @@ Both substantive tests were **verified to have teeth** by injecting the fault ea
 
 **Finding — `CliOutcome::ShowHelp` is misnamed.** Writing the oracle surfaced it: `ShowHelp` is produced at exactly one site (`cli.rs`, bare invocation, `flags == 0`) and `main.rs` renders it as `Error [top_level_no_args]` with a non-zero exit. An explicit `-h` never reaches it — clap intercepts that as a `DisplayHelp` error first. So the variant means "no args: print usage and **fail**", the opposite of what its name suggests, and the validity distinction lives in `main.rs` rather than in the outcome type. Not a bug; a naming trap that cost one wrong oracle. Consider renaming to `NoArgs` — filed as a note here rather than a ticket, since it is cosmetic.
 
-Still open under #92: expanding the *docgen-side* spec validator (contradictions detectable at generation time rather than test time).
+✅ **The motivating case is closed (2026-09-02) — but at test time, not
+generation time.** `cli.yaml` examples now carry an optional `steps:` list, and
+`action::tests::spec_steps_agree_with_plan` drives every documented command
+through the real parser and the real `plan()` and compares. `outcome:` stays
+authored prose; `steps:` is the machine-checkable half beside it.
+
+The check also refuses a *silent opt-out*: an example that reaches `Action` but
+declares no `steps:` is a failure, not a skip. Otherwise the way to defeat the
+check would be to omit the field, which is exactly how the drift happened.
+
+Verified to have teeth by reverting the spec, twice:
+
+    "xtgeoip run -c -p": spec says ["clean", "fetch", "prune_csv", "build"],
+                         plan() gives ["fetch", "clean", "prune_csv", "build"]
+    "xtgeoip build -b -c": reaches Action but declares no `steps:` in cli.yaml
+
+The first is the *actual* historical bug — R-004's order between `0712783` and
+2026-09-02 — so the check demonstrably catches the thing that motivated it.
+
+⚑ **Still open, and now with a structural reason.** #92 asks for the validator
+on the **generation** side, and this class cannot go there: `xtgeoip-docgen` is
+a separate binary and the crate has no `lib` target, so docgen cannot call
+`plan()`, `normalize_cli_to_action`, or anything else it would need to know
+what a command *does*. Generation-time validation is limited to what is
+derivable from the spec alone (contradictions, unreachable states, unused
+flags); anything requiring the program's own semantics has to live in the main
+binary's tests, as this does. That is a limit on #92's framing, not a gap in
+this change — and it is one more argument for the `lib` target that #88's
+closure and `tests/` being empty both keep running into.
 
 **A concrete case for it, found 2026-09-02.** `cli.yaml`'s `outcome:` strings
 are free text that docgen copies verbatim into the man page, and their

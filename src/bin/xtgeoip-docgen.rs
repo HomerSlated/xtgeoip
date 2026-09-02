@@ -138,6 +138,18 @@ pub struct Example {
     pub timeout_secs: Option<u64>,
     pub expected_stdout: Option<String>,
     pub expected_stderr: Option<String>,
+    /// The execution plan this invocation produces, in order, as step names.
+    ///
+    /// Distinct from `outcome`, which is authored prose for humans. This is
+    /// the machine-checkable half:
+    /// `action::tests::spec_steps_agree_with_plan` drives each command
+    /// through the real parser and `plan()` and compares. Three `outcome:`
+    /// strings claimed clean-before-fetch for six weeks after #24 stage 1
+    /// reversed exactly that, because nothing ever compared them to anything.
+    ///
+    /// Optional because not every valid invocation has a plan — `-h` never
+    /// reaches `Action` at all. `conf` does, and declares `[]`.
+    pub steps: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1010,8 +1022,9 @@ fn generate_error_text_rs(spec: &Spec) -> anyhow::Result<String> {
 fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
     let mut out = String::from(
         "// auto-generated\n#![allow(dead_code)]\npub struct CliExample { pub \
-         cmd: &'static str, pub valid: bool, pub outcome: &'static str }\npub \
-         const CLI_MATRIX: &[CliExample] = &[\n",
+         cmd: &'static str, pub valid: bool, pub outcome: &'static str, pub \
+         steps: Option<&'static [&'static str]> }\npub const CLI_MATRIX: \
+         &[CliExample] = &[\n",
     );
 
     let mut add = |exs: &[Example]| -> anyhow::Result<()> {
@@ -1019,9 +1032,18 @@ fn generate_cli_matrix_rs(spec: &Spec) -> anyhow::Result<String> {
             // Both fields are Rust literals: escape via the renderer, and
             // `{:?}` supplies the surrounding quotes.
             let outcome = render_rust_literal(&resolve_outcome(spec, ex)?);
+            let steps = match &ex.steps {
+                Some(steps) => {
+                    let names: Vec<String> =
+                        steps.iter().map(|s| format!("{s:?}")).collect();
+                    format!("Some(&[{}])", names.join(", "))
+                }
+                None => "None".to_string(),
+            };
             out.push_str(&format!(
-                "    CliExample {{ cmd: {:?}, valid: {}, outcome: {} }},\n",
-                ex.cmd, ex.valid, outcome
+                "    CliExample {{ cmd: {:?}, valid: {}, outcome: {}, steps: \
+                 {} }},\n",
+                ex.cmd, ex.valid, outcome, steps
             ));
         }
         Ok(())
@@ -1222,6 +1244,7 @@ mod tests {
             timeout_secs: None,
             expected_stdout: None,
             expected_stderr: None,
+            steps: None,
         }
     }
 

@@ -135,20 +135,24 @@ top_level:
       cmd: "xtgeoip -b"
       valid: true
       outcome: "backup database"
+      steps: [backup]
     - case_id: TL-007
       cmd: "xtgeoip -c"
       valid: true
       outcome: "clean database"
+      steps: [clean]
       rebuild: true
     - case_id: TL-008
       cmd: "xtgeoip -b -c"
       valid: true
       outcome: "backup then clean"
+      steps: [backup, clean]
       rebuild: true
     - case_id: TL-009
       cmd: "xtgeoip -b -p"
       valid: true
       outcome: "backup then prune"
+      steps: [backup, prune_bin]
     - case_id: TL-010
       cmd: "xtgeoip -c -p"
       valid: false
@@ -171,6 +175,7 @@ top_level:
       cmd: "xtgeoip -b -f"
       valid: true
       outcome: "force backup database"
+      steps: [backup]
     - case_id: TL-014
       cmd: "xtgeoip -b -c -f"
       valid: false
@@ -182,6 +187,7 @@ top_level:
       cmd: "xtgeoip -b -c -p"
       valid: true
       outcome: "backup then prune then clean"
+      steps: [backup, prune_bin, clean]
       rebuild: true
 
 commands:
@@ -200,10 +206,12 @@ commands:
         cmd: "xtgeoip fetch"
         valid: true
         outcome: "fetch CSVs"
+        steps: [fetch]
       - case_id: F-002
         cmd: "xtgeoip fetch -p"
         valid: true
         outcome: "fetch then prune archives"
+        steps: [fetch, prune_csv]
       - case_id: F-003
         cmd: "xtgeoip fetch -l"
         valid: false
@@ -243,14 +251,17 @@ commands:
         cmd: "xtgeoip build"
         valid: true
         outcome: "build database"
+        steps: [fetch, build]
       - case_id: B-002
         cmd: "xtgeoip build -l"
         valid: true
         outcome: "build (legacy mode)"
+        steps: [fetch, build]
       - case_id: B-003
         cmd: "xtgeoip build -b -p"
         valid: true
         outcome: "backup then prune then build"
+        steps: [backup, prune_bin, fetch, build]
       - case_id: B-004
         cmd: "xtgeoip build -p"
         valid: false
@@ -261,10 +272,12 @@ commands:
         cmd: "xtgeoip build -c -f"
         valid: true
         outcome: "clean then build"
+        steps: [fetch, clean, build]
       - case_id: B-006
         cmd: "xtgeoip build -b -c -p"
         valid: true
         outcome: "backup, prune, clean, build"
+        steps: [backup, prune_bin, fetch, clean, build]
       - case_id: B-007
         cmd: "xtgeoip build -b -p -f"
         valid: false
@@ -281,18 +294,22 @@ commands:
         cmd: "xtgeoip build -b"
         valid: true
         outcome: "backup then build"
+        steps: [backup, fetch, build]
       - case_id: B-010
         cmd: "xtgeoip build -c"
         valid: true
         outcome: "clean then build"
+        steps: [fetch, clean, build]
       - case_id: B-011
         cmd: "xtgeoip build -b -c"
         valid: true
         outcome: "backup then clean then build"
+        steps: [backup, fetch, clean, build]
       - case_id: B-012
         cmd: "xtgeoip build -b -f"
         valid: true
         outcome: "force backup then build"
+        steps: [backup, fetch, build]
       - case_id: B-013
         cmd: "xtgeoip build -b -c -f"
         valid: false
@@ -314,22 +331,27 @@ commands:
         cmd: "xtgeoip run"
         valid: true
         outcome: "fetch then build"
+        steps: [fetch, build]
       - case_id: R-002
         cmd: "xtgeoip run -l"
         valid: true
         outcome: "fetch then build (legacy)"
+        steps: [fetch, build]
       - case_id: R-003
         cmd: "xtgeoip run -p"
         valid: true
         outcome: "fetch then prune then build"
+        steps: [fetch, prune_csv, build]
       - case_id: R-004
         cmd: "xtgeoip run -c -p"
         valid: true
         outcome: "fetch then clean then prune then build"
+        steps: [fetch, clean, prune_csv, build]
       - case_id: R-005
         cmd: "xtgeoip run -c -f"
         valid: true
         outcome: "fetch then force clean then build"
+        steps: [fetch, clean, build]
       - case_id: R-006
         cmd: "xtgeoip run -b -p -f"
         valid: false
@@ -352,18 +374,22 @@ commands:
         cmd: "xtgeoip run -b"
         valid: true
         outcome: "backup then fetch then build"
+        steps: [backup, fetch, build]
       - case_id: R-010
         cmd: "xtgeoip run -b -c"
         valid: true
         outcome: "backup then fetch then clean then build"
+        steps: [backup, fetch, clean, build]
       - case_id: R-011
         cmd: "xtgeoip run -b -f"
         valid: true
         outcome: "force backup then fetch then build"
+        steps: [backup, fetch, build]
       - case_id: R-012
         cmd: "xtgeoip run -b -p"
         valid: true
         outcome: "backup then fetch then prune then build"
+        steps: [backup, fetch, prune_csv, build]
       - case_id: R-013
         cmd: "xtgeoip run -b -c -f"
         valid: false
@@ -394,15 +420,19 @@ commands:
         cmd: "xtgeoip conf -s"
         valid: true
         outcome: "show configuration"
+        steps: []
       - case_id: C-003
         cmd: "xtgeoip conf -d"
         valid: true
         outcome: "show default configuration"
+        steps: []
       - case_id: C-004
         cmd: "xtgeoip conf -e"
         valid: true
         outcome: "edit configuration"
+        steps: []
       - case_id: C-005
         cmd: "xtgeoip conf -c"
         valid: true
         outcome: "prompt for and encrypt MaxMind credentials"
+        steps: []

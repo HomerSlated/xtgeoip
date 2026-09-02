@@ -439,6 +439,102 @@ mod tests {
         );
     }
 
+    // ── spec ↔ plan agreement (#92) ──────────────────────────────────────
+
+    /// Every step in a plan, in execution order, as the names `cli.yaml` uses.
+    fn step_names(action: &Action) -> Vec<&'static str> {
+        fn name(s: &Step) -> &'static str {
+            match s {
+                Step::Backup { .. } => "backup",
+                Step::Clean { .. } => "clean",
+                Step::Fetch { .. } => "fetch",
+                Step::PruneCsv => "prune_csv",
+                Step::PruneBin => "prune_bin",
+            }
+        }
+        match plan(action) {
+            Plan::Simple(steps) => steps.iter().map(name).collect(),
+            Plan::Pipeline { pre, mid, .. } => {
+                let mut v: Vec<&'static str> = pre.iter().map(name).collect();
+                v.push("fetch");
+                v.extend(mid.iter().map(name));
+                v.push("build");
+                v
+            }
+        }
+    }
+
+    /// The spec's `steps:` must match what `plan()` actually does.
+    ///
+    /// This is the check whose absence let three `outcome:` strings claim
+    /// clean-before-fetch for six weeks after `0712783` (#24 stage 1) reversed
+    /// that order — R-004, R-005 and R-010 shipped into the man page saying so,
+    /// and were found by reading, not by tooling. `outcome:` stays authored
+    /// prose; `steps:` is the machine-checkable half, and this compares it
+    /// against the real parser and the real planner.
+    ///
+    /// Covers every documented invocation rather than the eleven Actions the
+    /// goldens above pin by hand. Step *parameters* (backup mode, fetch mode,
+    /// legacy) are the goldens' job; this one owns membership and order.
+    #[test]
+    fn spec_steps_agree_with_plan() {
+        use clap::Parser;
+
+        use crate::{
+            cli::{Cli, CliOutcome, normalize_cli_to_action},
+            generated::cli_matrix::CLI_MATRIX,
+        };
+
+        let mut problems = Vec::new();
+
+        for ex in CLI_MATRIX {
+            let argv: Vec<&str> = ex.cmd.split_whitespace().collect();
+            let action = match Cli::try_parse_from(&argv) {
+                Ok(cli) => match normalize_cli_to_action(&cli) {
+                    Ok(CliOutcome::Action(a)) => Some(a),
+                    _ => None,
+                },
+                Err(_) => None,
+            };
+
+            match (action, ex.steps) {
+                (Some(action), Some(declared)) => {
+                    let actual = step_names(&action);
+                    if actual != declared {
+                        problems.push(format!(
+                            "  {:?}: spec says {declared:?}, plan() gives \
+                             {actual:?}",
+                            ex.cmd
+                        ));
+                    }
+                }
+                // An invocation that reaches `Action` has a plan, so leaving
+                // `steps:` off would opt it out of this check silently. That
+                // is the failure mode the check exists to prevent, so it is
+                // itself a failure.
+                (Some(_), None) => problems.push(format!(
+                    "  {:?}: reaches Action but declares no `steps:` in \
+                     cli.yaml",
+                    ex.cmd
+                )),
+                (None, Some(declared)) => problems.push(format!(
+                    "  {:?}: declares steps {declared:?} but never reaches \
+                     Action",
+                    ex.cmd
+                )),
+                (None, None) => {}
+            }
+        }
+
+        assert!(
+            problems.is_empty(),
+            "{} of {} spec examples disagree with plan():\n{}",
+            problems.len(),
+            CLI_MATRIX.len(),
+            problems.join("\n")
+        );
+    }
+
     /// The point of #24 stage 1, stated as an invariant rather than a
     /// sequence: nothing destructive may precede the fetch except the backup.
     #[test]
