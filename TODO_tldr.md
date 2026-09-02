@@ -75,7 +75,7 @@ test.
 - Guardian coverage is thin: only `fetch.rs` and `secrets.rs` are signed. `config.rs` and `conf.rs` are unsigned and changed substantially in #103/#104 — the credential-handling path. **`fetch.rs`'s signature is now stale too** (#100, 2026-09-02): the `.sig` was left in place so the next pre-flight raises it, and a row is in `private/guardian/needs_reverification.md`
 - `tests/` is an empty directory; there is no `lib` target, so nothing can live there
 - Man-page prose in `docs/spec/manpage-template.toml` is hand-written and unchecked against the code. Three drifts found on 2026-09-02 (step ordering; the whole `conf -c` credential workflow missing since #103; a `[maxmind]` `timeout` key that does not exist and that `deny_unknown_fields` would reject). Nothing prevents a fourth
-- `logging.verbose` is in the shipped `xtgeoip.conf.example` but **no code reads it**. `Logging` has no such field and no `deny_unknown_fields`, so it is silently ignored. Either a dead key to delete or an unimplemented feature — likely related to the #1 residual
+- `[logging]` and `[paths]` accept unknown keys; `[maxmind]` does not (`deny_unknown_fields`). That asymmetry is why `logging.verbose` sat in the shipped example unread. Tightening it would reject configs copied from that example, so it needs a migration story rather than a one-line attribute
 
 ---
 

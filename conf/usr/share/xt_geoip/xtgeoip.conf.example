@@ -11,7 +11,6 @@ output_dir = "/usr/share/xt_geoip"
 
 [logging]
 log_file = "/var/log/xtgeoip.log"
-verbose = false
 
 # Optional. Number of worker threads used to parse the CSVs and build the
 # database. Omit it, or set 0, to use every available core.

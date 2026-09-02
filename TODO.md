@@ -203,10 +203,16 @@ Verified live: `xtgeoip conf -d --log-file /tmp/xt-override.log` creates the
 file, and the same command without the flag does not. Seven tests in total
 (4 precedence, 3 clap/doc).
 
-**Not addressed:** `logging.verbose` ships in `xtgeoip.conf.example` and no
-code reads it. `Logging` has no such field and no `deny_unknown_fields`, so it
-is accepted and ignored. Whether it is a dead key to delete or an
-unimplemented feature is a decision, not a cleanup — left in HOUSEKEEPING.
+**`logging.verbose` deleted (2026-09-02, user's call):** logging is either on
+or off; there is no verbose option. It shipped in `xtgeoip.conf.example` and
+no code ever read it — `Logging` has no such field.
+
+`deny_unknown_fields` was deliberately *not* added to `Logging` at the same
+time. It is why the key went unnoticed (`[maxmind]` has it, `[logging]` and
+`[paths]` do not), but adding it now would make every config copied from the
+shipped example fail to load — the key is inert today and would become fatal.
+That needs a migration story, and is recorded in HOUSEKEEPING rather than
+done here.
 
 ---
 
