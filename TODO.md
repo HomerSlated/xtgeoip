@@ -811,6 +811,15 @@ strings describe, so asserting `outcome:` against it would turn this drift
 into a build failure. That check is also the oracle any spec-derived planning
 work would need first — see the OVERVIEW.
 
+**A third instance, 2026-09-02.** The CONFIGURATION section documented a
+`[maxmind]` request-timeout key. There is no such config option — the timeout
+is the `DEFAULT_TIMEOUT_SECS` constant in `fetch.rs` — and `MaxMind` carries
+`#[serde(deny_unknown_fields)]`, so an operator who followed the man page
+would have produced a config that *fails to load*. Documentation is the only
+place that key has ever existed. Corrected along with the rest of the section
+list, which had also omitted `paths.archive_prune`, the `[maxmind.credentials]`
+sub-table, and `[processing]` entirely.
+
 ---
 
 ## DOCGEN (xtgeoip-docgen.rs)

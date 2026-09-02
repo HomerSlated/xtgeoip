@@ -66,6 +66,7 @@ test.
 - **Cached-archive fallback on failed fetch: REJECTED.** Rebuilding the same version over an intact install is a guaranteed no-op with real risk. `build` already spells that request
 - **Unattended cron: removed by design (#103).** Do not restore it by stashing the passphrase anywhere
 - **Fuzzing/proptest for CLI semantics: dropped.** 136 total combinations; `cli::snapshot` already enumerates all of them exhaustively
+- **Toolchain is pinned in `rust-toolchain.toml` (2026-09-02).** Do not reintroduce `dtolnay/rust-toolchain@stable` or `cargo +stable` in CI — both bypass the pin. Bump the pin deliberately and read the new lints then. `rustfmt` is intentionally not a pinned component, so a bare `cargo fmt` fails rather than formatting with a stable rustfmt that ignores the four nightly-only options in `rustfmt.toml`; use `cargo +nightly fmt`
 
 ---
 
@@ -73,7 +74,8 @@ test.
 
 - Guardian coverage is thin: only `fetch.rs` and `secrets.rs` are signed. `config.rs` and `conf.rs` are unsigned and changed substantially in #103/#104 — the credential-handling path
 - `tests/` is an empty directory; there is no `lib` target, so nothing can live there
-- Man-page prose in `docs/spec/manpage-template.toml` is hand-written and unchecked against the code. Two drifts found on 2026-09-02 (step ordering; the whole `conf -c` credential workflow missing since #103). Nothing prevents a third
+- Man-page prose in `docs/spec/manpage-template.toml` is hand-written and unchecked against the code. Three drifts found on 2026-09-02 (step ordering; the whole `conf -c` credential workflow missing since #103; a `[maxmind]` `timeout` key that does not exist and that `deny_unknown_fields` would reject). Nothing prevents a fourth
+- `logging.verbose` is in the shipped `xtgeoip.conf.example` but **no code reads it**. `Logging` has no such field and no `deny_unknown_fields`, so it is silently ignored. Either a dead key to delete or an unimplemented feature — likely related to the #1 residual
 
 ---
 
@@ -85,7 +87,9 @@ test.
 (closed unimplemented — guarded by a structural invariant already, see
 `TODO.md`), #98 documentation half. 2026-09-02 — man-page corrections
 (step ordering vs `plan()`; `conf -c` / encrypted-credential workflow, a
-#103 documentation residual) and the `#27` trace.
+#103 documentation residual; the config-section list), the `#27` trace, and
+CI unblocked after 30 red runs (`clippy::byte_char_slices` under a stable
+four releases newer than the local one; toolchain now pinned).
 
 Several were closed as **premise-invalidated** after checking against
 source: #38, #54, #88 and #96 described code that no longer existed.

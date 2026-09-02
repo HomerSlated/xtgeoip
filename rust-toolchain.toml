@@ -1,0 +1,24 @@
+# Single source of truth for the Rust toolchain, for CI and local development
+# alike.
+#
+# Before this file, CI resolved `dtolnay/rust-toolchain@stable` at run time
+# while local work used whatever the rustup directory override pointed at.
+# The two drifted four releases apart (1.98.0 vs 1.94.0) and the lint job was
+# red for 30 consecutive runs on a lint that did not exist locally, so
+# `scripts/sync.py`'s pre-commit clippy gate was silently weaker than CI.
+# Pinning both sides makes a local `cargo clippy` authoritative again.
+#
+# Bump this deliberately, and read the new lints when you do — a scheduled
+# bump is a better trigger for that review than a surprise red build.
+#
+# `rustfmt` is deliberately NOT listed as a component. rustfmt.toml uses four
+# nightly-only options (wrap_comments, format_strings, imports_granularity,
+# group_imports) that a stable rustfmt silently ignores, so a bare
+# `cargo fmt` would format the tree differently and CI's
+# `cargo +nightly fmt -- --check` would then fail. Omitting the component
+# makes `cargo fmt` fail loudly instead of formatting wrongly. Always use
+# `cargo +nightly fmt`, as `scripts/sync.py` does.
+
+[toolchain]
+channel = "1.98.0"
+components = ["clippy"]

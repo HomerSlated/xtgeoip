@@ -423,17 +423,39 @@ Additional configuration sections:
 .B [paths]
 .I archive_dir
 (default:
-.IR /var/lib/xt_geoip )
-and
+.IR /var/lib/xt_geoip ),
 .I output_dir
 (default:
-.IR /usr/share/xt_geoip ).
+.IR /usr/share/xt_geoip ),
+and
+.I archive_prune
+\(em how many archived versions to keep (default: 3).
 .TP
 .B [maxmind]
-Download URL and (optionally) request timeout.
+.I url
+\(em the GeoLite2 CSV download endpoint.
+It must use
+.IR https :
+the license key is sent as HTTP basic auth on the first request, so a
+cleartext origin would expose it before any redirect is involved.
+The
+.I credentials
+sub-table is written by
+.B "xtgeoip conf \-c"
+and should not be edited by hand.
+No other key is accepted in this section; an unrecognised one is a parse
+error, not a warning.
 .TP
 .B [logging]
-Log file path.
+.I log_file
+\(em path to the log file.
+.TP
+.B [processing]
+.I threads
+\(em number of worker threads used to parse the CSVs and build the database.
+Absent, or set to
+.BR 0 ,
+means use every available core.
 .RE
 .PP
 Use

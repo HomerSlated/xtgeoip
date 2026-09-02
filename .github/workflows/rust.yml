@@ -9,12 +9,21 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# The stable toolchain is pinned by rust-toolchain.toml, not selected here:
+# `rustup show` installs whatever that file names, and a bare `cargo ...`
+# resolves through it. Do not reintroduce `dtolnay/rust-toolchain@stable` or
+# `cargo +stable` for these jobs — both bypass the pin and reopen the drift
+# between CI and local development that kept this workflow red for 30 runs.
+# rustfmt is the deliberate exception: rustfmt.toml needs nightly-only
+# options, so the format check installs nightly and calls it explicitly.
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install pinned toolchain
+        run: rustup show
       - uses: Swatinem/rust-cache@v2
       - name: Build
         run: cargo build --all-targets
@@ -23,15 +32,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
+      - name: Install pinned toolchain
+        run: rustup show
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: Clippy
-        run: cargo +stable clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets -- -D warnings
       - name: Format check
         run: cargo +nightly fmt -- --check
 
@@ -39,7 +47,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install pinned toolchain
+        run: rustup show
       - uses: Swatinem/rust-cache@v2
       - name: Test
         run: cargo test
@@ -48,7 +57,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install pinned toolchain
+        run: rustup show
       - uses: Swatinem/rust-cache@v2
       - name: Run docgen
         run: cargo run --bin xtgeoip-docgen
