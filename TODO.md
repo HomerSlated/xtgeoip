@@ -1280,6 +1280,78 @@ Priority / notes:
 
 ---
 
+## MAINTENANCE / SUPPLY CHAIN
+
+### Dependency advisories — six live, unnoticed for four and a half months ✅ BUMPED (2026-09-03)
+
+The 2026-09-02 toolchain work closed *compiler* drift and left a matching hole
+open: `HOUSEKEEPING` predicted that nothing reported whether crate updates or
+advisories had gone stale. Checking that prediction turned it from a process
+gap into a live exposure. `cargo audit` against the lockfile at `1cf6038`:
+
+| Crate | Advisory | Reachable here? |
+|---|---|---|
+| `rustls-webpki` 0.103.10 | RUSTSEC-2026-0098 — URI name constraints incorrectly accepted | **yes** — TLS to MaxMind |
+| `rustls-webpki` 0.103.10 | RUSTSEC-2026-0099 — name constraints accepted for wildcard certs | **yes** |
+| `rustls-webpki` 0.103.10 | RUSTSEC-2026-0104 — reachable panic in CRL parsing | **yes** |
+| `h2` 0.4.13 | RUSTSEC-2026-0258 — unbounded empty DATA frames | **yes** — via `hyper`/`reqwest` |
+| `crossbeam-epoch` 0.9.18 | RUSTSEC-2026-0204 — invalid pointer deref in `fmt::Pointer` | in tree (Rayon), needs a `Debug`-print of an `Atomic` we never do |
+| `quinn-proto` 0.11.14 | RUSTSEC-2026-0185 — remote memory exhaustion (7.5 high) | **no** — lockfile-only |
+
+Plus four non-fatal warnings: `anyhow`, `memmap2` and `rand` unsound,
+`chacha20` yanked.
+
+**The one rated `high` is the one that does not apply.** `cargo tree -i
+quinn-proto -e normal --target all` returns no edge — it is a lockfile entry
+from a `reqwest` feature that is not enabled, so it is never compiled in. The
+three that matter are the `rustls-webpki` ones, two of which are certificate
+name-constraint validation accepting inputs it should reject, directly on the
+path that fetches from MaxMind. Recorded because the severity column would
+otherwise point at the wrong row.
+
+**Fixed by `cargo update` alone** — lockfile only, no `Cargo.toml` change:
+
+```
+cargo audit on the lock at 1cf6038  -> exit 1  (6 vulnerabilities, 4 warnings)
+cargo audit after cargo update      -> exit 0
+```
+
+**The exact pins are untouched, and that is not luck — it is the reason the
+yanked crate hid.** `argon2`, `chacha20poly1305`, `secrecy`, `zeroize`,
+`toml_edit` and `serde-saphyr` are all pinned `=`, and all six hold their
+versions across the update. Only the transitive `chacha20` moves, 0.10.1 →
+0.10.2 — which is the yanked one. **An `=` pin constrains the crate named, not
+its subtree**, so a frozen `chacha20poly1305 =0.11.0` never protected the
+`chacha20` beneath it. Worth keeping: the pins are a deliberate policy for the
+credential path, and it would be easy to read them as freezing more than they
+do.
+
+**What verified the bump, and what did not.** `cargo test` (188), clippy,
+rustfmt, docgen-check and a release build all pass, but none of them exercise
+a real ZIP decode or a real TLS handshake — and `zip` moved three minors
+(8.3.1 → 8.6.0) on the crate that parses untrusted MaxMind input. So the real
+decode was driven directly, through `extract_archive_to_temp` (which includes
+`scan_zip_entries`' traversal/absolute-path/exec-bit checks and the
+`MAX_EXTRACT_BYTES` cap), against the five real archives in
+`/var/lib/xt_geoip`: all five decoded to 12 entries and ~45 MB each. That run
+costs **no MaxMind budget and no root** — the archives are world-readable, and
+this is the local half of the observation in #89 that the `build -l` cycle is
+network-free. It was a throwaway probe, removed afterwards; making it a
+permanent test would need a decision about depending on machine state that is
+not in the repo.
+
+**Still unverified: the live fetch and the TLS handshake.** That needs
+`xtgeoip-tests --rebuild` — root, a release build, and part of the
+rate-capped budget.
+
+### The gate — `cargo audit` in CI and `sync.py`
+
+See the next commit. The detector is the deliverable; the bump above is the
+remediation that had to land first, or the gate would have blocked its own
+introduction (`sync.py` runs its checks *before* committing).
+
+---
+
 ## LOW PRIORITY / LARGE SCOPE
 
 ### #24 — pipelines: no rollback on mid-pipeline failure ✅ CLOSED (2026-07-18) — stage 1 done, stages 2–3 rejected
