@@ -1344,11 +1344,62 @@ not in the repo.
 `xtgeoip-tests --rebuild` — root, a release build, and part of the
 rate-capped budget.
 
-### The gate — `cargo audit` in CI and `sync.py`
+### The gate — `cargo audit` in CI and `sync.py` ✅ DONE (2026-09-03)
 
-See the next commit. The detector is the deliverable; the bump above is the
-remediation that had to land first, or the gate would have blocked its own
-introduction (`sync.py` runs its checks *before* committing).
+The bump above is remediation; this is the detector, and it is the part that
+stops the gap reopening. It had to land *second*: `sync.py` runs its checks
+before committing, so a gate added while the lock was still vulnerable would
+have blocked its own introduction.
+
+**Three pieces.**
+
+- `.cargo/audit.toml` — severity policy and the ignore list (empty). Read by
+  `cargo audit` from the working directory; unrelated to `.cargo/config.toml`.
+- CI job `audit` — separate from `lint`, so a vulnerable crate and a clippy
+  failure are never one red X; they have different owners and different fixes.
+  It compiles nothing, since `cargo audit` reads only `Cargo.lock` and the
+  RustSec database.
+- `scripts/sync.py::_check_advisories` — a pre-flight beside
+  `_check_toolchain`, before anything that compiles.
+
+**The exit code is not the verdict.** `cargo audit` exits 1 both when it finds
+a vulnerability and when it cannot reach the advisory database — measured,
+both give exit 1, and the second prints no report at all. That is the same
+ambiguity this repo already refused to accept from `gh` on 2026-09-02, where
+"not logged in" was indistinguishable from "no run yet" and burned the whole
+CI deadline. So the gate branches on whether a **parseable JSON report** came
+back, not on the status: a report means the audit ran and its answer is
+trustworthy either way; no report means nobody could answer, which is a
+warning. A GitHub blip must not read as "your dependencies are vulnerable"
+and block a commit.
+
+All four paths were exercised rather than assumed:
+
+| Situation | Result |
+|---|---|
+| clean lockfile | continues, `No advisories against 306 dependencies` |
+| six vulnerabilities (the pre-bump lock) | **aborts**, lists all six with IDs and the remedy |
+| advisory DB unreachable | warns, **continues** — no false block |
+| `cargo-audit` not installed | **aborts** with the install command |
+
+The last one matters as much as the others. A missing tool that let the gate
+pass silently would be the "skipped, therefore fine" failure `sync.py`'s own
+docstring was written about.
+
+**Vulnerabilities block; `unsound`/`unmaintained`/`yanked` report.** Not
+tightened to `-D warnings`, and it should not be. Clippy's `-D warnings`
+covers our code and is therefore always fixable by us; an advisory warning
+concerns a crate we do not own and may have no fix at all, so making those
+fatal would wedge every commit on an upstream release schedule. In the
+demonstration above the four warnings printed while the six vulnerabilities
+aborted — the split is visible, not theoretical.
+
+**A weekly schedule, because advisories are not published on our timetable.**
+A check that only runs on a commit cannot report anything during a quiet
+fortnight, which is exactly how six went unnoticed. ⚠ GitHub disables
+scheduled workflows after 60 days of repository inactivity and does not
+announce it, so the canary can stop with the repo — noted in the workflow so
+a silent green is not mistaken for a real one.
 
 ---
 

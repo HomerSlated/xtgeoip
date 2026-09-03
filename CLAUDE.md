@@ -7,9 +7,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 cargo build            # debug build
 cargo build --release  # release build
-cargo clippy           # lint
-rustfmt --check src/   # format check (80-col max, see rustfmt.toml)
+cargo clippy --all-targets -- -D warnings   # lint (as CI runs it)
+cargo "+$(cat rustfmt-toolchain)" fmt -- --check   # format check (80-col, rustfmt.toml)
+cargo audit            # dependency advisories
 ```
+
+Both toolchains are pinned. The stable one is in `rust-toolchain.toml`, so a
+bare `cargo ...` resolves through it. The formatter is the *only* exception:
+`rustfmt.toml` uses five nightly-only options, so the format check runs under
+the dated nightly named in `rustfmt-toolchain`, which CI and the sync script
+both read. Do not add `rustfmt` to the stable toolchain — a stable rustfmt
+silently discards those five options, `ignore` among them, and then rewrites
+`src/generated/`.
+
+`cargo audit` needs `cargo install cargo-audit --locked`. Vulnerabilities
+block; `unsound`/`unmaintained`/`yanked` report. Policy and the ignore list
+are in `.cargo/audit.toml`.
 
 Before a release build, run the pre-build workflow:
 

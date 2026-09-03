@@ -1,0 +1,43 @@
+# cargo-audit configuration.
+#
+# Read by `cargo audit` from the working directory; it has nothing to do with
+# `.cargo/config.toml`, which cargo itself reads. Both CI and scripts/sync.py
+# run the audit from the repository root, so both pick this up.
+#
+# ── What blocks, and what only reports ────────────────────────────────────
+#
+# The default severity split is deliberate and should not be tightened to
+# `-D warnings`. A *vulnerability* is an exposure in code we ship and it
+# blocks. An `unsound`, `unmaintained` or `yanked` warning is information
+# about somebody else's crate, and may have no fix available at all — making
+# those fatal would block every commit until an upstream we do not control
+# acts. That is a different situation from clippy's `-D warnings`, which
+# covers our own code and is therefore always fixable by us.
+#
+# ── The ignore list ───────────────────────────────────────────────────────
+#
+# Empty, and it should stay that way unless there is a reason that survives
+# being written down. An ignore list is where advisories go to die quietly,
+# so every entry must carry, in a comment directly above it:
+#
+#   1. the advisory ID and its publication date
+#   2. why it is not reachable in *this* program — not "it looks minor"
+#   3. a review date, so it is reconsidered rather than inherited
+#
+# Remove the entry the moment a fix ships. If an entry has outlived its
+# review date, that is a finding in itself.
+#
+# ── The exact pins are not auto-updatable ─────────────────────────────────
+#
+# `argon2`, `chacha20poly1305`, `secrecy`, `zeroize`, `toml_edit` and
+# `serde-saphyr` are pinned `=` in Cargo.toml on purpose — five of them are
+# the credential-encryption path (#103). An advisory against one of those is
+# a decision for the maintainer, not something to clear with `cargo update`,
+# and this gate deliberately reports rather than fixes.
+#
+# Note also that an `=` pin constrains the crate named, not its subtree: the
+# yanked `chacha20 0.10.1` sat *underneath* a frozen `chacha20poly1305
+# =0.11.0` and moved freely once the lock was refreshed (2026-09-03).
+
+[advisories]
+ignore = []

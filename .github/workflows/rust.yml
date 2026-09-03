@@ -5,6 +5,21 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+  # Weekly, for the audit job below. A dependency advisory is published on
+  # somebody else's schedule, not ours, so a check that only runs on a commit
+  # cannot report one during a quiet fortnight — which is exactly how six of
+  # them went unnoticed for four and a half months (2026-09-03).
+  #
+  # ⚠ GitHub disables scheduled workflows after 60 days without repository
+  # activity, and does not announce it. If this repo goes quiet, the canary
+  # stops with it and the Actions tab shows a re-enable prompt. Check there
+  # before concluding the audit has been green all along.
+  #
+  # The other jobs run on the schedule too. That is deliberate and nearly
+  # free: a weekly green build also proves the pinned toolchain is still
+  # installable, which nothing else checks.
+  schedule:
+    - cron: "17 6 * * 1"
 
 env:
   CARGO_TERM_COLOR: always
@@ -67,3 +82,31 @@ jobs:
         run: cargo run --bin xtgeoip-docgen
       - name: Check generated files are up to date
         run: git diff --exit-code src/generated/ docs/generated/
+
+  # Dependency advisories. Separate from `lint` so a vulnerable crate and a
+  # clippy failure are never reported as one red X — they have different
+  # owners and different fixes.
+  #
+  # This job compiles nothing: `cargo audit` reads Cargo.lock and the RustSec
+  # database, so it needs neither the project nor its dependencies built. The
+  # toolchain still installs, because rust-toolchain.toml applies to any cargo
+  # invocation in the tree; that is a few seconds and keeps the command here
+  # byte-identical to the one scripts/sync.py runs locally. Divergence between
+  # the local and CI forms of a check is the failure this workflow already
+  # learned the hard way.
+  #
+  # Severity policy lives in .cargo/audit.toml: vulnerabilities block,
+  # unsound/unmaintained/yanked report. Do not add `-D warnings` here — see
+  # the reasoning in that file.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        run: rustup show
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: Audit dependencies
+        run: cargo audit
