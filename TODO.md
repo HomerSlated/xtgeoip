@@ -1352,6 +1352,25 @@ deleted ordering (the count guard), an invocation the guards reject, the
 `timeout` key reinstated verbatim (caught), an undocumented key added to the
 example, a drifted default, and `deny_unknown_fields` removed from `MaxMind`.
 
+**Follow-up the same day** (the commit after *check the man page against the planner and the config*)**.** Both directions now
+compare against one extraction of the section's `.I key` / `.B [section]`
+tokens rather than searching the prose for a substring. Not a live bug — no
+current key is a substring of another, so the substring form gave the right
+answer for every key that exists today — but `archive_dir` and
+`archive_prune` are already prefix-siblings, and a future `output_dir_mode`
+would have been reported as documented the moment `output_dir` was. Removing
+a latent trap while the reasoning is fresh is cheaper than rediscovering it.
+Teeth re-verified after the refactor, since a refactor that quietly disarms a
+check is precisely the failure this area exists to prevent.
+
+The same follow-up explains an asymmetry that would otherwise read as an
+oversight: `manpage_execution_order_agrees_with_the_planner` pins an *exact*
+count of four, while the defaults check asserts a *floor* of four. The
+orderings are a closed list of illustrations, so a change in their number is
+worth a look; the documented defaults grow whenever a key gains one, and
+`log_file` took that count from three to four in this very change. An exact
+count there would fail on an improvement to the documentation.
+
 **Not done: the generation-time half.** Checking the template against
 `cli.yaml` — that every command and flag it names exists in the spec — is
 spec-internal and would belong in docgen's `validate_*` family. Left out

@@ -650,15 +650,52 @@ mod tests {
     /// documented`, for the configuration file rather than the flags. A key
     /// added to the shipped example and not written up here reaches users as
     /// an undocumented setting.
+    /// The identifiers the CONFIGURATION section documents: keys as a lone
+    /// `.I name`, sections as `.B [name]`.
+    ///
+    /// Both directions compare against this rather than searching the
+    /// section for a substring, so a key cannot count as documented merely
+    /// because it is a prefix of a different one. `archive_dir` and
+    /// `archive_prune` are already prefix-siblings, and nothing stops a
+    /// future `output_dir_mode` — a substring test would report that one
+    /// documented the moment `output_dir` was.
+    fn documented_identifiers() -> Vec<String> {
+        let section = manpage_configuration();
+        let snake = |t: &str| {
+            !t.is_empty()
+                && t.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+        };
+        let keys = section
+            .lines()
+            .filter_map(|l| l.strip_prefix(".I ").map(str::trim))
+            .filter(|t| snake(t))
+            .map(str::to_owned);
+        // `.B [maxmind.credentials]` names a sub-table, not a section; the
+        // snake filter drops it on the dot.
+        let sections = section
+            .lines()
+            .filter_map(|l| l.strip_prefix(".B ["))
+            .filter_map(|l| l.split(']').next().map(str::trim))
+            .filter(|t| snake(t))
+            .map(str::to_owned);
+        keys.chain(sections).collect()
+    }
+
     #[test]
     fn manpage_documents_every_shipped_config_key() {
-        let section = manpage_configuration();
         let (names, _) = shipped_config_keys();
+        let documented = documented_identifiers();
 
         assert!(!names.is_empty(), "no keys parsed from {EXAMPLE_CONFIG}");
+        assert!(
+            !documented.is_empty(),
+            "no `.I key` or `.B [section]` lines found in CONFIGURATION — the \
+             roff shape this scan relies on has changed, so it is checking \
+             nothing"
+        );
 
         let missing: Vec<&String> =
-            names.iter().filter(|n| !section.contains(*n)).collect();
+            names.iter().filter(|n| !documented.contains(n)).collect();
         assert!(
             missing.is_empty(),
             "{EXAMPLE_CONFIG} ships {missing:?}, which the man page's \
@@ -682,18 +719,8 @@ mod tests {
     /// over them.
     #[test]
     fn manpage_names_no_unknown_config_key() {
-        let section = manpage_configuration();
         let (names, _) = shipped_config_keys();
-
-        let documented: Vec<&str> = section
-            .lines()
-            .filter_map(|l| l.strip_prefix(".I "))
-            .map(str::trim)
-            .filter(|t| {
-                !t.is_empty()
-                    && t.chars().all(|c| c.is_ascii_lowercase() || c == '_')
-            })
-            .collect();
+        let documented = documented_identifiers();
 
         assert!(
             !documented.is_empty(),
@@ -710,10 +737,10 @@ mod tests {
         const WRITTEN_AT_RUNTIME: &[&str] = &["credentials"];
         assert!(WRITTEN_AT_RUNTIME.len() <= 2, "exception list is growing");
 
-        let unknown: Vec<&&str> = documented
+        let unknown: Vec<&String> = documented
             .iter()
-            .filter(|d| !names.iter().any(|n| n == *d))
-            .filter(|d| !WRITTEN_AT_RUNTIME.contains(*d))
+            .filter(|d| !names.contains(d))
+            .filter(|d| !WRITTEN_AT_RUNTIME.contains(&d.as_str()))
             .collect();
         assert!(
             unknown.is_empty(),
@@ -780,6 +807,16 @@ mod tests {
             );
             checked += 1;
         }
+        // A floor, where `manpage_execution_order_agrees_with_the_planner`
+        // pins an exact count — the asymmetry is deliberate. That test scans
+        // a closed list of four illustrative orderings, so a change in the
+        // number is itself worth a look. This one scans however many keys
+        // happen to carry a documented default, which legitimately grows
+        // whenever a key gains one: `log_file` took it from three to four in
+        // this very change. An exact count here would fail on an improvement
+        // to the documentation, which is the wrong incentive. The floor still
+        // catches the failure that matters — a scan that has stopped matching
+        // the roff and is silently checking less.
         assert!(
             checked >= 4,
             "only {checked} documented defaults were cross-checked against \
