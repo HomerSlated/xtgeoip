@@ -1493,12 +1493,58 @@ fatal would wedge every commit on an upstream release schedule. In the
 demonstration above the four warnings printed while the six vulnerabilities
 aborted — the split is visible, not theoretical.
 
-**A weekly schedule, because advisories are not published on our timetable.**
-A check that only runs on a commit cannot report anything during a quiet
-fortnight, which is exactly how six went unnoticed. ⚠ GitHub disables
-scheduled workflows after 60 days of repository inactivity and does not
-announce it, so the canary can stop with the repo — noted in the workflow so
-a silent green is not mistaken for a real one.
+**A weekly schedule was added here and removed the next day (2026-09-04).**
+Recorded in full because the reasoning that removed it is worth more than the
+schedule was.
+
+The stated justification was wrong. It read: "a check that only runs on a
+commit cannot report anything during a quiet fortnight, which is exactly how
+six went unnoticed." The second clause does not follow. The six went unnoticed
+because **there was no detector at all** — had the gate existed, the push on
+2026-08-20 would have caught `h2` (published 2026-08-17) three days later. A
+future reader trusting that sentence would draw the wrong lesson about what
+failed.
+
+Two things were then wrong with the schedule itself.
+
+- **It was over-broad.** Four of the five jobs read nothing but the
+  repository, so their answer cannot change while it sits untouched. Running
+  them on a Monday only repeats what Friday's push already said. The
+  "a weekly green build proves the toolchain is still installable"
+  justification was thin: the runner image and the floating action tags can
+  drift, but that surfaces on the next push, which is when it would have to
+  be fixed anyway.
+- **A cron is the wrong instrument even for `audit`.** That job genuinely
+  differs — its second input is the RustSec database, which moves whether or
+  not anyone pushes. But ⚠ GitHub disables scheduled workflows after 60 days
+  of repository inactivity, silently. So the check evaporates precisely in
+  the long-idle case that motivates it, and eight Mondays of green followed
+  by silence is indistinguishable from all-clear. The push history makes this
+  concrete rather than hypothetical: gaps of 32 and 12 days in two months.
+
+**The test worth keeping**: can a check's answer change while the repository
+is untouched? For `build`, `lint`, `test` and `docgen-check`, no. For `audit`,
+yes.
+
+**Dependabot was considered and rejected (2026-09-04).** It solves the idle
+case properly — server-side, no expiry — but the maintainer's position is
+that updates get applied on their terms and **the check stays local**. Two
+reasons that is not merely a preference: "always use the latest version" is a
+fallacy that carries its own baggage, and this project deliberately pins six
+crates exact for the credential path, where an upstream-driven bump is a
+decision rather than a chore. Recorded so it is not re-proposed. (For anyone
+revisiting: Dependabot *alerts* — notify only — and Dependabot *security
+updates* — auto-open PRs — are separate settings, and only the second is the
+treadmill. The decision above covers both regardless.)
+
+**So the idle gap is open, and is meant to be filled locally.** Nothing is
+built for it yet. `cargo audit` is a single command with a meaningful exit
+code, so a user-level timer, a shell hook, or simply running it by hand all
+work; what it must not become is anything that updates a dependency without a
+human deciding to.
+
+`cargo audit` remains a push gate, which is what a workflow is good at:
+refusing a vulnerable lockfile at the door rather than watching the world.
 
 ---
 
