@@ -27,6 +27,22 @@
 # inner attributes are unstable), and the per-item form would mean docgen
 # emitting an attribute before every generated item.
 
+# ── Is this pin stale? ───────────────────────────────────────────────────
+#
+#   rustup check
+#
+# reports the newest stable, the newest nightly and the newest rustup,
+# without installing anything. Compare its `stable` line against the channel
+# below and the `nightly` date against `rustfmt-toolchain`. That is the whole
+# check — local, half a second, and it never updates anything on its own.
+#
+# It exists because pinning solved one problem and created another. Before
+# the pin, CI floated and local did not, and the two silently drifted four
+# releases apart. After it, nothing at all reports that the pin *itself* has
+# aged — and a pin that is never revisited is just the old stale toolchain
+# with better paperwork. Bump on a schedule you choose, not on one a red
+# build chooses for you.
+
 [toolchain]
 channel = "1.98.0"
 components = ["clippy"]

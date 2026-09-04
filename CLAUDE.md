@@ -10,6 +10,7 @@ cargo build --release  # release build
 cargo clippy --all-targets -- -D warnings   # lint (as CI runs it)
 cargo "+$(cat rustfmt-toolchain)" fmt -- --check   # format check (80-col, rustfmt.toml)
 cargo audit            # dependency advisories
+rustup check           # is either toolchain pin stale?
 ```
 
 Both toolchains are pinned. The stable one is in `rust-toolchain.toml`, so a
@@ -19,6 +20,11 @@ the dated nightly named in `rustfmt-toolchain`, which CI and the sync script
 both read. Do not add `rustfmt` to the stable toolchain — a stable rustfmt
 silently discards those five options, `ignore` among them, and then rewrites
 `src/generated/`.
+
+`rustup check` reports the newest stable, nightly and rustup without
+installing anything; compare it against `rust-toolchain.toml` and
+`rustfmt-toolchain`. Bumping is deliberate — read the new lints when you do,
+since `-D warnings` turns a fresh style lint into a hard CI error.
 
 `cargo audit` needs `cargo install cargo-audit --locked`. Vulnerabilities
 block; `unsound`/`unmaintained`/`yanked` report. Policy and the ignore list

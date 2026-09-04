@@ -1280,6 +1280,70 @@ Priority / notes:
 
 ---
 
+## TOOLCHAIN MAINTENANCE
+
+### Pin staleness — the other half of the drift problem ✅ REPORTED (2026-09-04)
+
+This closes the thread the whole episode started from. The original failure
+was one lint:
+
+```
+error: can be more succinctly written as a byte str
+   --> src/build.rs:712:35
+712 |             Some(CountryCode::Iso([b'U', b'S']))
+    |                                   ^^^^^^^^^^^^ help: try: `*b"US"`
+    = note: `-D clippy::byte-char-slices` implied by `-D warnings`
+```
+
+Six occurrences, all in `build.rs`, all in test code, `lint` job only —
+`build`, `test` and `docgen-check` were green throughout. **The code was never
+broken.** `clippy::byte_char_slices` was a *style* lint introduced in a Rust
+newer than the local one: CI resolved `@stable` at run time and got 1.98.0
+while a rustup **directory override** held this repo at 1.94.0, invisible
+because such an override outranks `rust-toolchain.toml`. `-D warnings` did the
+rest. Fixed in `1177bfc`; both toolchains pinned in `d9e72a8`.
+
+**Pinning solved that and created its successor.** `_check_toolchain` catches
+the local toolchain diverging from the pin. Nothing caught the **pin itself**
+ageing — and a pin that is never revisited is the old stale toolchain with
+better paperwork. That was the residual left open in HOUSEKEEPING.
+
+**`rustup check` is the whole answer.** Local, ~0.46 s, installs nothing,
+reports the newest stable, nightly and rustup. Wired into `sync.py` as
+`_check_toolchain_freshness`, which compares it against `rust-toolchain.toml`
+and `rustfmt-toolchain` and prints, for example:
+
+```
+Toolchain pins have drifted (reporting only — nothing is blocked):
+  * rust-toolchain.toml pins 1.98.0; stable is now 1.98.1
+  * rustfmt-toolchain pins nightly-2026-09-01; latest nightly is 2026-09-03 (2 day(s) older)
+  * rustup is 1.26.0; 1.29.1 is available
+```
+
+**A report, never a gate, and that is the point.** A compiler release is
+somebody else's timetable. A check that refused to commit until the pin was
+current would be the original surprise back in a different costume — the
+operator decides when to move, and reads the new lints when they do. Throttled
+to weekly (`SYNC_FRESHNESS_DAYS`) so it is a reminder rather than noise;
+`rustup check` is the on-demand form.
+
+Four paths exercised: pins drifted (all three reported, exit 0), throttled
+(silent), `rustup` refusing to answer (warns and continues — and deliberately
+does **not** write the stamp, so a failed check cannot silence the next one for
+a week), and all pins current (`✅ Toolchain pins are current.`).
+
+**`sync.py` is gitignored**, so the durable half lives in the repository:
+`rust-toolchain.toml` carries an "is this pin stale?" note naming the command,
+and `CLAUDE.md` lists it among the development commands.
+
+⚠ **The pin protects only this repository.** rustup's default is still
+`stable` at 1.94.0, so outside `xtgeoip` a bare `cargo` on this machine is the
+same compiler that started this. Deliberately not changed — a machine-wide
+default is a decision about other projects. Recorded in
+`private/OUTSTANDING.md`.
+
+---
+
 ## MAN PAGE PROSE
 
 ### The template was the last unchecked surface ✅ CHECKED (2026-09-03)
