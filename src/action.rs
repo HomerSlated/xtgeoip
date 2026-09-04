@@ -675,4 +675,137 @@ mod tests {
             );
         }
     }
+
+    // ── man page ↔ planner agreement ─────────────────────────────────────
+
+    /// EXECUTION ORDER in the man page must agree with the real planner.
+    ///
+    /// The section lists four representative invocations and, for each, the
+    /// exact sequence of steps it produces. That is the same claim
+    /// `spec_steps_agree_with_plan` checks for `cli.yaml`'s `steps:` — but
+    /// written a second time, by hand, in prose, where nothing looked at it.
+    /// It went stale exactly as you would expect: #24 stage 1 (`0712783`)
+    /// moved `Clean` after `Fetch` and this section still described the old
+    /// order six weeks later, found by reading rather than by tooling
+    /// (2026-09-02). Three defects were found in this template that day; the
+    /// only thing preventing a fourth was that someone happened to look.
+    ///
+    /// The failure message names `docs/spec/manpage-template.toml`, not the
+    /// generated `.1`. Editing the generated file would appear to fix this
+    /// and be silently reverted by the next docgen run.
+    #[test]
+    fn manpage_execution_order_agrees_with_the_planner() {
+        use clap::Parser;
+
+        use crate::cli::{Cli, CliOutcome, normalize_cli_to_action};
+
+        /// Prose phrase → the step name `cli.yaml` and `step_names` use.
+        ///
+        /// Two phrases map to `fetch`: the man page distinguishes a remote
+        /// download from reading a cached archive, which is a real and
+        /// useful distinction for a reader, while the planner calls both
+        /// `Step::Fetch` and separates them by `FetchMode`. Keeping the map
+        /// explicit is what lets the prose stay readable without the check
+        /// losing its grip.
+        const PHRASES: &[(&str, &str)] = &[
+            ("backup", "backup"),
+            ("prune binary archives", "prune_bin"),
+            ("fetch", "fetch"),
+            ("read local archive", "fetch"),
+            ("clean", "clean"),
+            ("prune CSV archives", "prune_csv"),
+            ("build", "build"),
+        ];
+
+        let man = std::fs::read_to_string("docs/generated/xtgeoip.1")
+            .expect("docs/generated/xtgeoip.1 missing — run docgen");
+        let section = man
+            .split(".SH EXECUTION ORDER")
+            .nth(1)
+            .and_then(|s| s.split("\n.SH ").next())
+            .expect("no EXECUTION ORDER section in the man page");
+
+        // `.TP` / `.B "xtgeoip …"` / prose — the roff shape of a tagged
+        // paragraph. Anything else in the section is narrative and ignored.
+        let mut checked = 0;
+        let lines: Vec<&str> = section.lines().collect();
+        for (i, line) in lines.iter().enumerate() {
+            // The `.TP` is load-bearing, not decoration. The same
+            // `.B "xtgeoip \-b \-c"` appears again in the narrative at the
+            // foot of the section ("this means … are identical"), where the
+            // following line is prose, not a step list. Only a tagged
+            // paragraph carries an ordering claim.
+            if i == 0 || lines[i - 1].trim() != ".TP" {
+                continue;
+            }
+            let Some(cmd) = line.strip_prefix(".B \"xtgeoip ") else {
+                continue;
+            };
+            let Some(cmd) = cmd.strip_suffix('"') else {
+                continue;
+            };
+            let argv_str = format!("xtgeoip {}", cmd.replace("\\-", "-"));
+            let Some(prose) = lines.get(i + 1) else {
+                continue;
+            };
+
+            let mut expected = Vec::new();
+            for phrase in prose.split("\\(->") {
+                let phrase = phrase.trim();
+                let name = PHRASES
+                    .iter()
+                    .find(|(p, _)| *p == phrase)
+                    .map(|(_, n)| *n)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "EXECUTION ORDER for {argv_str:?} names the step \
+                             {phrase:?}, which maps to nothing the planner \
+                             produces. Either the prose is wrong or PHRASES \
+                             needs the new name — do not delete the entry to \
+                             make this pass. \
+                             (docs/spec/manpage-template.toml, \
+                             execution_order)"
+                        )
+                    });
+                expected.push(name);
+            }
+
+            let argv: Vec<&str> = argv_str.split_whitespace().collect();
+            let action = Cli::try_parse_from(&argv)
+                .ok()
+                .and_then(|cli| match normalize_cli_to_action(&cli) {
+                    Ok(CliOutcome::Action(a)) => Some(a),
+                    _ => None,
+                })
+                .unwrap_or_else(|| {
+                    panic!(
+                        "EXECUTION ORDER documents {argv_str:?}, which does \
+                         not parse into an Action at all \
+                         (docs/spec/manpage-template.toml, execution_order)"
+                    )
+                });
+
+            let actual = step_names(&action);
+            assert_eq!(
+                actual, expected,
+                "EXECUTION ORDER says {argv_str:?} runs {expected:?}, but the \
+                 planner runs {actual:?}. Fix the prose in \
+                 docs/spec/manpage-template.toml (execution_order) and re-run \
+                 docgen — editing docs/generated/xtgeoip.1 is reverted by the \
+                 next generation."
+            );
+            checked += 1;
+        }
+
+        // Without this, deleting every example — or breaking the roff shape
+        // the scan depends on — would leave a test that passes by examining
+        // nothing. That failure mode is the reason this whole area exists.
+        assert_eq!(
+            checked, 4,
+            "expected 4 documented orderings in EXECUTION ORDER, parsed \
+             {checked}. If an ordering was added or removed deliberately, \
+             update this count; if not, the roff shape the scan relies on has \
+             changed."
+        );
+    }
 }

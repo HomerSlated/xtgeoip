@@ -1280,6 +1280,86 @@ Priority / notes:
 
 ---
 
+## MAN PAGE PROSE
+
+### The template was the last unchecked surface ✅ CHECKED (2026-09-03)
+
+`docs/spec/manpage-template.toml` was hand-written and verified by nobody,
+sitting in the middle of a pipeline where everything else derives from
+`cli.yaml`: flag validity via `cli_rules.rs`, step ordering via `plan.rs`,
+error text via `error_text.rs`, test cases via `testcases.yaml`. Three defects
+were found in it by reading on 2026-09-02 — stale step ordering after #24
+stage 1, the whole `conf -c` credential workflow missing since #103, and a
+`[maxmind] timeout` key that never existed and that `deny_unknown_fields`
+would have *rejected* had a reader copied it. Nothing prevented a fourth.
+
+**Five checks, all at test time.** The #92 boundary decides the placement:
+these compare prose against the *program*, so they belong with the program,
+not in docgen. They also follow the one that already existed —
+`cli::contradiction::global_options_are_documented`, which reads
+`docs/generated/xtgeoip.1` — and each sits with what it asserts about rather
+than in a new module of its own.
+
+| Check | Home | Catches |
+|---|---|---|
+| `manpage_execution_order_agrees_with_the_planner` | `action.rs` | the #24 stage 1 defect |
+| `manpage_documents_every_shipped_config_key` | `config.rs` | a shipped key nobody wrote up |
+| `manpage_names_no_unknown_config_key` | `config.rs` | the `timeout` defect |
+| `manpage_config_defaults_match_the_shipped_example` | `config.rs` | a documented default that drifted |
+| `unknown_maxmind_key_is_rejected_as_documented` | `config.rs` | the strictness claim going false |
+
+**EXECUTION ORDER is the valuable one.** The section lists four invocations
+with the exact step sequence each produces — the same claim
+`spec_steps_agree_with_plan` checks for `cli.yaml`'s `steps:`, written a
+second time by hand in prose. The check parses the four `.TP` pairs out of the
+generated `.1`, maps each prose phrase to the name `step_names` uses, and
+compares against the real planner. Two phrases map to `fetch` ("fetch" and
+"read local archive"): the man page's distinction between a download and a
+cached read is useful to a reader, and the explicit map is what lets the prose
+stay readable without the check losing its grip. An unmapped phrase is a
+failure, never a skip.
+
+**A fourth defect, found by the tooling this time.** `[logging] log_file`
+named the key and stated no default, alone among the keys that have one, while
+the shipped example sets `/var/log/xtgeoip.log`. The first three were found by
+reading; this one was not. Fixed in the same pass.
+
+**One stated exception.** `credentials` is documented but is not in the
+shipped example, because `conf -c` writes it and the example says in as many
+words that credentials must never be put there by hand. Recorded as a named
+constant with the reason, and asserted to stay small — an exception list that
+grows is the universe being chosen to fit the test.
+
+**Two scoping decisions worth keeping.**
+
+- The defaults check only fires where the prose actually says `default:`.
+  `url` and `threads` are *described* rather than defaulted, and making the
+  man page repeat a 78-character download URL would be a check written for the
+  tooling's convenience rather than the reader's.
+- Commented-out TOML in the example counts as shipped. `[processing]` and
+  `threads` are commented *because they are optional*, not because they are
+  absent, and the man page documents them. The uncommenting heuristic guards
+  itself: its result must still parse as TOML, so swallowing a prose comment
+  fails loudly instead of quietly checking less.
+
+**Every failure message names `docs/spec/manpage-template.toml`, not the
+generated `.1`.** A reader who fixed the generated file would see the test
+pass and have the fix silently reverted by the next docgen run.
+
+**Teeth verified, one perturbation per check**, each reverted afterwards: the
+historical clean-before-fetch ordering (caught, with the exact diff), a
+deleted ordering (the count guard), an invocation the guards reject, the
+`timeout` key reinstated verbatim (caught), an undocumented key added to the
+example, a drifted default, and `deny_unknown_fields` removed from `MaxMind`.
+
+**Not done: the generation-time half.** Checking the template against
+`cli.yaml` — that every command and flag it names exists in the spec — is
+spec-internal and would belong in docgen's `validate_*` family. Left out
+deliberately: the five above are a complete deliverable, and bundling a second
+validator into the same pass would dilute both.
+
+---
+
 ## MAINTENANCE / SUPPLY CHAIN
 
 ### Dependency advisories — six live, unnoticed for four and a half months ✅ BUMPED (2026-09-03)

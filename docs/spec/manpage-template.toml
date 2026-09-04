@@ -474,7 +474,9 @@ error, not a warning.
 .TP
 .B [logging]
 .I log_file
-\(em path to the log file.
+\(em path to the log file
+(default:
+.IR /var/log/xtgeoip.log ).
 .TP
 .B [processing]
 .I threads

@@ -577,4 +577,242 @@ mod tests {
         // A span landing inside a multi-byte codepoint must not panic.
         assert_eq!(line_col("é\nx", 1), (1, 2));
     }
+
+    // ── man page ↔ configuration agreement ───────────────────────────────
+
+    const EXAMPLE_CONFIG: &str = "conf/usr/share/xt_geoip/xtgeoip.conf.example";
+
+    /// The CONFIGURATION section of the generated man page.
+    fn manpage_configuration() -> String {
+        let man = std::fs::read_to_string("docs/generated/xtgeoip.1")
+            .expect("docs/generated/xtgeoip.1 missing — run docgen");
+        man.split(".SH CONFIGURATION")
+            .nth(1)
+            .and_then(|s| s.split("\n.SH ").next())
+            .expect("no CONFIGURATION section in the man page")
+            .to_owned()
+    }
+
+    /// Section and key names in the shipped example config.
+    ///
+    /// Commented-out TOML counts as shipped: `[processing]`/`threads` are
+    /// commented *because they are optional*, not because they are absent,
+    /// and the man page documents them. So lines whose comment body is
+    /// itself TOML — `#[section]` or `#key = value` — are uncommented before
+    /// parsing, and prose comments are left alone. The parse below is what
+    /// guards the heuristic: if it ever swallowed a sentence, the result
+    /// would stop being valid TOML and this would fail loudly rather than
+    /// quietly checking less.
+    fn shipped_config_keys() -> (Vec<String>, toml::Table) {
+        let raw = std::fs::read_to_string(EXAMPLE_CONFIG)
+            .unwrap_or_else(|e| panic!("{EXAMPLE_CONFIG}: {e}"));
+
+        let uncommented: String = raw
+            .lines()
+            .map(|line| {
+                let body = line.trim_start().trim_start_matches('#').trim();
+                let is_toml = body.starts_with('[')
+                    || body.split_once('=').is_some_and(|(k, _)| {
+                        let k = k.trim();
+                        !k.is_empty()
+                            && k.chars()
+                                .all(|c| c.is_ascii_lowercase() || c == '_')
+                    });
+                if line.trim_start().starts_with('#') && is_toml {
+                    body.to_owned()
+                } else {
+                    line.to_owned()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let table: toml::Table = uncommented.parse().unwrap_or_else(|e| {
+            panic!(
+                "uncommenting {EXAMPLE_CONFIG} produced invalid TOML ({e}) — \
+                 the heuristic in shipped_config_keys() has swallowed prose"
+            )
+        });
+
+        let mut names = Vec::new();
+        for (section, value) in &table {
+            names.push(section.clone());
+            if let Some(t) = value.as_table() {
+                names.extend(t.keys().cloned());
+            }
+        }
+        (names, table)
+    }
+
+    /// Every section and key that ships must be documented.
+    ///
+    /// The direct analogue of `cli::contradiction::global_options_are_
+    /// documented`, for the configuration file rather than the flags. A key
+    /// added to the shipped example and not written up here reaches users as
+    /// an undocumented setting.
+    #[test]
+    fn manpage_documents_every_shipped_config_key() {
+        let section = manpage_configuration();
+        let (names, _) = shipped_config_keys();
+
+        assert!(!names.is_empty(), "no keys parsed from {EXAMPLE_CONFIG}");
+
+        let missing: Vec<&String> =
+            names.iter().filter(|n| !section.contains(*n)).collect();
+        assert!(
+            missing.is_empty(),
+            "{EXAMPLE_CONFIG} ships {missing:?}, which the man page's \
+             CONFIGURATION section never mentions. Document them in \
+             docs/spec/manpage-template.toml (configuration) and re-run \
+             docgen."
+        );
+    }
+
+    /// The man page must not document a key that does not exist.
+    ///
+    /// This is the direction that caught the real defect: on 2026-09-02 the
+    /// section documented a `[maxmind] timeout` key which had never existed
+    /// and which — `[maxmind]` carrying `deny_unknown_fields` — would have
+    /// been rejected outright had a reader copied it into their config. The
+    /// documentation was not merely stale, it was actively harmful, and
+    /// nothing in the pipeline objected.
+    ///
+    /// Config keys appear as a lone `.I name` in this section; paths and
+    /// URLs use `.IR` and carry `/` or `:`, so the snake_case filter passes
+    /// over them.
+    #[test]
+    fn manpage_names_no_unknown_config_key() {
+        let section = manpage_configuration();
+        let (names, _) = shipped_config_keys();
+
+        let documented: Vec<&str> = section
+            .lines()
+            .filter_map(|l| l.strip_prefix(".I "))
+            .map(str::trim)
+            .filter(|t| {
+                !t.is_empty()
+                    && t.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+            })
+            .collect();
+
+        assert!(
+            !documented.is_empty(),
+            "no `.I key` lines found in CONFIGURATION — the roff shape this \
+             scan relies on has changed, so it is checking nothing"
+        );
+
+        // Written by `xtgeoip conf -c`, never present in the shipped
+        // example — the example says in as many words that credentials must
+        // not be put there by hand. So it is a real key of `[maxmind]` that
+        // legitimately cannot come from the file. One narrow, stated
+        // exception; if this list ever grows past a couple of entries the
+        // universe is being chosen to fit the test rather than the reverse.
+        const WRITTEN_AT_RUNTIME: &[&str] = &["credentials"];
+        assert!(WRITTEN_AT_RUNTIME.len() <= 2, "exception list is growing");
+
+        let unknown: Vec<&&str> = documented
+            .iter()
+            .filter(|d| !names.iter().any(|n| n == *d))
+            .filter(|d| !WRITTEN_AT_RUNTIME.contains(*d))
+            .collect();
+        assert!(
+            unknown.is_empty(),
+            "the man page documents {unknown:?}, which {EXAMPLE_CONFIG} does \
+             not ship. A documented key that the parser does not accept is \
+             worse than an undocumented one — a reader who copies it gets a \
+             config that fails to load. Fix docs/spec/manpage-template.toml \
+             (configuration)."
+        );
+    }
+
+    /// Every default the man page *claims* must be the value that ships.
+    ///
+    /// Scoped to keys whose prose actually says "default:". The man page
+    /// describes `url` and `threads` rather than defaulting them, and
+    /// demanding it repeat a 78-character download URL would be a check
+    /// written for the tooling's convenience rather than the reader's.
+    ///
+    /// This is the check that found the fourth defect in this template
+    /// (2026-09-03): `[logging] log_file` named the key but stated no
+    /// default, alone among the keys that have one. The first three were
+    /// found by reading; this one was not.
+    #[test]
+    fn manpage_config_defaults_match_the_shipped_example() {
+        let section = manpage_configuration();
+        let (_, table) = shipped_config_keys();
+
+        // The prose for one key: from its `.I key` line up to the next key
+        // or the next tagged paragraph.
+        let window_for = |key: &str| -> Option<String> {
+            let start = section.find(&format!(".I {key}\n"))?;
+            let rest = &section[start + 4 + key.len()..];
+            let end = rest
+                .find("\n.I ")
+                .into_iter()
+                .chain(rest.find("\n.TP"))
+                .min()
+                .unwrap_or(rest.len());
+            Some(rest[..end].to_owned())
+        };
+
+        let mut checked = 0;
+        for (name, value) in
+            table.values().filter_map(toml::Value::as_table).flatten()
+        {
+            let shipped = match value {
+                toml::Value::String(v) => v.clone(),
+                toml::Value::Integer(v) => v.to_string(),
+                _ => continue,
+            };
+            let Some(window) = window_for(name) else {
+                continue;
+            };
+            if !window.contains("default:") {
+                continue;
+            }
+            assert!(
+                window.contains(&shipped),
+                "the man page claims a default for {name} but does not give \
+                 {shipped:?}, which is what {EXAMPLE_CONFIG} actually ships. \
+                 A reader following the man page would configure something \
+                 different from the shipped example \
+                 (docs/spec/manpage-template.toml, configuration)."
+            );
+            checked += 1;
+        }
+        assert!(
+            checked >= 4,
+            "only {checked} documented defaults were cross-checked against \
+             {EXAMPLE_CONFIG}; expected at least 4 (archive_dir, output_dir, \
+             archive_prune, log_file). Fewer means the scan has stopped \
+             matching the roff shape and is checking less than it appears to."
+        );
+    }
+
+    /// The man page states that `[maxmind]` accepts no other key. Prove it.
+    ///
+    /// Asserted by parsing, not by grepping for the sentence: the claim is
+    /// about the program's behaviour, so only the program can confirm it.
+    /// `[paths]`, `[logging]` and `[processing]` carry no
+    /// `deny_unknown_fields` and would silently accept a stray key — that
+    /// asymmetry is recorded in TODO.md HOUSEKEEPING as needing a migration
+    /// story, and the man page deliberately claims strictness only for the
+    /// section that has it.
+    #[test]
+    fn unknown_maxmind_key_is_rejected_as_documented() {
+        let base = "[paths]\narchive_dir = \"/a\"\narchive_prune = 3\n\
+                    output_dir = \"/b\"\n\n[maxmind]\n\
+                    url = \"https://example.com/x\"\n";
+
+        assert!(
+            parse_config(base).is_ok(),
+            "the baseline config should parse"
+        );
+        assert!(
+            parse_config(&format!("{base}timeout = 30\n")).is_err(),
+            "the man page states that no other key is accepted in [maxmind], \
+             but an unknown key parsed successfully — either \
+             deny_unknown_fields was removed or the claim is now false"
+        );
+    }
 }
