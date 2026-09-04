@@ -1507,108 +1507,60 @@ not in the repo.
 `xtgeoip-tests --rebuild` — root, a release build, and part of the
 rate-capped budget.
 
-### The gate — `cargo audit` in CI and `sync.py` ✅ DONE (2026-09-03)
+### The gate — built 2026-09-03, removed 2026-09-04 ❌ WITHDRAWN
 
-The bump above is remediation; this is the detector, and it is the part that
-stops the gap reopening. It had to land *second*: `sync.py` runs its checks
-before committing, so a gate added while the lock was still vulnerable would
-have blocked its own introduction.
+The bump above was remediation and **stands**: six real advisories, cleared by
+a lockfile update. What was built alongside it — `.cargo/audit.toml`, a CI
+`audit` job, a weekly schedule, and `_check_advisories()` in `sync.py` — has
+been removed in full at the maintainer's direction.
 
-**Three pieces.**
+**The reasoning, because it is more useful than the gate was.** Dependency
+updates get applied on the maintainer's terms. "Always use the latest version"
+is a fallacy that carries its own baggage, and this project pins six crates
+exact for the credential path precisely because a bump there is a decision
+rather than a chore. A gate that blocks a commit until an advisory published
+by somebody else is resolved inverts that: it hands the schedule to the
+advisory feed. The weekly cron went first (2026-09-04), then the rest.
 
-- `.cargo/audit.toml` — severity policy and the ignore list (empty). Read by
-  `cargo audit` from the working directory; unrelated to `.cargo/config.toml`.
-- CI job `audit` — separate from `lint`, so a vulnerable crate and a clippy
-  failure are never one red X; they have different owners and different fixes.
-  It compiles nothing, since `cargo audit` reads only `Cargo.lock` and the
-  RustSec database.
-- `scripts/sync.py::_check_advisories` — a pre-flight beside
-  `_check_toolchain`, before anything that compiles.
+**What was actually wrong with it**, beyond the preference:
 
-**The exit code is not the verdict.** `cargo audit` exits 1 both when it finds
-a vulnerability and when it cannot reach the advisory database — measured,
-both give exit 1, and the second prints no report at all. That is the same
-ambiguity this repo already refused to accept from `gh` on 2026-09-02, where
-"not logged in" was indistinguishable from "no run yet" and burned the whole
-CI deadline. So the gate branches on whether a **parseable JSON report** came
-back, not on the status: a report means the audit ran and its answer is
-trustworthy either way; no report means nobody could answer, which is a
-warning. A GitHub blip must not read as "your dependencies are vulnerable"
-and block a commit.
+- The `sync.py` pre-flight **blocked commits** on a finding about somebody
+  else's crate, which may have no fix available at all.
+- The CI job failed the build for the same reason, on a lockfile that had not
+  changed.
+- Neither answered a question about *this* code. They answered a question
+  about the world, on the world's timetable.
 
-All four paths were exercised rather than assumed:
+**What remains, and it is enough.** `cargo audit` is one command with a
+meaningful exit code. Running it by hand takes five seconds and is a perfectly
+good habit. Nothing now runs it automatically, nothing blocks on it, and
+nothing reports it — by design.
 
-| Situation | Result |
-|---|---|
-| clean lockfile | continues, `No advisories against 306 dependencies` |
-| six vulnerabilities (the pre-bump lock) | **aborts**, lists all six with IDs and the remedy |
-| advisory DB unreachable | warns, **continues** — no false block |
-| `cargo-audit` not installed | **aborts** with the install command |
+**Two facts from the schedule argument, kept because they generalise.**
 
-The last one matters as much as the others. A missing tool that let the gate
-pass silently would be the "skipped, therefore fine" failure `sync.py`'s own
-docstring was written about.
+- **The test worth applying to any check**: can its answer change while the
+  repository sits untouched? For `build`, `lint`, `test` and `docgen-check`,
+  no — same input, same answer, so `push` covers them completely and a cron
+  could only repeat what the last push said. Only the advisory check differed,
+  and that difference is precisely what made it unwelcome: it answered on
+  somebody else's timetable.
+- ⚠ **GitHub disables scheduled workflows after 60 days of repository
+  inactivity, silently.** So a cron evaporates exactly in the long-idle case
+  that would motivate one, and eight weeks of green followed by silence is
+  indistinguishable from all-clear. Worth knowing before anyone reaches for
+  `schedule:` here for an unrelated reason. This repository's push history has
+  gaps of 32 and 12 days in two months, so it is not a hypothetical.
 
-**Vulnerabilities block; `unsound`/`unmaintained`/`yanked` report.** Not
-tightened to `-D warnings`, and it should not be. Clippy's `-D warnings`
-covers our code and is therefore always fixable by us; an advisory warning
-concerns a crate we do not own and may have no fix at all, so making those
-fatal would wedge every commit on an upstream release schedule. In the
-demonstration above the four warnings printed while the six vulnerabilities
-aborted — the split is visible, not theoretical.
+**Do not re-propose**: the CI job, `.cargo/audit.toml`, the `sync.py`
+pre-flight, a `schedule:` trigger, or Dependabot. All five were considered on
+2026-09-03/04 and all five were declined.
 
-**A weekly schedule was added here and removed the next day (2026-09-04).**
-Recorded in full because the reasoning that removed it is worth more than the
-schedule was.
-
-The stated justification was wrong. It read: "a check that only runs on a
-commit cannot report anything during a quiet fortnight, which is exactly how
-six went unnoticed." The second clause does not follow. The six went unnoticed
-because **there was no detector at all** — had the gate existed, the push on
-2026-08-20 would have caught `h2` (published 2026-08-17) three days later. A
-future reader trusting that sentence would draw the wrong lesson about what
-failed.
-
-Two things were then wrong with the schedule itself.
-
-- **It was over-broad.** Four of the five jobs read nothing but the
-  repository, so their answer cannot change while it sits untouched. Running
-  them on a Monday only repeats what Friday's push already said. The
-  "a weekly green build proves the toolchain is still installable"
-  justification was thin: the runner image and the floating action tags can
-  drift, but that surfaces on the next push, which is when it would have to
-  be fixed anyway.
-- **A cron is the wrong instrument even for `audit`.** That job genuinely
-  differs — its second input is the RustSec database, which moves whether or
-  not anyone pushes. But ⚠ GitHub disables scheduled workflows after 60 days
-  of repository inactivity, silently. So the check evaporates precisely in
-  the long-idle case that motivates it, and eight Mondays of green followed
-  by silence is indistinguishable from all-clear. The push history makes this
-  concrete rather than hypothetical: gaps of 32 and 12 days in two months.
-
-**The test worth keeping**: can a check's answer change while the repository
-is untouched? For `build`, `lint`, `test` and `docgen-check`, no. For `audit`,
-yes.
-
-**Dependabot was considered and rejected (2026-09-04).** It solves the idle
-case properly — server-side, no expiry — but the maintainer's position is
-that updates get applied on their terms and **the check stays local**. Two
-reasons that is not merely a preference: "always use the latest version" is a
-fallacy that carries its own baggage, and this project deliberately pins six
-crates exact for the credential path, where an upstream-driven bump is a
-decision rather than a chore. Recorded so it is not re-proposed. (For anyone
-revisiting: Dependabot *alerts* — notify only — and Dependabot *security
-updates* — auto-open PRs — are separate settings, and only the second is the
-treadmill. The decision above covers both regardless.)
-
-**So the idle gap is open, and is meant to be filled locally.** Nothing is
-built for it yet. `cargo audit` is a single command with a meaningful exit
-code, so a user-level timer, a shell hook, or simply running it by hand all
-work; what it must not become is anything that updates a dependency without a
-human deciding to.
-
-`cargo audit` remains a push gate, which is what a workflow is good at:
-refusing a vulnerable lockfile at the door rather than watching the world.
+**Contrast with the toolchain check** (TOOLCHAIN MAINTENANCE), which was kept:
+it *reports* and never gates, it is throttled, and the thing it reports on —
+a pin this project chose — is the maintainer's own artifact rather than an
+external feed. The distinction is not "advisories bad, compilers good". It is
+that one of them tells you something about a decision you made, and the other
+would have made the decision for you.
 
 ---
 

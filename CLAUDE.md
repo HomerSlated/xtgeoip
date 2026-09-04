@@ -9,7 +9,6 @@ cargo build            # debug build
 cargo build --release  # release build
 cargo clippy --all-targets -- -D warnings   # lint (as CI runs it)
 cargo "+$(cat rustfmt-toolchain)" fmt -- --check   # format check (80-col, rustfmt.toml)
-cargo audit            # dependency advisories
 rustup check           # is either toolchain pin stale?
 ```
 
@@ -25,10 +24,6 @@ silently discards those five options, `ignore` among them, and then rewrites
 installing anything; compare it against `rust-toolchain.toml` and
 `rustfmt-toolchain`. Bumping is deliberate — read the new lints when you do,
 since `-D warnings` turns a fresh style lint into a hard CI error.
-
-`cargo audit` needs `cargo install cargo-audit --locked`. Vulnerabilities
-block; `unsound`/`unmaintained`/`yanked` report. Policy and the ignore list
-are in `.cargo/audit.toml`.
 
 Before a release build, run the pre-build workflow:
 

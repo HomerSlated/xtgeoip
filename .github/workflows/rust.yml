@@ -19,13 +19,12 @@ on:
 #    in the long-idle case that motivates it — and eight weeks of green
 #    followed by silence is indistinguishable from all-clear.
 #
-# Nor is Dependabot the answer here: updates are applied on the maintainer's
-# terms and the advisory check stays local, so nothing server-side watches
-# this repository on its own. That is a deliberate decision, not an omission
-# — see TODO.md, MAINTENANCE / SUPPLY CHAIN, before proposing either.
-#
-# `cargo audit` below remains a push gate, which is the job a workflow is
-# actually good at: refusing a vulnerable lockfile at the door.
+# Nor is Dependabot, nor a `cargo audit` job: dependency updates are applied
+# on the maintainer's terms, so nothing here — scheduled, server-side, or
+# per-push — watches the outside world on this repository's behalf. Every job
+# below reads only the repository, which is why `push` and `pull_request`
+# cover them completely. That is a decision, not an omission; see TODO.md,
+# MAINTENANCE / SUPPLY CHAIN, before proposing any of the three again.
 
 env:
   CARGO_TERM_COLOR: always
@@ -88,31 +87,3 @@ jobs:
         run: cargo run --bin xtgeoip-docgen
       - name: Check generated files are up to date
         run: git diff --exit-code src/generated/ docs/generated/
-
-  # Dependency advisories. Separate from `lint` so a vulnerable crate and a
-  # clippy failure are never reported as one red X — they have different
-  # owners and different fixes.
-  #
-  # This job compiles nothing: `cargo audit` reads Cargo.lock and the RustSec
-  # database, so it needs neither the project nor its dependencies built. The
-  # toolchain still installs, because rust-toolchain.toml applies to any cargo
-  # invocation in the tree; that is a few seconds and keeps the command here
-  # byte-identical to the one scripts/sync.py runs locally. Divergence between
-  # the local and CI forms of a check is the failure this workflow already
-  # learned the hard way.
-  #
-  # Severity policy lives in .cargo/audit.toml: vulnerabilities block,
-  # unsound/unmaintained/yanked report. Do not add `-D warnings` here — see
-  # the reasoning in that file.
-  audit:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install pinned toolchain
-        run: rustup show
-      - name: Install cargo-audit
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-audit
-      - name: Audit dependencies
-        run: cargo audit
