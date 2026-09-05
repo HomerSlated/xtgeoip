@@ -87,34 +87,58 @@ fn main() -> anyhow::Result<()> {
     let toml_str = fs::read_to_string("docs/spec/manpage-template.toml")?;
     let tmpl: ManpageTemplate = toml::from_str(&toml_str)?;
 
+    let outputs = render_outputs(&spec, &tmpl)?;
+
     fs::create_dir_all("docs/generated")?;
     fs::create_dir_all("src/generated")?;
-
-    fs::write("docs/generated/usage.md", generate_usage_md(&spec)?)?;
-    fs::write("docs/generated/tldr.md", generate_tldr_md(&spec)?)?;
-    fs::write("docs/generated/xtgeoip.1", generate_manpage(&spec, &tmpl)?)?;
-    fs::write(
-        "src/generated/mod.rs",
-        "pub mod cli_matrix;\npub mod cli_rules;\npub mod error_text;\npub \
-         mod plan;\n",
-    )?;
-    fs::write(
-        "src/generated/error_text.rs",
-        generate_error_text_rs(&spec)?,
-    )?;
-    fs::write(
-        "src/generated/cli_matrix.rs",
-        generate_cli_matrix_rs(&spec)?,
-    )?;
-    fs::write("src/generated/cli_rules.rs", generate_cli_rules_rs(&spec)?)?;
-    fs::write("src/generated/plan.rs", generate_plan_rs(&spec)?)?;
-    fs::write(
-        "docs/generated/testcases.yaml",
-        generate_testcases_yaml(&spec)?,
-    )?;
+    for (path, body) in outputs {
+        fs::write(path, body)?;
+    }
 
     println!("Docs generated successfully.");
     Ok(())
+}
+
+/// Render every generated file into memory, before any of them is written.
+///
+/// F-007. The eight outputs were generated and written one at a time, so an
+/// emitter failing part-way left the tree half-regenerated: new docs and a new
+/// CLI matrix beside an old `plan.rs`. The reachable trigger is a new entry in
+/// `plan.steps` — every validator passes, since they only check declaredness
+/// *within* the spec, and then `step_ctor` bails with "has no Step variant";
+/// same for an unknown `fetch_mode` or an unknown step `param`. docgen exited
+/// non-zero, but `cargo test` then compared a new `CLI_MATRIX` against an old
+/// planner and failed somewhere unrelated, and the partial regeneration was
+/// easy to commit by accident.
+///
+/// #92 moved the validators ahead of all writes; this closes the remaining gap,
+/// for the errors the validators cannot see. Every fallible step now happens
+/// here, and this function touches no files at all, so a failure leaves the
+/// tree exactly as it was. What is left is an IO error inside the write loop —
+/// a different and much rarer failure.
+fn render_outputs(
+    spec: &Spec,
+    tmpl: &ManpageTemplate,
+) -> anyhow::Result<Vec<(&'static str, String)>> {
+    Ok(vec![
+        ("docs/generated/usage.md", generate_usage_md(spec)?),
+        ("docs/generated/tldr.md", generate_tldr_md(spec)?),
+        ("docs/generated/xtgeoip.1", generate_manpage(spec, tmpl)?),
+        (
+            "src/generated/mod.rs",
+            "pub mod cli_matrix;\npub mod cli_rules;\npub mod \
+             error_text;\npub mod plan;\n"
+                .to_string(),
+        ),
+        ("src/generated/error_text.rs", generate_error_text_rs(spec)?),
+        ("src/generated/cli_matrix.rs", generate_cli_matrix_rs(spec)?),
+        ("src/generated/cli_rules.rs", generate_cli_rules_rs(spec)?),
+        ("src/generated/plan.rs", generate_plan_rs(spec)?),
+        (
+            "docs/generated/testcases.yaml",
+            generate_testcases_yaml(spec)?,
+        ),
+    ])
 }
 
 /* ---------------- VALIDATION ---------------- */

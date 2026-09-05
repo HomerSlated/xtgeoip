@@ -1530,7 +1530,7 @@ these appears.
 
 ## AUDIT TRIAGE (2026-09-04 sweep)
 
-### Six findings cleared ✅ DONE (2026-09-05)
+### Eight findings cleared ✅ DONE (2026-09-05)
 
 Four agents swept `src/` on 2026-09-04 (reports in `private/`). The findings the
 maintainer triaged as worth acting on are all closed. Each carries a regression
@@ -1608,17 +1608,71 @@ every later *verified* operation, so the equivalence is load-bearing and is now
 pinned by test against the incremental form, including the empty-range case.
 
 **`CLAUDE.md` said "There is no `cargo test` suite".** There were 197 when the
-claim was found and 203 after this pass added its regression tests. Replaced
+claim was found and 205 after this pass added its regression tests. Replaced
 with the two-suite description: unit tests are hermetic and free to run,
 `xtgeoip-tests` needs root, hits the live rate-capped API, and is not to be run
 casually.
 
-**Not taken from the sweep.** F-002 and F-007 (partial state after a
-mid-operation failure) are real and are the same shape as the `.part` leak
-closed on 2026-07-18, in two places the RAII fix did not reach. They are larger
-than the rest and were not part of this pass. O-001 and O-002 are the two large
-optimisations; both were measured by the agent and neither is proposed here,
-since `build` and `backup` are not currently the complaint.
+**F-002 — a failed country-file write left a dangling `version` pointer.**
+`write_outputs` runs all 506 parallel writes and collects the results, so a
+single ENOSPC/EACCES/EIO aborts the build only after most files have landed;
+`generate_manifest` never runs, and `output_dir` then holds a partially written
+database while `version` and the manifest still describe the previous one. An
+atomic swap is not the answer and is not on the table (#24 stages 2–3, rejected
+— `b4ec1db` lost data). Two smaller changes instead:
+
+1. **The pointer is written last.** `generate_manifest` wrote `version` before
+   the manifest, so a failure between the two left `version` naming a manifest
+   that was never written — `backup::gather_files` in `Verified` mode reads the
+   pointer, derives the manifest name from it, and aborts with "Manifest
+   missing … Use -f to force" on data that is otherwise intact. Reversed, the
+   same failure leaves the previous pointer and previous manifest still
+   agreeing, plus an unreferenced new manifest that `detect_orphans` sweeps up
+   on the next successful build. Nothing is renamed or staged; one write simply
+   precedes the other. Checked before changing: the `Verified` path follows the
+   pointer (`backup.rs:238-266`), and the force path's `all_blake3_files` glob
+   only *collects* files, so a stray manifest is harmless there.
+2. **The failure says what state the directory is in.** The old `bail!` was
+   `"N file write(s) failed during build"` and said nothing about `output_dir`
+   being half-written, so the operator had no reason to expect the follow-on
+   refusals. It now names the count written, the directory, the disagreement
+   between it and the manifest, which operations will refuse while that holds
+   (a backup or a clean without `-f` — both take `BackupMode::Verified`), and
+   that a successful re-run rewrites every country file and regenerates the
+   manifest.
+
+Two tests, one for the invariant (`version` resolves to the manifest that was
+written) and one for the regression, which fails against the old order: with a
+directory standing where the manifest goes, `fs::write` returns EISDIR and the
+pointer must not have advanced. Verified — under the old order it advanced to
+`20260324` while the manifest write failed.
+
+**F-007 — docgen left the generated tree half-regenerated.** The eight outputs
+were generated and written one at a time, so an emitter that fails part-way
+overwrote the earlier files and left the rest stale. `cargo test` then compared
+a new `CLI_MATRIX` against an old planner and failed somewhere unrelated, and
+the partial regeneration was easy to commit by accident. #92 moved the
+*validators* ahead of all writes; this closes the remaining gap, for the errors
+the validators cannot see. `render_outputs` now renders all nine into memory
+and `main` writes them in a loop. Verified that this is safe to hoist: no
+`fs::` call appears in any `generate_*` body — all of them are in `main` — and
+the regenerated tree is byte-identical.
+
+No unit test, for the same reason F-006 has none: the property is
+end-to-end, and the test would be a new mechanism rather than a new case
+(TODO.md's own standard). Verified by fault injection instead, against both
+codepaths. A `plan.steps` entry with no `Step` variant passes every validator
+and then fails in `step_ctor`; paired with a spec change that lands in
+`usage.md`, the old code wrote the new `usage.md` and *then* failed, leaving
+the tree modified, while the new code fails with the tree untouched. Note the
+first injection attempt proved nothing — it tripped F-006's `ACTION_BINDINGS`
+check at validator stage, and a second attempt changed only outputs the fault
+does not affect, so `git diff` saw nothing. The reproduction only counts once
+an *earlier* output genuinely differs.
+
+**Not taken from the sweep.** O-001 and O-002 are the two large optimisations;
+both were measured by the agent and neither is proposed here, since `build` and
+`backup` are not currently the complaint.
 
 **`src/fetch.rs` needs re-signing.** M-1's remediation invalidated guardian's
 signature. Row added to `private/guardian/needs_reverification.md` by hand with

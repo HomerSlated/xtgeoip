@@ -127,8 +127,14 @@ man page's "unowned files are never touched" — now uses the documented
 structural ownership test), **F-006** (the plan emitter dropped steps silently
 in two cases — both now hard errors), **O-003** (BLAKE3 338 → 1,739 MB/s,
 reproduced here before accepting), and `CLAUDE.md`'s "there is no `cargo test`
-suite" — 197 when found, 203 after this pass). Not taken: F-002/F-007 (partial state after a
-mid-operation failure) and O-001/O-002 (the two large optimisations).
+suite" — 197 when found, 205 after this pass), **F-002** (a failed country-file
+write left `version` naming a manifest that was never written, blocking every
+verified operation on intact data — the pointer is now written *last*, and the
+failure names the state `output_dir` is in) and **F-007** (docgen wrote its
+outputs one at a time, so a failing emitter left the tree half-regenerated —
+now rendered to memory first, verified byte-identical and by fault injection
+against both codepaths). Neither is an atomic swap; #24 stages 2–3 stay
+rejected. Not taken: O-001/O-002 (the two large optimisations).
 `src/fetch.rs` awaits re-signing.
 
 Several were closed as **premise-invalidated** after checking against

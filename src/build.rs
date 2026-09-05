@@ -181,20 +181,47 @@ fn write_outputs(
         for e in &write_errors {
             messages::error(&format!("{e:#}"));
         }
-        bail!("{} file write(s) failed during build", write_errors.len());
+        bail!(
+            "{} file write(s) failed during build.\n{} country file(s) were \
+             written before the failure, so {} now holds a partially written \
+             database while `version` and the manifest still describe the \
+             previous one. Operations that verify before touching files (a \
+             backup or a clean without -f) will refuse to run while the two \
+             disagree. Fix the cause and re-run: a successful build rewrites \
+             every country file and regenerates the manifest.",
+            write_errors.len(),
+            checksums.len(),
+            target_dir.display()
+        );
     }
     checksums.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
     Ok((files_to_write, checksums))
 }
 
+/// Write the manifest, then the `version` file that points at it.
+///
+/// The order is the whole point. `version` is a pointer: `backup::gather_files`
+/// in `Verified` mode reads it, derives the manifest name from it, and aborts
+/// with "Manifest missing … Use -f to force" when that file is absent. Writing
+/// the pointer first meant a failure between the two writes left `version`
+/// naming a manifest that was never written — a dangling pointer that blocks
+/// every verified operation on data that is otherwise intact.
+///
+/// In this order the same failure leaves the *previous* `version` and the
+/// *previous* manifest, which still agree with each other, plus an unreferenced
+/// new manifest. Verified reads follow the old pointer and never see it; the
+/// stray file is swept up by `detect_orphans` on the next successful build, and
+/// collected by `all_blake3_files` on the force path.
+///
+/// This is not an atomic swap (#24 stages 2–3, rejected — `b4ec1db` lost data).
+/// Nothing is renamed, staged, or rolled back; one write simply precedes the
+/// other.
 fn generate_manifest(
     target_dir: &Path,
     version: &Version,
     checksums: Vec<(String, String)>,
 ) -> anyhow::Result<PathBuf> {
-    fs::write(target_dir.join("version"), format!("{version}\n"))?;
-
     let manifest_name = version.bin_manifest_name();
     let manifest_path = target_dir.join(&manifest_name);
     let manifest_content: String = checksums
@@ -202,6 +229,8 @@ fn generate_manifest(
         .map(|(fname, hash)| format!("{hash}  {fname}\n"))
         .collect();
     fs::write(&manifest_path, manifest_content.as_bytes())?;
+
+    fs::write(target_dir.join("version"), format!("{version}\n"))?;
 
     Ok(manifest_path)
 }
@@ -979,6 +1008,67 @@ mod tests {
         let manifest = touch(p, "GeoLite2-Country-bin_20260101.blake3");
         detect_orphans(p, &[iv4, iv6], &manifest).unwrap();
         assert!(!p.join("orphaned").exists());
+    }
+
+    /// F-002. `version` is a pointer and the manifest is its target;
+    /// `backup::gather_files` in `Verified` mode reads the pointer, derives
+    /// the manifest name from it, and aborts when that file is absent. This
+    /// is the invariant the write order exists to preserve.
+    #[test]
+    fn a_written_manifest_is_the_one_the_version_pointer_names() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        let version =
+            Version::parse("GeoLite2-Country-CSV_20260324.zip").unwrap();
+
+        let manifest = generate_manifest(
+            p,
+            &version,
+            vec![("AA.iv4".into(), "ab".into())],
+        )
+        .unwrap();
+
+        let pointer = fs::read_to_string(p.join("version")).unwrap();
+        assert_eq!(pointer.trim(), version.as_str());
+        assert_eq!(
+            p.join(format!("GeoLite2-Country-bin_{}.blake3", pointer.trim())),
+            manifest,
+            "the pointer must resolve to the manifest that was written"
+        );
+        assert!(manifest.exists());
+    }
+
+    /// F-002. Writing the pointer *first* meant a failure between the two
+    /// writes left `version` naming a manifest that was never written — a
+    /// dangling pointer that blocks every verified operation on data that is
+    /// otherwise intact ("Manifest missing … Use -f to force"). With the
+    /// manifest written first, the same failure leaves the previous pointer
+    /// and the previous manifest still agreeing with each other.
+    ///
+    /// A directory standing where the manifest goes makes `fs::write` fail
+    /// with EISDIR, standing in for the ENOSPC/EACCES/EIO this guards.
+    #[test]
+    fn a_failed_manifest_write_leaves_the_version_pointer_untouched() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        let version =
+            Version::parse("GeoLite2-Country-CSV_20260324.zip").unwrap();
+
+        fs::write(p.join("version"), "20260101\n").unwrap();
+        let stale = touch(p, "GeoLite2-Country-bin_20260101.blake3");
+        fs::create_dir(p.join(version.bin_manifest_name())).unwrap();
+
+        generate_manifest(p, &version, vec![]).unwrap_err();
+
+        assert_eq!(
+            fs::read_to_string(p.join("version")).unwrap(),
+            "20260101\n",
+            "a failed manifest write must not advance the version pointer"
+        );
+        assert!(
+            stale.exists(),
+            "the manifest the surviving pointer names must still be there"
+        );
     }
 
     #[test]
