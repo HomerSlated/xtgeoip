@@ -17,6 +17,29 @@ This applies globally. Every item in this TODO must be assessed against these co
 
 ---
 
+## ✅ v0.3.0 — version bump ✅ DONE (2026-09-05)
+
+76 commits since `2c090bd` set 0.2.0 on 2026-06-09. The bump is warranted by
+the one **breaking** change among them: `ed2b8ba` rejects `run -b -p`, which
+previously ran. Note the symmetry — 0.2.0's own bump commit was also a
+flag-ambiguity rejection (`-b -c -f`), so the precedent for what earns a minor
+bump in 0.x here is "a combination that used to run now exits 1".
+
+Also in it, in rough order of size: the spec-derived 4-stage planner and the
+generation-side validator (#92); credential encryption (#103, XChaCha20-Poly1305
++ Argon2); the audit triage — F-001, F-002, F-003, F-006, F-007, M-1, O-003 —
+and O-001/O-002, the two large optimisations (`build` 1.92×, `backup` 1.64×);
+toolchain pinning for both channels plus staleness reporting; six dependency
+advisories cleared; and the test suite from nothing to 216.
+
+One line changed (`Cargo.toml`). Everything else is derived from it and was
+regenerated rather than edited: `Cargo.lock`, the man page's `.TH` line via
+`CARGO_PKG_VERSION` in `xtgeoip-docgen`, `xtgeoip --version` via clap, and the
+MaxMind `User-Agent` (`xtgeoip/0.3.0`) in `fetch.rs`. No tag was created — this
+repo has never used version tags.
+
+---
+
 ## ✅ build: reverted atomic swap ✅ DONE (2026-06-13, `4909da4`)
 
 `build.rs::atomic_swap` removed; write-in-place + `detect_orphans` reinstated.

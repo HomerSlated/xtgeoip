@@ -99,6 +99,11 @@ test.
 
 ## RECENTLY CLOSED
 
+2026-09-05 — **v0.3.0**. 76 commits since 0.2.0; the bump is earned by
+`ed2b8ba`, which makes `run -b -p` exit 1 where it used to run. One line in
+`Cargo.toml`; the man page, `--version` and the MaxMind `User-Agent` all derive
+from it. No tag — this repo has never used them.
+
 2026-07-18/19 — #2, #22, #24, #29, #38, #54, #57, #71, #75, #76, #77, #79,
 #81, #87, #88, #92 (test-time part), #93, #94, #95, #96, #97, #99, #101,
 #102. 2026-07-20 — #103 (`c2be6a3`). 2026-09-01 — #104 (`b804fa2`), #89
