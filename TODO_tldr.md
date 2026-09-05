@@ -117,6 +117,19 @@ prose was right and the spec wrong. `-p` had two candidate targets in `run`
 the guard required `b ∧ c ∧ p`, copied from the `-f` shape where both targets
 are flag-driven. Now `b ∧ p`. **Breaking**: `run -b -p` exits 1; prune in two
 invocations. R-007 retired (superset of R-012 under `proof.unique_maps_to`).
+Also 2026-09-05 — a paper on spec-driven architecture (`docs/papers/`,
+groff-built, 11pp) and the audit triage: **F-001** (logger failure reported
+through the logger it failed to install — now degrades to a warning, and
+`main` reports an unusable logger directly), **M-1** (the checksum body was
+the one uncapped remote read — now 4 KiB, plus 64-hex-char validation),
+**F-003** (`detect_orphans` deleted *any* `.blake3`/`.sha256`, breaching the
+man page's "unowned files are never touched" — now uses the documented
+structural ownership test), **F-006** (the plan emitter dropped steps silently
+in two cases — both now hard errors), **O-003** (BLAKE3 338 → 1,739 MB/s,
+reproduced here before accepting), and `CLAUDE.md`'s "there is no `cargo test`
+suite" — 197 when found, 203 after this pass). Not taken: F-002/F-007 (partial state after a
+mid-operation failure) and O-001/O-002 (the two large optimisations).
+`src/fetch.rs` awaits re-signing.
 
 Several were closed as **premise-invalidated** after checking against
 source: #38, #54, #88 and #96 described code that no longer existed.

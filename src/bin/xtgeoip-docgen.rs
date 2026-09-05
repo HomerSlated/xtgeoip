@@ -1158,9 +1158,21 @@ pub(crate) fn plan_generated(action: &Action) -> Plan {
             selected.push((rank(name)?, name.as_str(), None));
         }
         for (letter, name) in &ctx.selects {
-            if let Some(expr) = flag(letter) {
-                selected.push((rank(name)?, name.as_str(), Some(expr.into())));
-            }
+            // No `else`: an unbound letter used to drop the step from the
+            // emitted planner with docgen still exiting 0, so the spec
+            // declared a step the program would never run. `validate_plan`
+            // checks the letter against `spec.flags` but not against this
+            // binding table, and generation time is precisely where
+            // spec-internal contradictions are supposed to be owned.
+            let expr = flag(letter).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "plan.contexts.{ctx_name}.selects binds {letter:?} to \
+                     step {name:?}, but ACTION_BINDINGS has no expression for \
+                     {letter:?} in this context — the step would be silently \
+                     omitted from the generated planner"
+                )
+            })?;
+            selected.push((rank(name)?, name.as_str(), Some(expr.into())));
         }
         selected.sort_by_key(|(r, _, _)| *r);
 
@@ -1234,6 +1246,23 @@ pub(crate) fn plan_generated(action: &Action) -> Plan {
                 .filter(|(r, _, _)| *r > fetch_rank && *r < build_rank)
                 .cloned()
                 .collect();
+            // `pre` and `mid` are open windows either side of the fetch,
+            // so a step ranked at or after `build` (or exactly at the
+            // fetch) falls into neither and is discarded without a word.
+            // Unreachable while `build` holds the maximum rank; the rank
+            // model's own caveat (docs/design/26-spec-derived-planning.md)
+            // says that assumption is the thing most likely to be broken
+            // next, so fail loudly rather than emit a short plan. The +2 is
+            // fetch and build themselves, which are in neither window.
+            anyhow::ensure!(
+                pre.len() + mid.len() + 2 == selected.len(),
+                "{ctx_name}: {} of {} plan steps fall outside the \
+                 pre/fetch/mid/build windows and would be dropped from the \
+                 generated planner — a step ranked at or after `build` cannot \
+                 be placed by the rank model",
+                selected.len() - (pre.len() + mid.len() + 2),
+                selected.len()
+            );
             emit(&mut out, &pre, "pre")?;
             emit(&mut out, &mid, "mid")?;
             let legacy = flag("l").unwrap_or("false");

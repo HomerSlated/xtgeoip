@@ -327,6 +327,67 @@ fn hostile_content_disposition_is_rejected() {
     }
 }
 
+/// Guardian M-1: the checksum body was the one remote read with no size
+/// cap, and the same text was then written to `archive_dir` verbatim. A
+/// hostile origin answering with a multi-gigabyte body drove the
+/// root-privileged process into OOM. The read is now bounded.
+#[test]
+fn oversized_checksum_response_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start(|req| {
+        if req.target().contains("sha256") {
+            // Well over the 4 KiB cap, and a valid digest prefix so that
+            // nothing but the size can be what rejects it.
+            let mut body = "0".repeat(64);
+            body.push_str("  x.zip ");
+            body.push_str(&"A".repeat(16 * 1024));
+            MockReply::ok(body)
+        } else {
+            versioned_reply(b"not-a-real-archive")
+        }
+    });
+    let cfg = mock_config(&server.url(), dir.path());
+
+    let err = fetch(&cfg, FetchMode::Remote, "123456", "test-license-key")
+        .expect_err("must fail");
+    assert!(
+        err.to_string().contains("Checksum response exceeded"),
+        "unexpected error: {err}"
+    );
+
+    // Nothing oversized may reach the archive directory.
+    let leaked: Vec<_> = fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.metadata().map(|m| m.len() > 4096).unwrap_or(false))
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(leaked.is_empty(), "oversized files persisted: {leaked:?}");
+}
+
+/// A body that is not a digest at all \(an HTML error page, a truncated
+/// response\) is reported as a format problem rather than as a checksum
+/// mismatch, which would send the reader after the archive instead.
+#[test]
+fn malformed_checksum_response_is_named_as_such() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = MockServer::start(|req| {
+        if req.target().contains("sha256") {
+            MockReply::ok("<html><body>503 Service Unavailable</body></html>")
+        } else {
+            versioned_reply(b"not-a-real-archive")
+        }
+    });
+    let cfg = mock_config(&server.url(), dir.path());
+
+    let err = fetch(&cfg, FetchMode::Remote, "123456", "test-license-key")
+        .expect_err("must fail");
+    assert!(
+        err.to_string().contains("Invalid checksum format"),
+        "unexpected error: {err}"
+    );
+}
+
 /// End-to-end proof of the `PartialDownload` guard: a checksum mismatch
 /// must fail *and* leave no `.part` file behind.
 #[test]

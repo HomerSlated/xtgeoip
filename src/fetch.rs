@@ -27,6 +27,13 @@ const MAX_DOWNLOAD_BYTES: u64 = 512 * 1024 * 1024; // 512 MiB
 const MAX_EXTRACT_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2 GiB
 const SIZE_TOLERANCE: f64 = 0.5; // ±50% of last known archive size
 const DEFAULT_TIMEOUT_SECS: u64 = 300;
+/// The checksum body is the one remote read that used to have no bound
+/// (guardian M-1). A SHA-256 digest plus a filename is under 100 bytes;
+/// 4 KiB leaves room for a trailing comment or CRLF without leaving the
+/// response free to be gigabytes long. Capping the read also caps what is
+/// persisted, since the same text is written to `checksum_path`.
+const MAX_CHECKSUM_BYTES: u64 = 4 * 1024;
+
 const MAX_RETRIES: u32 = 3;
 const BASE_DELAY_SECS: u64 = 2;
 
@@ -364,15 +371,39 @@ fn acquire_remote_archive(
         bail!("Checksum request failed: {}", checksum_resp.status());
     }
 
+    // +1 so an exactly-at-limit body is distinguishable from a breach,
+    // matching the archive download above.
     let mut checksum_text = String::new();
-    checksum_resp
+    (&mut checksum_resp)
+        .take(MAX_CHECKSUM_BYTES + 1)
         .read_to_string(&mut checksum_text)
         .context("Failed to read checksum response")?;
+
+    if checksum_text.len() as u64 > MAX_CHECKSUM_BYTES {
+        bail!(
+            "Checksum response exceeded {MAX_CHECKSUM_BYTES} bytes — refusing \
+             to use it"
+        );
+    }
 
     let expected_hash = checksum_text
         .split_whitespace()
         .next()
         .ok_or_else(|| anyhow::anyhow!("Invalid checksum format"))?;
+
+    // A digest that is not 64 hex characters can never equal `actual_hash`,
+    // so this changes no accept/reject decision. It changes the *message*:
+    // a truncated or HTML error body now says so, instead of being reported
+    // as a checksum mismatch and sending the reader after the archive.
+    if expected_hash.len() != 64
+        || !expected_hash.bytes().all(|b| b.is_ascii_hexdigit())
+    {
+        bail!(
+            "Invalid checksum format: expected 64 hex characters, got {} \
+             characters",
+            expected_hash.len()
+        );
+    }
 
     // Verify checksum
     if actual_hash != expected_hash {

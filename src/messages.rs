@@ -52,24 +52,60 @@ pub fn init_logger(log_file: Option<&str>) -> Result<()> {
     let mut dispatch =
         base_dispatch.chain(stdout_dispatch).chain(stderr_dispatch);
 
-    // file logging with timestamp + level — only when configured
+    // file logging with timestamp + level — only when configured.
+    //
+    // A file sink that cannot be opened must not take the terminal sinks
+    // down with it. Chaining `fern::log_file(..)?` directly did exactly
+    // that: one `?` inside the chain aborted the whole dispatch, nothing
+    // was installed, and the resulting error was then reported *through*
+    // the logger that had just failed to install — so the process exited 1
+    // in complete silence. That inverted this module's own contract above
+    // ("no file" must never mean "no output") by making a *broken* file
+    // worse than no file at all. The failure is now degraded to a warning,
+    // emitted after `apply()` so there is a logger to emit it with.
+    let mut file_error = None;
     if let Some(log_file) = log_file {
-        let file_dispatch = fern::Dispatch::new()
-            .format(|out, message, record| {
-                out.finish(format_args!(
-                    "{} [{}] {}",
-                    Local::now().to_rfc3339_opts(SecondsFormat::Micros, false),
-                    record.level(),
-                    message
-                ))
-            })
-            .chain(fern::log_file(log_file)?);
-        dispatch = dispatch.chain(file_dispatch);
+        match open_file_sink(log_file) {
+            Ok(handle) => {
+                let file_dispatch = fern::Dispatch::new()
+                    .format(|out, message, record| {
+                        out.finish(format_args!(
+                            "{} [{}] {}",
+                            Local::now()
+                                .to_rfc3339_opts(SecondsFormat::Micros, false),
+                            record.level(),
+                            message
+                        ))
+                    })
+                    .chain(handle);
+                dispatch = dispatch.chain(file_dispatch);
+            }
+            Err(reason) => file_error = Some(reason),
+        }
     }
 
     dispatch.apply()?;
 
+    if let Some(reason) = file_error {
+        // Both destinations on purpose: the terminal for an interactive
+        // run, syslog for the cron case where stdout goes nowhere and this
+        // would otherwise be the one message no one ever sees.
+        warn(&format!("file logging disabled — {reason}"));
+        log_early_error(&format!("could not open log file: {reason}"));
+    }
+
     Ok(())
+}
+
+/// Open the log file, or say why not.
+///
+/// Split out from `init_logger` so the degrade decision is testable: the
+/// global logger can only be installed once per process, so `init_logger`
+/// itself cannot be exercised twice in one test binary.
+fn open_file_sink(
+    log_file: &str,
+) -> std::result::Result<std::fs::File, String> {
+    fern::log_file(log_file).map_err(|e| format!("{log_file}: {e}"))
 }
 
 /// Log configuration load failures to syslog
@@ -142,5 +178,45 @@ mod tests {
     #[test]
     fn absent_everywhere_is_none() {
         assert_eq!(resolve_log_file(false, None, None), None);
+    }
+
+    /// A usable path opens, and the sink is appended to rather than
+    /// truncated — `fern::log_file` is the only writer and a run must not
+    /// erase the previous run's log.
+    #[test]
+    fn a_writable_path_opens() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("xtgeoip.log");
+        std::fs::write(&path, b"previous run\n").expect("seed");
+
+        let sink = open_file_sink(path.to_str().expect("utf-8"));
+        assert!(sink.is_ok(), "expected Ok, got {:?}", sink.err());
+        drop(sink);
+
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            "previous run\n",
+            "opening the sink must not truncate an existing log"
+        );
+    }
+
+    /// The F-001 case. A log path whose parent does not exist must report a
+    /// reason naming the path, *not* propagate an error that can only be
+    /// printed through the logger this call is trying to install.
+    #[test]
+    fn a_missing_parent_directory_yields_a_reason_naming_the_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("no-such-dir").join("xtgeoip.log");
+        let path = path.to_str().expect("utf-8");
+
+        let reason = open_file_sink(path).expect_err("must not open");
+        assert!(
+            reason.contains(path),
+            "reason must name the path, got: {reason}"
+        );
+        assert!(
+            reason.len() > path.len(),
+            "reason must carry the OS error too, got: {reason}"
+        );
     }
 }

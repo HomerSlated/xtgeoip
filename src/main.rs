@@ -34,6 +34,23 @@ fn is_root() -> bool {
         .unwrap_or(false)
 }
 
+/// Install the logger, or report the failure *without* it.
+///
+/// This is the one error `main`'s catch-all funnel structurally cannot
+/// print. That funnel calls `messages::error`, which goes through
+/// `log::log!`; with no logger installed the `log` crate discards the
+/// record, so the process exited 1 having written nothing to stdout or
+/// stderr. `init_logger` now degrades a bad *file* sink to a warning, so
+/// what remains here is the residue — a genuinely unusable logger — and it
+/// is reported to stderr and syslog directly rather than through itself.
+fn install_logger(log_file: Option<&str>) {
+    if let Err(e) = init_logger(log_file) {
+        eprintln!("Error: failed to initialise logging: {e:#}");
+        log_early_error(&format!("failed to initialise logging: {e}"));
+        process::exit(EXIT_RUNTIME_ERROR);
+    }
+}
+
 fn init_runtime(cfg: &config::Config) -> Result<()> {
     if let Some(threads) = cfg
         .processing
@@ -62,10 +79,10 @@ fn run(cli: Cli) -> Result<()> {
             // log-file path — but an explicit `--log-file` is known already
             // and takes precedence, so honour it here too rather than
             // silently ignoring the flag on one subcommand.
-            init_logger(
+            install_logger(
                 resolve_log_file(cli.no_log, cli.log_file.as_deref(), None)
                     .as_deref(),
-            )?;
+            );
             conf::run_conf(conf_action)?;
         }
 
@@ -97,7 +114,7 @@ fn run(cli: Cli) -> Result<()> {
                 cli.log_file.as_deref(),
                 configured.as_deref(),
             );
-            init_logger(log_file.as_deref())?;
+            install_logger(log_file.as_deref());
             let cfg = cfg_result.map_err(|e| {
                 log_early_error(&format!("Failed to load config: {}", e));
                 e

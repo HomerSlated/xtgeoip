@@ -206,6 +206,52 @@ fn generate_manifest(
     Ok(manifest_path)
 }
 
+/// Could this program have written this file?
+///
+/// The man page's FILE OWNERSHIP section promises that unowned files are
+/// "**never** touched, by any operation", and says the guarantee is
+/// "enforced structurally, not by convention". That was true of the clean
+/// path (`backup::iv_files` applies the two-character stem test) but was
+/// not applied here: `detect_orphans` selected on extension alone, so an
+/// operator's own `checksums.sha256` or a packaging step's `SHA256SUMS.sha256`
+/// in `output_dir` was classified as a stale manifest and deleted silently
+/// by the next `build`. The documented exception is narrower than the code
+/// was — it covers `*.blake3`/`*.sha256` *from an earlier build*, not every
+/// file with those extensions.
+///
+/// The two arms mirror the two things this program writes:
+///
+/// * data files — `<CC>.iv4` / `<CC>.iv6`, stem exactly two characters from
+///   `[A-Z0-9]`, the same test `backup::iv_files` uses;
+/// * manifests — `GeoLite2-Country-bin_<version>.blake3`, plus the legacy
+///   `.sha256` spelling, both produced by `Version::bin_manifest_name`.
+///
+/// The `version` file is owned but is never an orphan (it is rewritten on
+/// every build), so it is excluded here rather than special-cased below.
+fn is_ours(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(OsStr::to_str) else {
+        return false;
+    };
+    let Some(ext) = path.extension().and_then(OsStr::to_str) else {
+        return false;
+    };
+    let stem = &name[..name.len() - ext.len() - 1];
+
+    match ext {
+        "iv4" | "iv6" => {
+            stem.len() == 2
+                && stem
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || c.is_ascii_uppercase())
+        }
+        "blake3" | "sha256" => {
+            stem.starts_with("GeoLite2-Country-bin_")
+                && Version::parse(name).is_some()
+        }
+        _ => false,
+    }
+}
+
 fn detect_orphans(
     target_dir: &Path,
     written: &[PathBuf],
@@ -214,15 +260,7 @@ fn detect_orphans(
     let all_existing: Vec<_> = fs::read_dir(target_dir)?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
-        .filter(|p| {
-            let ext = p.extension().and_then(OsStr::to_str).unwrap_or("");
-            let fname = p.file_name().and_then(OsStr::to_str).unwrap_or("");
-            fname != "version"
-                && (ext == "iv4"
-                    || ext == "iv6"
-                    || ext == "blake3"
-                    || ext == "sha256")
-        })
+        .filter(|p| is_ours(p))
         .collect();
 
     let mut written_set: HashSet<PathBuf> =
@@ -641,16 +679,18 @@ fn write_country_v4(
 ) -> anyhow::Result<(String, String)> {
     let file_path = file_base.with_extension("iv4");
     let mut buf = Vec::with_capacity(ranges.len() * 8);
-    let mut hasher = blake3::Hasher::new();
     for &(start, end) in ranges {
-        let s = start.to_be_bytes();
-        let e = end.to_be_bytes();
-        buf.extend_from_slice(&s);
-        buf.extend_from_slice(&e);
-        hasher.update(&s);
-        hasher.update(&e);
+        buf.extend_from_slice(&start.to_be_bytes());
+        buf.extend_from_slice(&end.to_be_bytes());
     }
-    let hash = hasher.finalize().to_string();
+    // One BLAKE3 call over the finished buffer, not two per range. The
+    // digest is identical — BLAKE3 is a streaming hash, so `update(a)`
+    // then `update(b)` is by definition `update(a ++ b)`, and `buf` is
+    // exactly that concatenation. What changes is throughput: the wide
+    // AVX2/AVX-512 path needs >= 1 KiB per call, and fed 4 or 16 bytes at
+    // a time it degrades to one 64-byte block per call. Measured 318 ->
+    // 1,725 MB/s on the production volume (O-003).
+    let hash = blake3::hash(&buf).to_string();
     fs::write(&file_path, &buf)?;
     let fname = file_path
         .file_name()
@@ -666,16 +706,18 @@ fn write_country_v6(
 ) -> anyhow::Result<(String, String)> {
     let file_path = file_base.with_extension("iv6");
     let mut buf = Vec::with_capacity(ranges.len() * 32);
-    let mut hasher = blake3::Hasher::new();
     for &(start, end) in ranges {
-        let s = start.to_be_bytes();
-        let e = end.to_be_bytes();
-        buf.extend_from_slice(&s);
-        buf.extend_from_slice(&e);
-        hasher.update(&s);
-        hasher.update(&e);
+        buf.extend_from_slice(&start.to_be_bytes());
+        buf.extend_from_slice(&end.to_be_bytes());
     }
-    let hash = hasher.finalize().to_string();
+    // One BLAKE3 call over the finished buffer, not two per range. The
+    // digest is identical — BLAKE3 is a streaming hash, so `update(a)`
+    // then `update(b)` is by definition `update(a ++ b)`, and `buf` is
+    // exactly that concatenation. What changes is throughput: the wide
+    // AVX2/AVX-512 path needs >= 1 KiB per call, and fed 4 or 16 bytes at
+    // a time it degrades to one 64-byte block per call. Measured 318 ->
+    // 1,725 MB/s on the production volume (O-003).
+    let hash = blake3::hash(&buf).to_string();
     fs::write(&file_path, &buf)?;
     let fname = file_path
         .file_name()
@@ -951,6 +993,84 @@ mod tests {
         assert!(conf.exists(), "foreign file must survive detect_orphans");
     }
 
+    /// F-003. The stale-manifest exception is scoped by the man page to
+    /// "*.blake3, *.sha256 **from an earlier build**". Selecting on
+    /// extension alone made every file with those extensions eligible, so
+    /// an operator's own checksum file in `output_dir` was deleted
+    /// silently by the next build — a direct breach of the "never touched"
+    /// guarantee for unowned files.
+    #[test]
+    fn detect_orphans_foreign_checksum_files_untouched() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        let foreign = [
+            touch(p, "SHA256SUMS.sha256"),
+            touch(p, "checksums.sha256"),
+            touch(p, "release.blake3"),
+            // Right extension, right shape, wrong product.
+            touch(p, "GeoLite2-City-bin_20260101.blake3"),
+        ];
+        let manifest = touch(p, "GeoLite2-Country-bin_20260606.blake3");
+
+        detect_orphans(p, &[], &manifest).unwrap();
+
+        for f in &foreign {
+            assert!(
+                f.exists(),
+                "unowned file must never be deleted: {}",
+                f.display()
+            );
+        }
+        // Nor may they be reported as stale-owned; they are not ours to
+        // have an opinion about.
+        assert!(
+            !p.join("orphaned").exists(),
+            "unowned files must not be listed as orphans"
+        );
+    }
+
+    /// The same structural test the clean path uses: a two-character stem
+    /// from [A-Z0-9]. A file that merely ends in .iv4 is not ours.
+    #[test]
+    fn detect_orphans_foreign_iv_files_are_invisible() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        let foreign = [
+            touch(p, "backup.iv4"), // stem too long
+            touch(p, "us.iv4"),     // lowercase
+            touch(p, "U.iv6"),      // too short
+            touch(p, "U-.iv6"),     // not [A-Z0-9]
+        ];
+        let manifest = touch(p, "GeoLite2-Country-bin_20260606.blake3");
+
+        detect_orphans(p, &[], &manifest).unwrap();
+
+        for f in &foreign {
+            assert!(f.exists(), "unowned file deleted: {}", f.display());
+        }
+        assert!(
+            !p.join("orphaned").exists(),
+            "unowned files must not be listed as orphans"
+        );
+    }
+
+    /// The exception still works for what it was written for: a manifest
+    /// this program produced, from an earlier version, is superseded.
+    #[test]
+    fn detect_orphans_our_own_stale_manifest_still_deleted() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        let old_blake3 = touch(p, "GeoLite2-Country-bin_20260101.blake3");
+        let old_sha256 = touch(p, "GeoLite2-Country-bin_20260101.sha256");
+        let manifest = touch(p, "GeoLite2-Country-bin_20260606.blake3");
+
+        detect_orphans(p, &[], &manifest).unwrap();
+
+        assert!(!old_blake3.exists(), "our stale manifest must be deleted");
+        assert!(!old_sha256.exists(), "our stale manifest must be deleted");
+        assert!(manifest.exists(), "the current manifest must survive");
+    }
+
     #[test]
     fn detect_orphans_version_file_untouched() {
         let dir = TempDir::new().unwrap();
@@ -997,5 +1117,66 @@ mod tests {
             p.join("orphaned").exists(),
             "orphaned list file must be created"
         );
+    }
+
+    // ── O-003: one hash call over the buffer, same digest ────────────────
+
+    /// O-003 replaced two `hasher.update()` calls per range with a single
+    /// call over the finished buffer. The manifest digests are published
+    /// and compared against on every subsequent *verified* operation, so
+    /// the equivalence is load-bearing rather than incidental: pin it
+    /// against the incremental form the optimisation removed.
+    #[test]
+    fn hashing_the_whole_buffer_matches_the_incremental_form_v4() {
+        let dir = TempDir::new().unwrap();
+        let ranges: Vec<(u32, u32)> =
+            (0..1000u32).map(|i| (i * 16, i * 16 + 15)).collect();
+
+        let (_, actual) =
+            write_country_v4(&dir.path().join("XX"), &ranges).unwrap();
+
+        let mut hasher = blake3::Hasher::new();
+        for &(start, end) in &ranges {
+            hasher.update(&start.to_be_bytes());
+            hasher.update(&end.to_be_bytes());
+        }
+        assert_eq!(actual, hasher.finalize().to_string());
+
+        // And the digest must still describe the bytes actually on disk.
+        let written = fs::read(dir.path().join("XX.iv4")).unwrap();
+        assert_eq!(written.len(), ranges.len() * 8);
+        assert_eq!(actual, blake3::hash(&written).to_string());
+    }
+
+    #[test]
+    fn hashing_the_whole_buffer_matches_the_incremental_form_v6() {
+        let dir = TempDir::new().unwrap();
+        let ranges: Vec<(u128, u128)> =
+            (0..1000u128).map(|i| (i << 64, (i << 64) + 255)).collect();
+
+        let (_, actual) =
+            write_country_v6(&dir.path().join("XX"), &ranges).unwrap();
+
+        let mut hasher = blake3::Hasher::new();
+        for &(start, end) in &ranges {
+            hasher.update(&start.to_be_bytes());
+            hasher.update(&end.to_be_bytes());
+        }
+        assert_eq!(actual, hasher.finalize().to_string());
+
+        let written = fs::read(dir.path().join("XX.iv6")).unwrap();
+        assert_eq!(written.len(), ranges.len() * 32);
+        assert_eq!(actual, blake3::hash(&written).to_string());
+    }
+
+    /// The empty case: a country with no ranges of one family still gets a
+    /// digest, and it must be BLAKE3 of the empty input rather than
+    /// anything special-cased.
+    #[test]
+    fn an_empty_range_set_hashes_the_empty_buffer() {
+        let dir = TempDir::new().unwrap();
+        let (_, hash) = write_country_v4(&dir.path().join("ZZ"), &[]).unwrap();
+        assert_eq!(hash, blake3::hash(b"").to_string());
+        assert_eq!(fs::read(dir.path().join("ZZ.iv4")).unwrap().len(), 0);
     }
 }

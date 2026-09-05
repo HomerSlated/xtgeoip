@@ -42,13 +42,37 @@ This writes to `src/generated/` (error constants, CLI test matrix) and `docs/gen
 
 ## Testing
 
-There is no `cargo test` suite. Testing is done via the `xtgeoip-tests` binary against a real release build:
+Two suites, with different jobs. Run the unit tests freely; run the
+integration suite deliberately.
+
+**Unit tests** (`cargo test`) — fast, hermetic, no root, no network. These
+cover parsing, planning, the spec-vs-implementation contradiction checks, the
+136-combination CLI snapshot, and the man-page-vs-program checks.
+
+```bash
+cargo test                  # all of it
+cargo test --lib            # library only
+```
+
+One is marked `#[ignore]` because it rewrites a golden file rather than
+asserting against it; run it explicitly after an intended change:
+
+```bash
+cargo test --lib -- --ignored regenerate_snapshot   # src/cli_snapshot.golden
+```
+
+**Integration suite** (`xtgeoip-tests`) — drives the real release binary
+end to end:
 
 ```bash
 sudo target/release/xtgeoip-tests   # requires root and a release build
 ```
 
-The test cases come from `docs/generated/testcases.yaml`, which is itself generated from `docs/spec/cli.yaml`. The test binary (`src/bin/xtgeoip-tests.rs`) must be kept in sync with `docs/spec/cli.yaml` changes.
+It needs root, hits the **live, rate-capped** MaxMind API, and writes to the
+real output directories. Do not re-run it casually. Its cases come from
+`docs/generated/testcases.yaml`, generated from `docs/spec/cli.yaml`, and the
+runner (`src/bin/xtgeoip-tests.rs`) carries hand-maintained corpus-size
+assertions that must be updated when the spec gains or loses a case.
 
 ## Architecture
 

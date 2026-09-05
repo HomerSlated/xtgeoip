@@ -149,15 +149,30 @@ selecting `build` without `fetch` produces code that does not compile — the
 Fetch-before-Build guarantee stays in the type system rather than degrading to
 a runtime check.
 
-⚑ **Stage 4 — deleting `plan()` — awaits sign-off.** The running code is still
-the hand-written planner; everything landed is additive and reversible.
+✅ **Stage 4 — deleting `plan()` — DONE (2026-09-02, `3a42ae0`).** Sign-off
+given. `action.rs` lost 98 lines of hand-written `plan()` and gained
+`use crate::generated::plan::plan_generated as plan;`, so every call site and
+every test kept working unchanged and the generated planner now drives
+execution. The differential test that proved the two agreed over all 76
+`Action` values went with it, necessarily: there is no longer a second planner
+to differ from. `spec_steps_agree_with_plan` and the eleven goldens are what
+pin the survivor.
 
-Two pieces are worth doing whether or not the codegen ever happens:
+Both follow-ups are also closed, one by doing and one by deciding:
 
-- assert `outcome:` against `plan()` (the **#92 remainder**) — the oracle,
-  the role `cli::snapshot` played for the validator;
-- make the canonical-order enumeration a permanent test — it pins a property
-  the man page's EXECUTION ORDER section promises users.
+- ✅ **canonical-order enumeration is now a permanent test** —
+  `action::tests::manpage_execution_order_agrees_with_the_planner`
+  (2026-09-03, `3548a1b`), which parses the four `.TP` pairs out of the
+  generated `.1` and compares them against the real planner. It pins exactly
+  the property the man page's EXECUTION ORDER section promises users.
+- ✅ **`outcome:` versus `plan()` (the #92 remainder) — resolved by
+  decision, not by code.** `outcome:` stays authored prose and `steps:` is the
+  machine-checkable half; the reasoning is recorded at the head of
+  `spec_steps_agree_with_plan`. Asserting free prose against a step list would
+  either constrain the prose to a generated sentence or compare it loosely
+  enough to pass anything, and the defect it was proposed against (three
+  `outcome:` strings claiming clean-before-fetch for six weeks) is caught by
+  the `steps:` check that now exists.
 
 **Dangling ticket references (audited 2026-09-01).** These numbers are
 cited across this file as dependencies or enablers but have **no `###`
@@ -1510,6 +1525,106 @@ the guard table, which is why this survived them. A sixth check would parse the
 combination the guards actually reject. Harder than the other five — the claims
 are free prose, not a structured list — and worth doing only if a second one of
 these appears.
+
+---
+
+## AUDIT TRIAGE (2026-09-04 sweep)
+
+### Six findings cleared ✅ DONE (2026-09-05)
+
+Four agents swept `src/` on 2026-09-04 (reports in `private/`). The findings the
+maintainer triaged as worth acting on are all closed. Each carries a regression
+test, and each test was checked against the *old* behaviour before being kept.
+
+**F-001 — a failure reported through the logger that failed to install.**
+`init_logger` chained `fern::log_file(path)?` inside the dispatch, so one `?`
+aborted the whole dispatch, the terminal sinks were never installed, and the
+resulting error was then reported by `main`'s catch-all via `messages::error`
+→ `log::log!` → discarded. `xtgeoip conf -s --log-file /nonexistent-dir/x.log`
+exited 1 having written nothing to stdout *or* stderr. Worse in a
+`[logging] log_file` whose directory has gone: it poisons every command on the
+host, silently.
+
+That inverted this module's own documented contract — "no file" must never mean
+"no output" (#1) — by making a *broken* file worse than no file at all. Two
+changes, because the class is wider than the instance:
+
+1. `messages::init_logger` now **degrades**: a file sink that will not open is
+   a warning (to terminal *and* syslog, for the cron case), not a fatal error.
+   The decision is split into `open_file_sink` so it is testable — the global
+   logger can only be installed once per process, so `init_logger` itself
+   cannot be exercised twice in one test binary.
+2. `main::install_logger` reports a genuinely unusable logger to stderr and
+   syslog **directly**, never through `messages::error`. That funnel
+   structurally cannot print this one error.
+
+**M-1 (guardian) — the one unbounded remote read.** `fetch.rs` capped the
+archive body (`MAX_DOWNLOAD_BYTES`) and extraction (`MAX_EXTRACT_BYTES`) but
+read the checksum response with a bare `read_to_string`, then wrote the whole
+thing to `archive_dir`. A hostile origin in the MaxMind chain — including the
+credential-less redirect target — could drive the root-privileged process into
+OOM. Now bounded by `MAX_CHECKSUM_BYTES` (4 KiB) with a `+1` breach check
+matching the archive path. `expected_hash` is additionally validated as exactly
+64 ASCII hex characters: that changes no accept/reject decision (a non-digest
+can never equal the computed hash) but turns "checksum mismatch" into "invalid
+checksum format" when the body is an HTML error page, which sends the reader
+to the right place.
+
+**F-003 — `detect_orphans` deleted any `.blake3`/`.sha256`, not only ours.**
+The man page's FILE OWNERSHIP section promises unowned files are "**never**
+touched, by any operation", scopes the stale-manifest exception to files "from
+an earlier build", and says the guarantee is "enforced structurally, not by
+convention". That was true of the clean path (`backup::iv_files`) and was not
+applied here at all: the partition tested the extension and nothing else, so an
+operator's `SHA256SUMS.sha256` in `output_dir` was deleted silently by the next
+build. `build::is_ours` now applies the documented structural test to both
+families — two-character `[A-Z0-9]` stems for `iv4`/`iv6`, and the
+`GeoLite2-Country-bin_<version>` shape for manifests — and unowned files are no
+longer even listed as orphans, since they are not ours to have an opinion
+about.
+
+**F-006 — the plan emitter dropped steps silently, twice.** `generate_plan_rs`
+had `if let Some(expr) = flag(letter)` with no `else`, so a `selects:` entry
+whose letter `ACTION_BINDINGS` does not bind for that context vanished from the
+generated planner with docgen exiting 0. And the `pre`/`mid` rank windows are
+open either side of the fetch, so a step ranked at or after `build` fell into
+neither and was discarded. Both are now hard errors naming the context and the
+step. The second is unreachable while `build` holds the maximum rank — but
+`26-spec-derived-planning.md` records that assumption as the one most likely to
+break next, so it fails loudly rather than emitting a short plan. Verified by
+introducing each fault into `cli.yaml` and confirming the message, then
+reverting.
+
+**O-003 — BLAKE3 fed 4 and 16 bytes at a time.** `write_country_v4`/`_v6`
+hashed each range as it was appended, so the wide AVX2/AVX-512 path (which
+needs >= 1 KiB per call) degraded to one 64-byte block per call. Now one
+`blake3::hash(&buf)` over the finished buffer. **Reproduced independently
+before accepting the finding**: 10.42 MB at production volume, best of 7,
+**338 -> 1,739 MB/s (5.14x)**, digests asserted identical each rep. The
+optimisation report claimed 318 -> 1,725 MB/s; the measurement stands. The
+figure is conservative — the incremental arm of the benchmark omits the buffer
+construction the real code also does. The manifest digests are compared on
+every later *verified* operation, so the equivalence is load-bearing and is now
+pinned by test against the incremental form, including the empty-range case.
+
+**`CLAUDE.md` said "There is no `cargo test` suite".** There were 197 when the
+claim was found and 203 after this pass added its regression tests. Replaced
+with the two-suite description: unit tests are hermetic and free to run,
+`xtgeoip-tests` needs root, hits the live rate-capped API, and is not to be run
+casually.
+
+**Not taken from the sweep.** F-002 and F-007 (partial state after a
+mid-operation failure) are real and are the same shape as the `.part` leak
+closed on 2026-07-18, in two places the RAII fix did not reach. They are larger
+than the rest and were not part of this pass. O-001 and O-002 are the two large
+optimisations; both were measured by the agent and neither is proposed here,
+since `build` and `backup` are not currently the complaint.
+
+**`src/fetch.rs` needs re-signing.** M-1's remediation invalidated guardian's
+signature. Row added to `private/guardian/needs_reverification.md` by hand with
+the `.sig` deliberately left in place, per that file's own convention, so the
+next guardian run raises the BAD signature itself rather than inheriting this
+note's word for it.
 
 ---
 
