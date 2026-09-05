@@ -502,13 +502,41 @@ configured URL in its https rejection (`got {:?}`). A URL is not a
 credential and the message is much less useful without it; noted so the
 next audit does not re-file it as new.
 
-Not verified end-to-end on a live host — AppArmor blocks unprivileged user
-namespaces (`kernel.apparmor_restrict_unprivileged_userns = 1`) and the
-config path is hardcoded, so shadowing `/etc/xtgeoip.conf` needs root. To
-check by hand:
+**Closed off from the other side, 2026-09-05.** The echo stands — but the one
+way a URL *could* have carried a secret is now rejected outright:
+`Config::validate` refuses a `maxmind.url` with userinfo
+(`https://user:pass@host/`). That is the case where the echo would have
+printed a password, and where a credential would have been sitting in the one
+config field that is deliberately not encrypted. The rejection message names
+`[maxmind.credentials]` and does not quote the URL back.
+
+❌ **End-to-end verification RETIRED (2026-09-05) — premise moot.** Recorded
+here rather than deleted so the next audit does not re-file it as an
+outstanding gap.
+
+The check was to confirm on a live host that the top-level handler no longer
+echoes raw config source. What made that worth a live run was the possibility
+of *plaintext credentials* in the echoed source. Since #103 (2026-07-20) the
+config cannot contain any: credentials live in `[maxmind.credentials]` as
+ciphertext, and an unmigrated plaintext host is detected and refused with a
+migration instruction rather than parsed. So the material the leak would have
+exposed no longer exists in the file.
+
+What remains is covered without a live host: `errors_never_echo_config_source`
+drives five leak shapes — legacy plaintext fields, a partially hand-migrated
+file, an unknown key adjacent to a secret-looking line, a syntax error whose
+span lands on the secret's line, and a type mismatch whose serde message
+embeds the offending value — and asserts the sentinel never reaches the error
+chain.
+
+The former blocker is recorded for anyone who wants it anyway: AppArmor here
+sets `kernel.apparmor_restrict_unprivileged_userns = 1` and the config path is
+hardcoded, so shadowing `/etc/xtgeoip.conf` needs root —
 `sudo unshare -m sh -c 'mount --bind /path/to/legacy.conf /etc/xtgeoip.conf && xtgeoip fetch'`
-(the mount is private to that namespace; config load fails before any
-network call).
+(the mount is private to that namespace; config load fails before any network
+call). Note this is the same blocker as `docs/design/98-test-isolation.md` §4:
+reaching a different config file. A `--config` option would make this a
+one-liner needing neither root nor a namespace.
 
 ---
 
@@ -1498,11 +1526,37 @@ worth a look; the documented defaults grow whenever a key gains one, and
 `log_file` took that count from three to four in this very change. An exact
 count there would fail on an improvement to the documentation.
 
-**Not done: the generation-time half.** Checking the template against
-`cli.yaml` — that every command and flag it names exists in the spec — is
-spec-internal and would belong in docgen's `validate_*` family. Left out
-deliberately: the five above are a complete deliverable, and bundling a second
-validator into the same pass would dilute both.
+✅ **The generation-time half is DONE (2026-09-05)** — `validate_manpage_template`
+in docgen's `validate_*` family. Every option and command the template names
+must be one the spec declares, both directions for commands.
+
+It catches a rename or a typo, not a false claim: `-c` is `--clean` under
+`build` and `--set-credentials` under `conf`, and the check deliberately does
+not model per-command validity, which would duplicate the guard table that
+test time already checks against the parser.
+
+Two things had to be right for it to be worth having. roff writes a literal
+hyphen as `\-`, so a bare scan of the real template yields six spurious tokens
+(`\-owned` from `stale\-owned`, `\-src`, `\-cc`, `\-Z` from `[A\-Z0\-9]`,
+`\-no`, `\-file`); the rule that removes all six is that an option's `\-` is
+never preceded by an alphanumeric and a prose hyphen always is. And `\fB` ends
+in an alphanumeric, so without stripping font escapes first
+`\fB\-\-legacy\fR` reads as the short flag `-legacy` rather than the long
+`--legacy` — observed on the real template, now pinned by a test.
+
+`description` is excluded, load-bearingly: it is the one section that
+legitimately names another program's options — `xt_geoip`'s `--src-cc`, an
+iptables match option this tool never accepts.
+
+It also closed a real spec gap. `conf`'s `-d`/`-e`/`-s`/`-c` were declared
+nowhere in the spec, only in `cli.rs` and the template, so the spec's claim to
+describe the whole CLI surface was false and the check would have had to carve
+out the four flags most likely to be renamed. They are now in
+`subcommand_options:`, kept out of `flags:` for the same reason
+`global_options:` is.
+
+Teeth verified by injecting each fault class: a renamed short flag, a mistyped
+long option, and a documented command the spec does not declare.
 
 ---
 

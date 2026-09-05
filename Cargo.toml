@@ -20,6 +20,9 @@ zip = "8.1.0"
 anyhow = "1.0.102"
 reqwest = { version = "0.13.2", features = ["blocking", "json", "gzip", "rustls"] }
 toml = "1.0.6"
+# Already in the tree via reqwest (2.5.8); declared directly so config
+# validation can reject a URL carrying userinfo. Adds no new code.
+url = "2.5.8"
 csv = "1.4.0"
 memchr = "2.8.3"
 rayon = "1.11.0"

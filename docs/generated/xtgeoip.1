@@ -413,6 +413,12 @@ copy it to
 .B /etc/xtgeoip.conf
 and edit as required.
 .PP
+Every section rejects keys it does not define, and an unrecognised key is a
+parse error rather than a warning.
+A key that is silently ignored cannot be told apart from one that works, so
+a misspelling would otherwise leave the default in force while appearing to
+have been set.
+.PP
 To download GeoLite2 databases, a free MaxMind account is required.
 Obtain one at
 .IR https://www.maxmind.com/en/geolite2/signup ,
@@ -466,8 +472,7 @@ The
 sub-table is written by
 .B "xtgeoip conf \-c"
 and should not be edited by hand.
-No other key is accepted in this section; an unrecognised one is a parse
-error, not a warning.
+No other key is accepted in this section, as above.
 .TP
 .B [logging]
 .I log_file

@@ -14,6 +14,7 @@ pub(crate) fn system_config_path() -> &'static Path {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Paths {
     pub archive_dir: String,
     pub archive_prune: usize,
@@ -48,17 +49,32 @@ pub struct Credentials {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Logging {
     pub log_file: String,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Processing {
     /// Number of Rayon worker threads. 0 or absent = use all available cores.
     pub threads: Option<usize>,
 }
 
+/// `deny_unknown_fields` on every table, not just `[maxmind]` (2026-09-05).
+///
+/// Before this, `[paths]`, `[logging]`, `[processing]` and the top level all
+/// accepted stray keys in silence, and `logging.verbose` sat in the shipped
+/// example config being read by nothing — which is how the asymmetry was
+/// found. A key that looks live and does nothing is worse than one that is
+/// rejected: the operator has no way to tell the difference from the outside.
+///
+/// This is a breaking change for any config carrying a key the program does
+/// not define. That is the intent — such a config was already not doing what
+/// its author believed — but it is why the shipped example is asserted to
+/// parse under the strict rules by `shipped_example_config_parses`.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub paths: Paths,
     pub maxmind: MaxMind,
@@ -103,6 +119,32 @@ impl Config {
                  as HTTP basic auth and would otherwise cross the network in \
                  cleartext (got {:?})",
                 self.maxmind.url.trim()
+            );
+        }
+
+        // Reject userinfo (`https://user:pass@host/`). Two reasons, and the
+        // second is why this is here rather than left alone.
+        //
+        // Credentials belong in the encrypted `[maxmind.credentials]` table
+        // (#103); a URL is the one place in this file that is *not* encrypted
+        // and is echoed verbatim by the error above. So a password smuggled
+        // into the URL would be both stored in plaintext and printable — the
+        // exact shape #104 closed everywhere else.
+        //
+        // Parsed after `trim()` to match the scheme check's order, and kept
+        // *alongside* it rather than replacing it: four tests pin the current
+        // scheme behaviour (case-insensitivity, non-https rejection,
+        // surrounding whitespace, and empty-url reporting emptiness rather
+        // than scheme), and `Url::parse` as the scheme gate would put all four
+        // at risk for no gain.
+        if let Ok(parsed) = url::Url::parse(self.maxmind.url.trim())
+            && (!parsed.username().is_empty() || parsed.password().is_some())
+        {
+            bail!(
+                "maxmind.url must not carry embedded credentials — put the \
+                 account ID and license key in [maxmind.credentials] via \
+                 `xtgeoip conf -c`, where they are encrypted. A URL is stored \
+                 in plaintext and is quoted back in error messages."
             );
         }
         if let Some(creds) = &self.maxmind.credentials {
@@ -372,6 +414,66 @@ mod tests {
         );
     }
 
+    /// A URL must not carry userinfo — that is plaintext credential storage
+    /// in the one field the https error quotes back verbatim.
+    #[test]
+    fn urls_with_embedded_credentials_are_rejected() {
+        for url in [
+            "https://user:pass@download.maxmind.com/x",
+            "https://user@download.maxmind.com/x",
+            "https://:pass@download.maxmind.com/x",
+        ] {
+            let err = config_with_url(url)
+                .validate()
+                .expect_err("userinfo must be rejected");
+            let msg = err.to_string();
+            assert!(
+                msg.contains("[maxmind.credentials]"),
+                "error should name where credentials belong: {msg}"
+            );
+            assert!(
+                !msg.contains("pass"),
+                "the error must not echo the smuggled secret: {msg}"
+            );
+        }
+    }
+
+    /// The userinfo check must not block a real MaxMind download.
+    ///
+    /// Provable without touching the network, and worth saying why: the
+    /// validator only ever sees `maxmind.url`, the *base* endpoint. The query
+    /// string is appended later, inside `fetch()` — `?suffix=zip` and
+    /// `?suffix=zip.sha256` — so validation never sees the forms actually
+    /// requested. Both are asserted here anyway, since the cost of being
+    /// wrong is a rate-capped budget rather than a failing test.
+    #[test]
+    fn real_maxmind_urls_are_accepted() {
+        let base = shipped_example_maxmind_url();
+        config_with_url(&base)
+            .validate()
+            .expect("the shipped example URL must validate");
+
+        for suffix in ["?suffix=zip", "?suffix=zip.sha256"] {
+            let requested = format!("{base}{suffix}");
+            let parsed =
+                url::Url::parse(&requested).expect("fetch-time URL must parse");
+            assert!(
+                parsed.username().is_empty() && parsed.password().is_none(),
+                "appending {suffix} introduced userinfo: {requested}"
+            );
+        }
+    }
+
+    /// The `url` shipped in the example config, so the test above checks the
+    /// real endpoint rather than a hand-copied one that could drift from it.
+    fn shipped_example_maxmind_url() -> String {
+        let (_, table) = shipped_config_keys();
+        table["maxmind"]["url"]
+            .as_str()
+            .expect("maxmind.url must be a string")
+            .to_owned()
+    }
+
     #[test]
     fn other_schemes_are_rejected() {
         for url in ["ftp://example.com/x", "file:///tmp/x", "download"] {
@@ -459,6 +561,70 @@ mod tests {
             assert!(
                 !full.contains(SENTINEL),
                 "config content leaked into the error chain:\n{full}"
+            );
+        }
+    }
+
+    /// The shipped example must be accepted by the program's own
+    /// deserializer, not merely be valid TOML.
+    ///
+    /// `shipped_config_keys` parses into a `toml::Table`, which checks syntax
+    /// and key names but never runs `Config`'s deserializer — so before this,
+    /// the example could have been rejected by the tool while every test
+    /// passed. That gap only started to matter when `deny_unknown_fields`
+    /// reached every table (2026-09-05): a stray key in the example is now a
+    /// config that fails to load, and the example is what operators copy.
+    ///
+    /// Both forms are checked. As shipped, `[processing]` is commented out;
+    /// uncommented, it must still parse, because the comment marks it
+    /// optional rather than absent.
+    #[test]
+    fn shipped_example_config_parses() {
+        let raw = std::fs::read_to_string(EXAMPLE_CONFIG)
+            .unwrap_or_else(|e| panic!("{EXAMPLE_CONFIG}: {e}"));
+        parse_config(&raw).unwrap_or_else(|e| {
+            panic!("{EXAMPLE_CONFIG} does not parse as shipped: {e:#}")
+        });
+
+        let (_, table) = shipped_config_keys();
+        let uncommented = toml::to_string(&table).expect("re-serialise");
+        parse_config(&uncommented).unwrap_or_else(|e| {
+            panic!(
+                "{EXAMPLE_CONFIG} does not parse with its optional sections \
+                 uncommented: {e:#}"
+            )
+        });
+    }
+
+    /// Every table rejects an unknown key, not just `[maxmind]`.
+    ///
+    /// The asymmetry this closes was not theoretical: `logging.verbose` sat
+    /// in the shipped example being read by nothing, because `[logging]`
+    /// accepted anything. A key that looks live and does nothing cannot be
+    /// distinguished from one that works, from outside the program.
+    #[test]
+    fn every_config_table_rejects_unknown_keys() {
+        let cases = [
+            ("paths", "[paths]\narchive_dir = \"/a\"\narchive_prune = \
+              3\noutput_dir = \"/b\"\nbogus = 1\n\n[maxmind]\nurl = \
+              \"https://x.example/y\"\n"),
+            ("logging", "[paths]\narchive_dir = \"/a\"\narchive_prune = \
+              3\noutput_dir = \"/b\"\n\n[maxmind]\nurl = \
+              \"https://x.example/y\"\n\n[logging]\nlog_file = \
+              \"/l\"\nverbose = true\n"),
+            ("processing", "[paths]\narchive_dir = \"/a\"\narchive_prune \
+              = 3\noutput_dir = \"/b\"\n\n[maxmind]\nurl = \
+              \"https://x.example/y\"\n\n[processing]\nthreads = \
+              0\nbogus = 1\n"),
+            ("top level", "[paths]\narchive_dir = \"/a\"\narchive_prune \
+              = 3\noutput_dir = \"/b\"\n\n[maxmind]\nurl = \
+              \"https://x.example/y\"\n\n[bogus]\nx = 1\n"),
+        ];
+        for (what, source) in cases {
+            assert!(
+                parse_config(source).is_err(),
+                "{what} accepted an unknown key — deny_unknown_fields is \
+                 missing or was removed"
             );
         }
     }
