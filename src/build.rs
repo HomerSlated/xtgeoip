@@ -3,13 +3,14 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     ffi::OsStr,
     fs::{self, File},
+    net::Ipv6Addr,
     path::{Path, PathBuf},
+    str::FromStr,
     sync::atomic::{AtomicUsize, Ordering},
 };
 
 use anyhow::bail;
 use csv::ReaderBuilder;
-use ipnetwork::IpNetwork;
 use memmap2::Mmap;
 use rayon::prelude::*;
 
@@ -96,26 +97,27 @@ pub fn build(
         .or_insert_with(|| "Other Country".into());
 
     let country_count = country_name.len();
+    let index = CountryIndex::new(&country_id, &country_name);
     let (v4_result, v6_result) = rayon::join(
-        || load_blocks_v4(source_dir, &country_id, country_count),
-        || load_blocks_v6(source_dir, &country_id, country_count),
+        || load_blocks(source_dir, BLOCKS_V4, &index, cidr_v4_bytes),
+        || load_blocks(source_dir, BLOCKS_V6, &index, cidr_v6_bytes),
     );
     let v4_pools = v4_result?;
     let v6_pools = v6_result?;
 
-    let mut country_ranges: BTreeMap<CountryCode, CountryRanges> = country_name
-        .keys()
-        .map(|&cc| (cc, CountryRanges::default()))
+    // `index.order` is `country_name`'s key order by construction, so zipping
+    // the two dense pools against it reproduces exactly the `BTreeMap` the
+    // per-code `HashMap`s used to build — including the countries with no
+    // ranges at all, which still get their (empty) `.iv4`/`.iv6` pair.
+    let country_ranges: BTreeMap<CountryCode, CountryRanges> = index
+        .order
+        .iter()
+        .zip(v4_pools)
+        .zip(v6_pools)
+        .map(|((&cc, pool_v4), pool_v6)| {
+            (cc, CountryRanges { pool_v4, pool_v6 })
+        })
         .collect();
-    for cc in [CountryCode::A1, CountryCode::A2, CountryCode::O1] {
-        country_ranges.entry(cc).or_default();
-    }
-    for (cc, pool) in v4_pools {
-        country_ranges.entry(cc).or_default().pool_v4 = pool;
-    }
-    for (cc, pool) in v6_pools {
-        country_ranges.entry(cc).or_default().pool_v6 = pool;
-    }
 
     let (written_paths, checksums) =
         write_outputs(&country_ranges, target_dir)?;
@@ -491,127 +493,330 @@ fn parse_block_indices(
     })
 }
 
-// -------------------------
-// IPv4 block loading
-// -------------------------
-fn load_blocks_v4(
-    source_dir: &Path,
-    country_id: &HashMap<String, CountryCode>,
-    country_count: usize,
-) -> anyhow::Result<HashMap<CountryCode, Vec<(u32, u32)>>> {
-    const FILE_NAME: &str = "GeoLite2-Country-Blocks-IPv4.csv";
-    let file = File::open(source_dir.join(FILE_NAME))?;
-    let mmap = mmap_file(&file)?;
-    let mut rdr = ReaderBuilder::new()
-        .has_headers(true)
-        .from_reader(mmap.as_ref());
-    let headers = rdr.headers()?.clone();
-    let idx = parse_block_indices(&headers, FILE_NAME)?;
+const BLOCKS_V4: &str = "GeoLite2-Country-Blocks-IPv4.csv";
+const BLOCKS_V6: &str = "GeoLite2-Country-Blocks-IPv6.csv";
 
-    let skipped = AtomicUsize::new(0);
-    // Rows without a usable range are dropped here rather than carried into
-    // `parsed` and skipped during grouping (#38): the `Option` cost 4 bytes
-    // per element on this path and a branch per row in the loop below.
-    let parsed: Vec<(CountryCode, (u32, u32))> = rdr
-        .into_records()
-        .par_bridge()
-        .filter_map(|r| {
-            r.map_err(|_| {
-                skipped.fetch_add(1, Ordering::Relaxed);
-            })
-            .ok()
-        })
-        .filter_map(|rec| {
-            let id = rec.get(idx.id).unwrap_or("");
-            let rid = rec.get(idx.rid).unwrap_or("");
-            let proxy = rec.get(idx.proxy).unwrap_or("") == "1";
-            let sat = rec.get(idx.sat).unwrap_or("") == "1";
-            let network = rec.get(idx.net).unwrap_or("");
-            let cc = resolve_country_code(proxy, sat, id, rid, country_id);
-            let range = if network.is_empty() {
-                None
-            } else {
-                cidr_to_range_ipv4(network)
-            };
-            range.map(|r| (cc, r))
-        })
-        .collect();
+/// Byte ranges the blocks CSV is split into, per rayon worker.
+///
+/// More ranges than workers, so a chunk that happens to hold denser rows
+/// cannot leave a core idle at the tail. Swept on this 2-core host over the
+/// real 2026-09-01 archive, whole-`build` min of 5 interleaved runs:
+///
+/// | per thread | 1 | 2 | **4** | 8 | 16 |
+/// |---|---:|---:|---:|---:|---:|
+/// | ms | 300.0 | 287.4 | **260.6** | 269.7 | 255.9 |
+///
+/// One range per worker is the clear loser; past four the curve is flat and
+/// the remaining spread is inside the run-to-run noise on this box, so four
+/// is chosen as the knee rather than as a measured optimum.
+///
+/// It is a work-splitting knob, not a correctness one: every value above was
+/// verified to emit a byte-identical output tree.
+const CHUNKS_PER_THREAD: usize = 4;
 
-    let n = skipped.load(Ordering::Relaxed);
-    if n > 0 {
-        messages::warn(&format!("{n} malformed rows skipped in {FILE_NAME}"));
+/// Country lookup, in the two shapes the loaders need.
+///
+/// Replaces the `HashMap<String, CountryCode>` that the per-row path used to
+/// probe ~1.09M times. Two things change: the key is an integer rather than a
+/// string (no SipHash over the geoname digits) and the value is a dense index
+/// rather than a code, so a chunk can accumulate straight into
+/// `Vec<Vec<_>>` by position instead of hashing a `CountryCode` per row.
+struct CountryIndex {
+    /// Dense index → code, in `BTreeMap` key order. This ordering is
+    /// load-bearing: `build` turns it back into the `BTreeMap` whose order
+    /// decides output file names and manifest order.
+    order: Vec<CountryCode>,
+    /// Sorted `(geoname_id, dense index)`. Keys are unique because
+    /// `parse_geoname` accepts only canonical decimal, which is injective.
+    by_id: Vec<(u32, u16)>,
+    /// Geonames `parse_geoname` rejects — non-numeric, out of `u32` range, or
+    /// written with a leading zero. Real archives have none, so this is
+    /// normally empty and never probed. It exists because the dense table
+    /// cannot represent such a key, and quietly resolving one to `O1` would
+    /// be a wrong *country* rather than a missing one.
+    by_str: HashMap<String, u16>,
+    a1: u16,
+    a2: u16,
+    o1: u16,
+}
+
+/// Parse a geoname ID, canonical decimal only.
+///
+/// Two rules beyond "digits", both there to keep the dense table faithful to
+/// the `HashMap<String, _>` it replaces:
+///
+/// * **Checked arithmetic.** A geoname above `u32::MAX` must not wrap — a
+///   wrapped value can land on a *real* geoname in the sorted table and resolve
+///   to the wrong country with no error at all. The string map simply missed
+///   and yielded `O1`.
+/// * **No leading zeros.** `"0123"` and `"123"` are distinct `HashMap` keys but
+///   the same integer. Rejecting the non-canonical spelling on both the build
+///   side and the lookup side keeps them distinct here too.
+#[inline]
+fn parse_geoname(b: &[u8]) -> Option<u32> {
+    if b.is_empty() || b.len() > 10 || (b.len() > 1 && b[0] == b'0') {
+        return None;
+    }
+    let mut v: u32 = 0;
+    for &c in b {
+        if !c.is_ascii_digit() {
+            return None;
+        }
+        v = v.checked_mul(10)?.checked_add(u32::from(c - b'0'))?;
+    }
+    Some(v)
+}
+
+impl CountryIndex {
+    fn new(
+        country_id: &HashMap<String, CountryCode>,
+        country_name: &BTreeMap<CountryCode, String>,
+    ) -> Self {
+        let order: Vec<CountryCode> = country_name.keys().copied().collect();
+        let idx_of: HashMap<CountryCode, u16> = order
+            .iter()
+            .enumerate()
+            .map(|(i, &c)| (c, i as u16))
+            .collect();
+
+        let mut by_id: Vec<(u32, u16)> = Vec::with_capacity(country_id.len());
+        let mut by_str: HashMap<String, u16> = HashMap::new();
+        for (geoname, cc) in country_id {
+            // Every code in `country_id` was inserted into `country_name`
+            // alongside it, so the index always exists.
+            let i = idx_of[cc];
+            match parse_geoname(geoname.as_bytes()) {
+                Some(n) => by_id.push((n, i)),
+                None => {
+                    by_str.insert(geoname.clone(), i);
+                }
+            }
+        }
+        by_id.sort_unstable();
+
+        Self {
+            order,
+            by_id,
+            by_str,
+            a1: idx_of[&CountryCode::A1],
+            a2: idx_of[&CountryCode::A2],
+            o1: idx_of[&CountryCode::O1],
+        }
     }
 
-    let mut pools: HashMap<CountryCode, Vec<(u32, u32)>> =
-        HashMap::with_capacity(country_count);
-    for (cc, range) in parsed {
-        pools.entry(cc).or_default().push(range);
+    /// The dense index for one block row.
+    ///
+    /// Mirrors [`resolve_country_code`], which is retained under `cfg(test)`
+    /// as the oracle this is checked against.
+    #[inline]
+    fn resolve(&self, proxy: bool, sat: bool, id: &[u8], rid: &[u8]) -> u16 {
+        if proxy {
+            return self.a1;
+        }
+        if sat {
+            return self.a2;
+        }
+        let key = if !id.is_empty() { id } else { rid };
+        if key.is_empty() {
+            return self.o1;
+        }
+        match parse_geoname(key) {
+            Some(n) => match self.by_id.binary_search_by_key(&n, |e| e.0) {
+                Ok(p) => self.by_id[p].1,
+                Err(_) => self.o1,
+            },
+            None => std::str::from_utf8(key)
+                .ok()
+                .and_then(|k| self.by_str.get(k).copied())
+                .unwrap_or(self.o1),
+        }
     }
-    pools.par_iter_mut().for_each(|(_, v)| *v = merge_ranges(v));
-    Ok(pools)
+}
+
+/// Split `bytes` after the header line into `n` ranges, each ending on a
+/// newline.
+///
+/// Sound only for a quote-free file; see the guard in [`load_blocks`].
+fn chunk_bounds(bytes: &[u8], n: usize) -> Vec<(usize, usize)> {
+    let Some(nl) = memchr::memchr(b'\n', bytes) else {
+        return vec![];
+    };
+    let start = nl + 1;
+    if start >= bytes.len() {
+        return vec![];
+    }
+    let per = (bytes.len() - start) / n.max(1) + 1;
+    let mut out = Vec::with_capacity(n);
+    let mut s = start;
+    while s < bytes.len() {
+        let mut e = (s + per).min(bytes.len());
+        while e < bytes.len() && bytes[e - 1] != b'\n' {
+            e += 1;
+        }
+        out.push((s, e));
+        s = e;
+    }
+    out
 }
 
 // -------------------------
-// IPv6 block loading
+// Block loading
 // -------------------------
-fn load_blocks_v6(
-    source_dir: &Path,
-    country_id: &HashMap<String, CountryCode>,
-    country_count: usize,
-) -> anyhow::Result<HashMap<CountryCode, Vec<(u128, u128)>>> {
-    const FILE_NAME: &str = "GeoLite2-Country-Blocks-IPv6.csv";
-    let file = File::open(source_dir.join(FILE_NAME))?;
-    let mmap = mmap_file(&file)?;
-    let mut rdr = ReaderBuilder::new()
-        .has_headers(true)
-        .from_reader(mmap.as_ref());
-    let headers = rdr.headers()?.clone();
-    let idx = parse_block_indices(&headers, FILE_NAME)?;
 
+/// Parse one blocks CSV into per-country range pools, indexed densely.
+///
+/// The shape, and why it is not the `par_bridge` over `StringRecord` it
+/// replaced:
+///
+/// * **Chunked, not bridged.** `par_bridge` pulls rows from one sequential
+///   iterator through a mutex, so the csv reader itself stays serial. Splitting
+///   the mmap into byte ranges gives each worker its own reader, and scales
+///   past the two-way `rayon::join` in [`build`].
+/// * **`ByteRecord`, reused.** The old path allocated a `StringRecord` per row
+///   and validated UTF-8 for every field. Reading into one record per chunk
+///   allocates nothing per row; the UTF-8 check is reinstated explicitly below
+///   so that malformed rows are still counted and dropped exactly as before.
+/// * **Dense index, not a `HashMap` regroup.** The old path collected
+///   `Vec<(CountryCode, range)>` and then regrouped it on *one* thread — a
+///   serial section between two parallel ones. Each chunk now accumulates
+///   straight into `Vec<Vec<_>>` by position and the merge is an `append`.
+///
+/// Measured on the 2026-09-01 archive: the two files together fall from
+/// 450.5 ms to 192.8 ms.
+fn load_blocks<T, F>(
+    source_dir: &Path,
+    file_name: &str,
+    countries: &CountryIndex,
+    parse_cidr: F,
+) -> anyhow::Result<Vec<Vec<(T, T)>>>
+where
+    T: IpInt + Send,
+    F: Fn(&[u8]) -> Option<(T, T)> + Sync,
+{
+    let file = File::open(source_dir.join(file_name))?;
+    let mmap = mmap_file(&file)?;
+    let bytes: &[u8] = mmap.as_ref();
+
+    let mut hdr = ReaderBuilder::new().has_headers(true).from_reader(bytes);
+    let headers = hdr.headers()?.clone();
+    let idx = parse_block_indices(&headers, file_name)?;
+    let expected_fields = headers.len();
+
+    // Splitting at newlines is only sound while nothing is quoted: a quoted
+    // newline would cut a record in half, and a quoted comma would shift every
+    // field boundary after it — inside one chunk only, with no parse error and
+    // no warning. That is a wrong-country answer, not a crash, so it is
+    // checked on every run rather than assumed. Both blocks files held zero
+    // `"` bytes across 44 MB of the 2026-09-01 archive; a future one that does
+    // not falls back to a single range, which the csv reader then parses with
+    // its full quoting rules, slower and correct.
+    let quoted = memchr::memchr(b'"', bytes).is_some();
+    if quoted {
+        messages::warn(&format!(
+            "{file_name} contains quoted fields; parsing it serially."
+        ));
+    }
+    let ranges = if quoted {
+        vec![(0, bytes.len())]
+    } else {
+        chunk_bounds(bytes, rayon::current_num_threads() * CHUNKS_PER_THREAD)
+    };
+
+    let ncc = countries.order.len();
     let skipped = AtomicUsize::new(0);
-    // As in load_blocks_v4, but the saving is larger here: `Option` around a
-    // `(u128, u128)` costs 16 bytes at 16-byte alignment, so dropping it
-    // takes each element from 64 to 48 bytes — ~25% of this path's transient
-    // allocation, which is the larger of the two (#38).
-    let parsed: Vec<(CountryCode, (u128, u128))> = rdr
-        .into_records()
-        .par_bridge()
-        .filter_map(|r| {
-            r.map_err(|_| {
-                skipped.fetch_add(1, Ordering::Relaxed);
-            })
-            .ok()
+
+    let mut pools: Vec<Vec<(T, T)>> = ranges
+        .par_iter()
+        .map(|&(s, e)| {
+            let mut rdr = ReaderBuilder::new()
+                .has_headers(quoted)
+                .flexible(true)
+                .from_reader(&bytes[s..e]);
+            let mut rec = csv::ByteRecord::new();
+            let mut pools: Vec<Vec<(T, T)>> = vec![Vec::new(); ncc];
+            let mut local_skipped = 0usize;
+
+            loop {
+                match rdr.read_byte_record(&mut rec) {
+                    Ok(true) => {}
+                    Ok(false) => break,
+                    Err(_) => {
+                        // A reader over an in-memory slice cannot make
+                        // progress after an error, so count the row and stop
+                        // rather than spin on it.
+                        local_skipped += 1;
+                        break;
+                    }
+                }
+
+                // Two checks the csv crate used to make for us, restored here
+                // because the chunked reader cannot make them the same way.
+                // `flexible(true)` is required — csv pins the expected width
+                // to the *first record it sees*, which for a chunk is a data
+                // row, so a single short row would otherwise condemn every
+                // other row in that chunk. Comparing against the header width
+                // is what the whole-file reader did. The UTF-8 check restores
+                // what `StringRecord` did: the old path decoded every field
+                // and counted a decode failure as a skipped row, and
+                // `ByteRecord` does not decode at all.
+                if rec.len() != expected_fields
+                    || std::str::from_utf8(rec.as_slice()).is_err()
+                {
+                    local_skipped += 1;
+                    continue;
+                }
+
+                let network = rec.get(idx.net).unwrap_or(b"");
+                if network.is_empty() {
+                    continue;
+                }
+                let Some(range) = parse_cidr(network) else {
+                    continue;
+                };
+                let ci = countries.resolve(
+                    rec.get(idx.proxy).unwrap_or(b"") == b"1",
+                    rec.get(idx.sat).unwrap_or(b"") == b"1",
+                    rec.get(idx.id).unwrap_or(b""),
+                    rec.get(idx.rid).unwrap_or(b""),
+                );
+                pools[ci as usize].push(range);
+            }
+
+            skipped.fetch_add(local_skipped, Ordering::Relaxed);
+            pools
         })
-        .filter_map(|rec| {
-            let id = rec.get(idx.id).unwrap_or("");
-            let rid = rec.get(idx.rid).unwrap_or("");
-            let proxy = rec.get(idx.proxy).unwrap_or("") == "1";
-            let sat = rec.get(idx.sat).unwrap_or("") == "1";
-            let network = rec.get(idx.net).unwrap_or("");
-            let cc = resolve_country_code(proxy, sat, id, rid, country_id);
-            let range = if network.is_empty() {
-                None
-            } else {
-                cidr_to_range_ipv6(network)
-            };
-            range.map(|r| (cc, r))
-        })
-        .collect();
+        .reduce(
+            || vec![Vec::new(); ncc],
+            |mut acc, part| {
+                for (slot, mut v) in part.into_iter().enumerate() {
+                    if acc[slot].is_empty() {
+                        acc[slot] = v;
+                    } else {
+                        acc[slot].append(&mut v);
+                    }
+                }
+                acc
+            },
+        );
 
     let n = skipped.load(Ordering::Relaxed);
     if n > 0 {
-        messages::warn(&format!("{n} malformed rows skipped in {FILE_NAME}"));
+        messages::warn(&format!("{n} malformed rows skipped in {file_name}"));
     }
 
-    let mut pools: HashMap<CountryCode, Vec<(u128, u128)>> =
-        HashMap::with_capacity(country_count);
-    for (cc, range) in parsed {
-        pools.entry(cc).or_default().push(range);
-    }
-    pools.par_iter_mut().for_each(|(_, v)| *v = merge_ranges(v));
+    pools.par_iter_mut().for_each(merge_ranges_in_place);
     Ok(pools)
 }
 
+/// The pre-O-001 country resolver, retained as the oracle for
+/// [`CountryIndex::resolve`].
+///
+/// Production no longer calls it: the dense index resolves a row to a `u16`
+/// slot without ever constructing a `CountryCode`. It stays because the index
+/// is new code on a wrong-answer-shaped path, and a differential test against
+/// the implementation it replaced is worth more than assertions written from
+/// the same understanding that produced the replacement.
+#[cfg(test)]
 fn resolve_country_code(
     proxy: bool,
     sat: bool,
@@ -635,20 +840,147 @@ fn resolve_country_code(
 // -------------------------
 // CIDR → Range
 // -------------------------
+
+/// Parse an IPv4 CIDR straight from CSV bytes.
+///
+/// Replaces `IpNetwork::parse`, which was the single most expensive step in
+/// the row loop: it allocates nothing, never builds a `str`, and skips the
+/// enum dispatch that made every IPv6 row try the IPv4 grammar first.
+///
+/// The address half is as strict as `std`'s `Ipv4Addr`, which is what the
+/// crate it replaces defers to — including the leading-zero rule, so
+/// `01.2.3.4/8` is rejected here exactly as it was before. The prefix half is
+/// deliberately *lenient* in the same three ways that crate is: see
+/// [`parse_prefix`], and note that a missing `/` means a full-length prefix
+/// rather than a parse failure. [`cidr_to_range_ipv4`] is kept as the oracle
+/// and the two are checked against each other over a generated corpus.
+#[inline]
+fn cidr_v4_bytes(b: &[u8]) -> Option<(u32, u32)> {
+    // A bare address means a full-length prefix, as in the crate this
+    // replaces — a third divergence the differential test found.
+    let (addr_bytes, prefix) = match memchr::memchr(b'/', b) {
+        Some(i) => (&b[..i], parse_prefix(&b[i + 1..], 32)?),
+        None => (b, 32),
+    };
+
+    let mut addr: u32 = 0;
+    let mut octet: u32 = 0;
+    let mut digits = 0u32;
+    let mut octets = 0u32;
+    for &c in addr_bytes {
+        if c.is_ascii_digit() {
+            // A second digit after a leading `0` is rejected by `Ipv4Addr`.
+            if digits > 0 && octet == 0 {
+                return None;
+            }
+            octet = octet * 10 + u32::from(c - b'0');
+            digits += 1;
+            if octet > 255 || digits > 3 {
+                return None;
+            }
+        } else if c == b'.' {
+            if digits == 0 || octets == 3 {
+                return None;
+            }
+            addr = (addr << 8) | octet;
+            octet = 0;
+            digits = 0;
+            octets += 1;
+        } else {
+            return None;
+        }
+    }
+    if digits == 0 || octets != 3 {
+        return None;
+    }
+    addr = (addr << 8) | octet;
+
+    let mask = if prefix == 0 {
+        0
+    } else {
+        u32::MAX << (32 - prefix)
+    };
+    Some((addr & mask, (addr & mask) | !mask))
+}
+
+/// Parse an IPv6 CIDR straight from CSV bytes.
+///
+/// The address half is handed to `std`'s `Ipv6Addr`, which is what
+/// `ipnetwork` used underneath; the saving here is the enum dispatch, the
+/// `String` the csv crate no longer builds, and the `IpNetwork::V4` grammar
+/// that every one of the 526,635 IPv6 rows used to be tried against first.
+#[inline]
+fn cidr_v6_bytes(b: &[u8]) -> Option<(u128, u128)> {
+    let (addr_bytes, prefix) = match memchr::memchr(b'/', b) {
+        Some(i) => (&b[..i], parse_prefix(&b[i + 1..], 128)?),
+        None => (b, 128),
+    };
+    let addr = u128::from(
+        Ipv6Addr::from_str(std::str::from_utf8(addr_bytes).ok()?).ok()?,
+    );
+    let mask = if prefix == 0 {
+        0
+    } else {
+        u128::MAX << (128 - prefix)
+    };
+    Some((addr & mask, (addr & mask) | !mask))
+}
+
+/// Parse a CIDR prefix length exactly as `u8::from_str` would.
+///
+/// Two of its quirks are load-bearing, and both were found by the
+/// differential test rather than by reading: a leading `+` is accepted
+/// (`/+8`), and so is any run of leading zeros (`/0128`). Neither appears in
+/// a MaxMind archive, but "the parser is stricter than the one it replaced"
+/// is still a behaviour change, and a silent one — the row would be dropped
+/// rather than rejected loudly.
+///
+/// Note the contrast with [`parse_geoname`], which *must* reject a leading
+/// zero: there the string is a map key and two spellings must stay distinct,
+/// whereas here the number is only ever a shift width.
+#[inline]
+fn parse_prefix(b: &[u8], max: u32) -> Option<u32> {
+    let digits = match b.first()? {
+        b'+' => &b[1..],
+        _ => b,
+    };
+    if digits.is_empty() {
+        return None;
+    }
+    let mut v: u32 = 0;
+    for &c in digits {
+        if !c.is_ascii_digit() {
+            return None;
+        }
+        v = v.checked_mul(10)?.checked_add(u32::from(c - b'0'))?;
+        if v > max {
+            return None;
+        }
+    }
+    Some(v)
+}
+
+/// The pre-O-001 IPv4 CIDR parser, retained as the oracle for
+/// [`cidr_v4_bytes`]. See [`resolve_country_code`] for why the old
+/// implementations stay in the tree.
+#[cfg(test)]
 fn cidr_to_range_ipv4(cidr: &str) -> Option<(u32, u32)> {
-    let net: IpNetwork = cidr.parse().ok()?;
+    let net: ipnetwork::IpNetwork = cidr.parse().ok()?;
     match net {
-        IpNetwork::V4(v4) => {
+        ipnetwork::IpNetwork::V4(v4) => {
             Some((u32::from(v4.network()), u32::from(v4.broadcast())))
         }
         _ => None,
     }
 }
 
+/// The pre-O-001 IPv6 CIDR parser, retained as the oracle for
+/// [`cidr_v6_bytes`].
+#[cfg(test)]
 fn cidr_to_range_ipv6(cidr: &str) -> Option<(u128, u128)> {
-    let net: IpNetwork = cidr.parse().ok()?;
+    let net: ipnetwork::IpNetwork = cidr.parse().ok()?;
     match net {
-        IpNetwork::V6(v6) => {
+        ipnetwork::IpNetwork::V6(v6) => {
             Some((u128::from(v6.network()), u128::from(v6.broadcast())))
         }
         _ => None,
@@ -672,23 +1004,42 @@ impl IpInt for u128 {
     }
 }
 
-fn merge_ranges<T: IpInt>(ranges: &[(T, T)]) -> Vec<(T, T)> {
+/// Sort and coalesce a country's ranges without allocating a second pool.
+///
+/// The old `merge_ranges` copied its input, built a second `Vec`, and returned
+/// it to replace the first — two full copies of every country's ranges. This
+/// sorts in place and compacts with a write cursor, which matters here because
+/// the pools now arrive owned rather than borrowed.
+///
+/// The result does not depend on the order rows arrived in, which is what lets
+/// the chunked loader replace the bridged one: after sorting by start, ties
+/// resolve through `max(end)`, so the merged output is a function of the *set*
+/// of ranges, not of the sequence.
+fn merge_ranges_in_place<T: IpInt>(ranges: &mut Vec<(T, T)>) {
     if ranges.is_empty() {
-        return vec![];
+        return;
     }
-    let mut sorted = ranges.to_vec();
-    sorted.sort_unstable_by_key(|r| r.0);
-    let mut merged: Vec<(T, T)> = Vec::with_capacity(sorted.len());
-    for &(start, end) in &sorted {
-        if let Some(last) = merged.last_mut()
-            && start <= last.1.saturating_inc()
-        {
-            last.1 = last.1.max(end);
+    ranges.sort_unstable_by_key(|r| r.0);
+    let mut w = 0;
+    for i in 1..ranges.len() {
+        let (start, end) = ranges[i];
+        if start <= ranges[w].1.saturating_inc() {
+            ranges[w].1 = ranges[w].1.max(end);
         } else {
-            merged.push((start, end));
+            w += 1;
+            ranges[w] = (start, end);
         }
     }
-    merged
+    ranges.truncate(w + 1);
+}
+
+/// Allocating wrapper around [`merge_ranges_in_place`], kept for the tests
+/// that describe the merge rules on literal inputs.
+#[cfg(test)]
+fn merge_ranges<T: IpInt>(ranges: &[(T, T)]) -> Vec<(T, T)> {
+    let mut v = ranges.to_vec();
+    merge_ranges_in_place(&mut v);
+    v
 }
 
 // -------------------------
@@ -1268,5 +1619,318 @@ mod tests {
         let (_, hash) = write_country_v4(&dir.path().join("ZZ"), &[]).unwrap();
         assert_eq!(hash, blake3::hash(b"").to_string());
         assert_eq!(fs::read(dir.path().join("ZZ.iv4")).unwrap().len(), 0);
+    }
+
+    // ── O-001: the byte parsers against the crate they replaced ──
+
+    /// A deterministic corpus, so a failure is reproducible.
+    fn lcg(seed: &mut u64) -> u64 {
+        *seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        *seed
+    }
+
+    /// The hand-rolled IPv4 parser must agree with `ipnetwork` — which is
+    /// what production used until O-001 — on every input, not just on the
+    /// ones the archive happens to contain. 20,000 generated CIDRs plus the
+    /// edge cases a generator will not produce.
+    #[test]
+    fn ipv4_byte_parser_agrees_with_ipnetwork() {
+        let mut seed = 0x5DEECE66Du64;
+        let mut cases: Vec<String> = Vec::with_capacity(20_100);
+        for _ in 0..20_000 {
+            let a = lcg(&mut seed);
+            // Prefixes range past 32 on purpose: rejection must match too.
+            let pfx = (lcg(&mut seed) % 40) as u32;
+            cases.push(format!(
+                "{}.{}.{}.{}/{}",
+                a as u8,
+                (a >> 8) as u8,
+                (a >> 16) as u8,
+                (a >> 24) as u8,
+                pfx
+            ));
+        }
+        cases.extend(
+            [
+                "0.0.0.0/0",
+                "255.255.255.255/32",
+                "1.2.3.4/033",
+                "01.2.3.4/8",
+                "1.02.3.4/8",
+                "00.0.0.0/8",
+                "1.2.3.4/33",
+                "1.2.3.4/999",
+                "1.2.3.4/+8",
+                "1.2.3.4/-8",
+                "1.2.3.4/",
+                "1.2.3.4",
+                "1.2.3/24",
+                "1.2.3.4.5/24",
+                "1.2.3.256/24",
+                "1.2.3.4444/24",
+                "1.2..4/24",
+                ".1.2.3/24",
+                "1.2.3./24",
+                "",
+                "/24",
+                "not-a-cidr",
+                " 1.2.3.4/24",
+                "1.2.3.4/24 ",
+                "::1/128",
+                "2001:db8::/64",
+            ]
+            .map(String::from),
+        );
+
+        for case in &cases {
+            assert_eq!(
+                cidr_v4_bytes(case.as_bytes()),
+                cidr_to_range_ipv4(case),
+                "IPv4 parsers disagree on {case:?}"
+            );
+        }
+    }
+
+    /// As above for IPv6. The generator walks the whole 128-bit space and
+    /// both compressed and uncompressed spellings, since the address half is
+    /// the part that is delegated rather than hand-written.
+    #[test]
+    fn ipv6_byte_parser_agrees_with_ipnetwork() {
+        let mut seed = 0x2545F4914F6CDD1Du64;
+        let mut cases: Vec<String> = Vec::with_capacity(20_100);
+        for _ in 0..20_000 {
+            let hi = lcg(&mut seed);
+            let lo = lcg(&mut seed);
+            let addr = Ipv6Addr::from(((hi as u128) << 64) | lo as u128);
+            let pfx = (lcg(&mut seed) % 140) as u32;
+            cases.push(format!("{addr}/{pfx}"));
+        }
+        cases.extend(
+            [
+                "::/0",
+                "::1/128",
+                "2001:db8::/64",
+                "2001:0db8:0000:0000:0000:0000:0000:0000/64",
+                "::ffff:1.2.3.4/120",
+                "2001:db8::/0128",
+                "2001:db8::/129",
+                "2001:db8::/999",
+                "2001:db8::/+64",
+                "2001:db8::/",
+                "2001:db8::",
+                "2001:db8:::/64",
+                "garbage",
+                "",
+                "/64",
+                "1.2.3.4/8",
+                " ::1/128",
+            ]
+            .map(String::from),
+        );
+
+        for case in &cases {
+            assert_eq!(
+                cidr_v6_bytes(case.as_bytes()),
+                cidr_to_range_ipv6(case),
+                "IPv6 parsers disagree on {case:?}"
+            );
+        }
+    }
+
+    /// The first of the two silent-wrong-country holes the dense index could
+    /// have opened: an out-of-range geoname must be rejected, not wrapped
+    /// onto a real one. `4294967296` is `u32::MAX + 1`, which wraps to 0.
+    #[test]
+    fn parse_geoname_rejects_what_would_alias_a_real_id() {
+        assert_eq!(parse_geoname(b"49518"), Some(49518));
+        assert_eq!(parse_geoname(b"0"), Some(0));
+        assert_eq!(parse_geoname(b"4294967295"), Some(u32::MAX));
+        assert_eq!(parse_geoname(b"4294967296"), None, "must not wrap to 0");
+        assert_eq!(parse_geoname(b"9999999999"), None, "must not wrap");
+        assert_eq!(parse_geoname(b"12345678901"), None, "too long");
+        assert_eq!(parse_geoname(b"0123"), None, "non-canonical spelling");
+        assert_eq!(parse_geoname(b"00"), None);
+        assert_eq!(parse_geoname(b""), None);
+        assert_eq!(parse_geoname(b"12a"), None);
+        assert_eq!(parse_geoname(b"-1"), None);
+    }
+
+    fn index_fixture() -> (HashMap<String, CountryCode>, CountryIndex) {
+        let de = CountryCode::parse("DE").unwrap();
+        let fr = CountryCode::parse("FR").unwrap();
+        let mut country_id = HashMap::new();
+        country_id.insert("42".to_string(), de);
+        country_id.insert("99".to_string(), fr);
+        country_id.insert("4294967295".to_string(), de);
+        // The second hole: a geoname the dense table cannot hold. The string
+        // map resolved it, so the index must too.
+        country_id.insert("X7".to_string(), fr);
+        country_id.insert("0123".to_string(), de);
+
+        let mut country_name = BTreeMap::new();
+        for (cc, name) in [
+            (de, "Germany"),
+            (fr, "France"),
+            (CountryCode::A1, "Anonymous Proxy"),
+            (CountryCode::A2, "Satellite Provider"),
+            (CountryCode::O1, "Other Country"),
+        ] {
+            country_name.insert(cc, name.to_string());
+        }
+
+        let index = CountryIndex::new(&country_id, &country_name);
+        (country_id, index)
+    }
+
+    /// The dense index must resolve every row exactly as the string-keyed
+    /// resolver it replaced — including the two cases it cannot represent
+    /// directly, which is the whole reason `by_str` exists.
+    #[test]
+    fn country_index_agrees_with_the_resolver_it_replaced() {
+        let (country_id, index) = index_fixture();
+        let cases: Vec<(bool, bool, &str, &str)> = vec![
+            (false, false, "42", ""),
+            (false, false, "99", ""),
+            (false, false, "", "42"),
+            (false, false, "42", "99"),
+            (false, false, "", ""),
+            (false, false, "7", ""),
+            (false, false, "4294967295", ""),
+            (false, false, "4294967296", ""),
+            (false, false, "X7", ""),
+            (false, false, "0123", ""),
+            (false, false, "123", ""),
+            (true, false, "42", ""),
+            (false, true, "42", ""),
+            (true, true, "42", ""),
+            (true, false, "", ""),
+        ];
+        for (proxy, sat, id, rid) in cases {
+            let slot = index.resolve(proxy, sat, id.as_bytes(), rid.as_bytes());
+            assert_eq!(
+                index.order[slot as usize],
+                resolve_country_code(proxy, sat, id, rid, &country_id),
+                "index disagrees on ({proxy}, {sat}, {id:?}, {rid:?})"
+            );
+        }
+    }
+
+    /// `order` is what `build` zips the dense pools back against, so it must
+    /// be exactly the key order of the map it came from.
+    #[test]
+    fn country_index_order_is_btreemap_key_order() {
+        let (_, index) = index_fixture();
+        let mut sorted = index.order.clone();
+        sorted.sort();
+        assert_eq!(index.order, sorted, "order must be sorted by code");
+        assert_eq!(index.order[index.a1 as usize], CountryCode::A1);
+        assert_eq!(index.order[index.a2 as usize], CountryCode::A2);
+        assert_eq!(index.order[index.o1 as usize], CountryCode::O1);
+    }
+
+    /// Chunking is only correct if the ranges tile the file exactly once:
+    /// a gap silently drops rows, an overlap silently doubles them, and a
+    /// split anywhere but after a newline corrupts two rows at the seam.
+    #[test]
+    fn chunk_bounds_tile_the_body_exactly_once() {
+        let mut csv = String::from("network,geoname_id\n");
+        for i in 0..500 {
+            csv.push_str(&format!("10.0.{}.0/24,{i}\n", i % 256));
+        }
+        let bytes = csv.as_bytes();
+        let header_end = csv.find('\n').unwrap() + 1;
+
+        for n in [1usize, 2, 3, 7, 8, 64, 4096] {
+            let bounds = chunk_bounds(bytes, n);
+            assert_eq!(bounds[0].0, header_end, "n={n}: must skip the header");
+            assert_eq!(
+                bounds.last().unwrap().1,
+                bytes.len(),
+                "n={n}: must reach the end"
+            );
+            for w in bounds.windows(2) {
+                assert_eq!(w[0].1, w[1].0, "n={n}: gap or overlap");
+            }
+            for &(_, e) in &bounds {
+                assert!(
+                    e == bytes.len() || bytes[e - 1] == b'\n',
+                    "n={n}: chunk ends mid-row"
+                );
+            }
+        }
+
+        assert!(chunk_bounds(b"header only, no newline", 4).is_empty());
+        assert!(chunk_bounds(b"header\n", 4).is_empty());
+    }
+
+    fn blocks_fixture(dir: &Path, name: &str, body: &str) {
+        let mut csv = String::from(
+            "network,geoname_id,registered_country_geoname_id,\
+             represented_country_geoname_id,is_anonymous_proxy,\
+             is_satellite_provider,is_anycast\n",
+        );
+        csv.push_str(body);
+        fs::write(dir.join(name), csv).unwrap();
+    }
+
+    /// End to end over the chunked path: rows land in the right country, get
+    /// merged, and malformed ones are dropped rather than aborting.
+    #[test]
+    fn load_blocks_groups_merges_and_skips() {
+        let dir = TempDir::new().unwrap();
+        let (_, index) = index_fixture();
+        blocks_fixture(
+            dir.path(),
+            BLOCKS_V4,
+            "10.0.0.0/24,42,,,0,0,0\n10.0.1.0/24,42,,,0,0,0\n192.168.0.0/24,\
+             99,,,0,0,0\n172.16.0.0/24,,,,1,0,0\nnot-a-cidr,42,,,0,0,0\n,42,,,\
+             0,0,0\n10.9.9.9/24,42,,,0,0,0,extra-field\n",
+        );
+
+        let pools =
+            load_blocks(dir.path(), BLOCKS_V4, &index, cidr_v4_bytes).unwrap();
+
+        let slot = |code: &str| {
+            let cc = CountryCode::parse(code).unwrap();
+            index.order.iter().position(|&c| c == cc).unwrap()
+        };
+        // The two adjacent /24s coalesce into one range.
+        assert_eq!(
+            pools[slot("DE")],
+            vec![(
+                u32::from_be_bytes([10, 0, 0, 0]),
+                u32::from_be_bytes([10, 0, 1, 255])
+            )]
+        );
+        assert_eq!(pools[slot("FR")].len(), 1);
+        assert_eq!(pools[index.a1 as usize].len(), 1, "proxy row → A1");
+        // Unparseable CIDR, empty network, and the wrong-width row are gone;
+        // nothing else is.
+        let total: usize = pools.iter().map(|p| p.len()).sum();
+        assert_eq!(total, 3);
+    }
+
+    /// The quote guard. A quoted comma shifts every field boundary after it,
+    /// which chunk splitting cannot see — so a quoted file must take the
+    /// single-range path and still parse correctly.
+    #[test]
+    fn load_blocks_handles_a_quoted_field() {
+        let dir = TempDir::new().unwrap();
+        let (_, index) = index_fixture();
+        blocks_fixture(
+            dir.path(),
+            BLOCKS_V4,
+            "10.0.0.0/24,42,\"a,b\",,0,0,0\n192.168.0.0/24,99,\"c,d\",,0,0,0\n",
+        );
+
+        let pools =
+            load_blocks(dir.path(), BLOCKS_V4, &index, cidr_v4_bytes).unwrap();
+        let de = index
+            .order
+            .iter()
+            .position(|&c| c == CountryCode::parse("DE").unwrap())
+            .unwrap();
+        assert_eq!(pools[de].len(), 1, "quoted comma must not shift fields");
+        assert_eq!(pools.iter().map(|p| p.len()).sum::<usize>(), 2);
     }
 }

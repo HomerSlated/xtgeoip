@@ -2746,6 +2746,7 @@ dependencies = [
  "ipnetwork",
  "libc",
  "log",
+ "memchr",
  "memmap2",
  "rayon",
  "reqwest",

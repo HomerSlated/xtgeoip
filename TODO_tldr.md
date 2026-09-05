@@ -134,7 +134,17 @@ failure names the state `output_dir` is in) and **F-007** (docgen wrote its
 outputs one at a time, so a failing emitter left the tree half-regenerated —
 now rendered to memory first, verified byte-identical and by fault injection
 against both codepaths). Neither is an atomic swap; #24 stages 2–3 stay
-rejected. Not taken: O-001/O-002 (the two large optimisations).
+rejected. **O-001/O-002** followed on request the same day: block loading
+chunked at newlines with a reused `ByteRecord`, byte CIDR parsers and a dense
+country index (whole `build` **1.92×**, 563 → 293 ms, min of 15 interleaved
+runs), and `backup` gzip split into parallel members (**1.64×**, 245 → 150 ms,
+archive 0.074% *smaller*, no new dependency). Both A/B'd against the code they
+replaced — the build tree is byte-identical, the decompressed tar byte-identical
+— after first proving the baseline itself was bit-stable, without which
+"unchanged" cannot be falsified. The old parsers stay under `cfg(test)` as
+differential oracles and caught three silent divergences (`ipnetwork` accepts
+`/+8`, `/0128`, and a bare address). One live hazard: multi-member gzip means
+`GzDecoder` truncates where `MultiGzDecoder` does not.
 `src/fetch.rs` awaits re-signing.
 
 Several were closed as **premise-invalidated** after checking against

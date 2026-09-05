@@ -1670,15 +1670,107 @@ check at validator stage, and a second attempt changed only outputs the fault
 does not affect, so `git diff` saw nothing. The reproduction only counts once
 an *earlier* output genuinely differs.
 
-**Not taken from the sweep.** O-001 and O-002 are the two large optimisations;
-both were measured by the agent and neither is proposed here, since `build` and
-`backup` are not currently the complaint.
+**Taken later.** O-001 and O-002, the two large optimisations, were left out of
+this pass because `build` and `backup` were not the complaint. The maintainer
+asked for both on 2026-09-05; see the next section.
 
 **`src/fetch.rs` needs re-signing.** M-1's remediation invalidated guardian's
 signature. Row added to `private/guardian/needs_reverification.md` by hand with
 the `.sig` deliberately left in place, per that file's own convention, so the
 next guardian run raises the BAD signature itself rather than inheriting this
 note's word for it.
+
+### O-001 and O-002 — the two large optimisations ✅ DONE (2026-09-05)
+
+Both accepted on the acceptance criteria the report itself wrote, and both
+proved by A/B against the implementation they replaced rather than by
+assertion. Measured on the 2-core host, over the real 2026-09-01 archive
+(1,088,244 rows) and the real 509-file `/usr/share/xt_geoip` tree.
+
+**The oracle came first.** The current code was run twice into two directories
+and the trees diffed: byte-identical, 508 files each. Without that, "the output
+is unchanged" is unfalsifiable — a nondeterministic baseline can never be shown
+to have been preserved. Everything below rests on it.
+
+**O-001 — block loading, 91.1% of `build`.** Three changes, one function:
+
+* `par_bridge` over `csv::StringRecord` became a chunked `par_iter`. The bridge
+  pulls rows from one sequential iterator through a mutex, so the csv reader
+  itself never parallelised; the mmap is now split into byte ranges at newlines
+  and each worker gets its own reader. This also lifts the width cap — the old
+  shape was parallel only across the two files.
+* A reused `ByteRecord` replaced the per-row `StringRecord`, so the row loop
+  allocates nothing, and `ipnetwork::IpNetwork::parse` was replaced by byte
+  parsers that never build a `str`.
+* The `HashMap<String, CountryCode>` regroup — ~1.09M SipHash probes on **one**
+  thread, a serial section between two parallel ones — became a sorted
+  `Vec<(u32, u16)>` and a dense `Vec<Vec<_>>` indexed by position.
+
+Whole-`build` **563.2 → 292.6 ms, 1.92×** (min of 15 interleaved runs,
+alternating two binaries; the box was under load from other agents and single
+runs spread 30%, so the ratio is the number, not the absolutes). Acceptance
+was ≥ 1.8×. Output byte-identical to the baseline tree, manifest included.
+
+Three wrong-answer holes the report flagged in its own sketch, all closed:
+
+* **Chunk splitting assumes nothing is quoted.** A quoted comma shifts every
+  field boundary after it *inside one chunk*, with no parse error — a wrong
+  country, silently. Both blocks files hold zero `"` bytes across 44 MB, but
+  that is checked on every run, not assumed; a quoted file falls back to a
+  single range and the csv reader's own quoting rules.
+* **`parse_u32` must be checked, not wrapping.** A geoname above `u32::MAX`
+  would wrap and could land on a *real* ID in the sorted table. The string map
+  simply missed and yielded `O1`.
+* **A non-numeric geoname has no dense slot.** Demoting it to `O1` would be a
+  wrong country. Such keys go to a fallback map, normally empty and never
+  probed. Leading-zero spellings go there too: `"0123"` and `"123"` are
+  distinct `HashMap` keys but one integer.
+
+The old implementations stay in the tree under `cfg(test)` as differential
+oracles — `resolve_country_code`, `cidr_to_range_ipv4`/`_ipv6` — and `ipnetwork`
+moved to `[dev-dependencies]`. That is what caught the three divergences no
+amount of re-reading did: `ipnetwork` accepts `/+8`, accepts `/0128`, and
+accepts a bare address as a full-length prefix. None occurs in a MaxMind
+archive, and all three would have been silent — the row dropped, not rejected.
+A hand-written assertion would have encoded the same misunderstanding as the
+parser it was checking.
+
+**O-002 — parallel gzip in `backup`, 95.2% of `backup`.** The tar is built in
+memory, split, and each part deflated into its own gzip member; concatenated
+members are one valid gzip stream. No new dependency. `backup` **245.4 →
+149.5 ms, 1.64×** (acceptance ≥ 1.6×) with the archive **0.074% smaller** —
+splitting does not cost size on this data, the same non-monotonic behaviour #99
+found in the level sweep. Decompressed tar streams are byte-identical, all 508
+entries, `gzip -t` clean, and `tar xzf` reproduces the source tree exactly.
+
+Chunk count is derived (`current_num_threads() × 2`), not fixed. The sweep is
+why: three members was *consistently* the worst of every count ≥ 2 across two
+independent runs, because with two workers it costs two rounds and idles one
+worker through the second. Any multiple of the width fills every round. A
+buffered-but-serial variant was measured too — 1.04× — so the win is the
+parallelism and not the `Vec`.
+
+One real compatibility cost, and it is a silent one: `flate2::read::GzDecoder`
+stops after the first member and *reports success*. On the real archive it
+returns 2,838,145 of 11,352,576 bytes. The only in-repo reader was the test
+helper in `backup.rs`, now `MultiGzDecoder`; a test pins the truncation so the
+hazard cannot be reintroduced unnoticed. External `gzip` and `tar` are
+unaffected. `gzip -l` now reports the last member's size rather than the total.
+
+**Two things the A/B nearly missed.** The first `abbuild` driver hard-coded
+`legacy: false`, so the one path where the country key set *differs* — legacy
+maps geonames 6255148/6255147 to a continent code, adding an `EU` key and
+colliding `AS` — went unmeasured, and that is precisely the path where every
+dense slot shifts. Re-run: byte-identical, 510 files each, and the flag
+verifiably changes the output. The second was a doc comment claiming a chunk
+count "was the measured shape" when the number had been inherited from the
+report and never measured here. Swept: 1/2/4/8/16 per thread give
+300.0/287.4/260.6/269.7/255.9 ms, all emitting byte-identical trees, so four
+is a knee rather than an optimum and the comment now says so.
+
+**Not taken.** O-003 through O-007 remain untouched — the ask was these two.
+
+---
 
 ---
 
