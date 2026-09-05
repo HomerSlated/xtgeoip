@@ -200,16 +200,37 @@ exception', so a local http mirror must be fronted with https rather than
 special-cased."* Pointing `maxmind.url` at `http://127.0.0.1:PORT` is therefore
 already rejected here, and I am not proposing to weaken it.
 
-The comment tells us what is wanted instead: **front the stub with https.** That
-turns out to be free:
+The comment tells us what is wanted instead: **front the stub with https.** The
+dependency chain makes that cheap:
 
     reqwest 0.13.4 → rustls-platform-verifier 0.7.0 → rustls-native-certs 0.8.4
 
-The binary verifies against the **system trust store**. So a locally-generated
-CA installed into `/usr/local/share/ca-certificates` (or the run's own trust
-directory) makes an https loopback stub trusted by the real, unmodified
-release binary — **no production code change, and the no-exception rule stays
-intact**. The stub serves two endpoints, which is the entire protocol:
+`verification/others.rs` (the non-Apple, non-Windows, non-Android path — i.e.
+Linux) calls `rustls_native_certs::load_native_certs()`, and that crate resolves
+roots from **`SSL_CERT_FILE` / `SSL_CERT_DIR` when either is set**, falling back
+to the platform store otherwise (`rustls-native-certs-0.8.4/src/lib.rs:8`,
+`CertPaths::from_env`).
+
+That is better than modifying the system trust store, and the earlier draft of
+this section had it wrong. Nothing needs installing: the runner generates a CA
+into the temp tree and sets `SSL_CERT_FILE` for the spawned process only. It is
+**per-process, reversible, needs no root, and leaves the host's trust
+configuration untouched** — and the no-exception https rule stays fully intact,
+because the stub really is serving https and really is being verified.
+
+The same `sudo`-strips-the-environment trap from §4(b) applies to
+`SSL_CERT_FILE`: under the temp-dir design `sudo` leaves the spawn path, so it
+does not bite — but if `sudo` is retained for any reason, this variable must be
+passed inline or it silently falls back to the real trust store, and the stub
+then fails to verify.
+
+**Not yet verified empirically.** The above is read off the dependency source,
+not observed. Before anyone builds on it, confirm end to end: generate a CA,
+serve https on loopback, point a release `xtgeoip` at it with `SSL_CERT_FILE`
+set, and check the fetch completes. That is a five-minute check and it is the
+difference between "the code path exists" and "it works here".
+
+The stub serves two endpoints, which is the entire protocol:
 
 - `GET {url}?suffix=zip` → the canned archive, with `Content-Disposition`
   carrying the version and `Content-Length` for the size guard
