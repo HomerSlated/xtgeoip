@@ -2,11 +2,13 @@
 use std::{
     collections::BTreeMap,
     fs::{self},
+    io::{BufWriter, Write},
     path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result, anyhow, bail};
 use flate2::{Compression, write::GzEncoder};
+use rayon::prelude::*;
 use tar::Builder;
 
 use crate::{
@@ -40,6 +42,48 @@ const VERSION_FILE: &str = "version";
 /// is *slower* (197 ms) because writing 11.38 MB costs more than compressing
 /// it.
 const COMPRESSION_LEVEL: u32 = 4;
+
+/// gzip members per worker thread (O-002).
+///
+/// A gzip stream may be the concatenation of several independent members;
+/// every decoder that follows the format reads them as one stream. That makes
+/// the compressor — 95% of a backup, after #99 took the level down to 4 —
+/// parallelisable with no new dependency: split the finished tar buffer into
+/// byte ranges, deflate each one on its own thread, write the members
+/// back to back.
+///
+/// Why a *multiple of the worker count* rather than one chunk per core.
+/// Measured on this 2-core host over the real 509-file output tree, min of 7
+/// and again min of 9 (the ranking among n >= 2 moves between runs; the shape
+/// does not):
+///
+/// | members | time    | vs. production | size    |
+/// |---------|---------|----------------|---------|
+/// | stream  | 223 ms  | 1.00x          |     —   |
+/// | 1       | 214 ms  | 1.04x          | +0.000% |
+/// | 2       | 139 ms  | 1.61x          | -0.087% |
+/// | **3**   | **153 ms** | **1.46x**   | -0.021% |
+/// | 4       | 138 ms  | 1.62x          | -0.077% |
+/// | 6       | 121 ms  | 1.84x          | -0.067% |
+///
+/// Three members is *consistently* the worst of n >= 2, in both runs: with two
+/// workers it costs two rounds and leaves one worker idle for the whole
+/// second. Any multiple of the width fills every round, so the count is
+/// derived from `current_num_threads` rather than fixed. Two per worker gives
+/// rayon slack to balance uneven chunks without cutting the members so small
+/// that each reset dictionary starts costing size.
+///
+/// Note the size column: splitting does **not** cost bytes on this data — the
+/// same non-monotonic behaviour #99 found in the level sweep. n = 1 measures
+/// the buffering alone and is worth only 1.04x, so the win is the parallelism,
+/// not the `Vec`.
+const GZIP_CHUNKS_PER_THREAD: usize = 2;
+
+/// Upper bound on gzip members, so a many-core host does not shred an 11 MB
+/// tar into chunks small enough for the per-member dictionary reset to start
+/// costing real size. Never measured above 6 on this host — it is a guard
+/// rail, not a tuned value.
+const GZIP_MAX_CHUNKS: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackupMode {
@@ -167,22 +211,77 @@ fn verify_manifest_files(
     Ok(verified_files)
 }
 
-/// Write a tar.gz archive to `path` (inner step; no atomicity).
-fn write_tarball(path: &Path, files: &[PathBuf]) -> Result<()> {
-    let tar_gz = fs::File::create(path)?;
-    let enc = GzEncoder::new(tar_gz, Compression::new(COMPRESSION_LEVEL));
-    let mut tar = Builder::new(enc);
+/// How many gzip members this host should split a tar buffer into.
+///
+/// See [`GZIP_CHUNKS_PER_THREAD`]. Always at least 1, so the single-threaded
+/// case degrades to one ordinary member rather than to zero.
+fn gzip_chunk_count() -> usize {
+    (rayon::current_num_threads() * GZIP_CHUNKS_PER_THREAD)
+        .clamp(1, GZIP_MAX_CHUNKS)
+}
 
-    for file in files {
-        if file.exists() {
-            let name = file.file_name().ok_or_else(|| {
-                anyhow!("Invalid file path {}", file.display())
-            })?;
-            tar.append_path_with_name(file, name)?;
+/// Build the tar stream in memory.
+///
+/// Separated from compression because O-002 needs the finished bytes before it
+/// can split them. Costs one transient 11 MB buffer on the real tree, against
+/// a 35 MB `build` peak, so it is not the operation's high-water mark.
+fn build_tar(files: &[PathBuf]) -> Result<Vec<u8>> {
+    let mut buf: Vec<u8> = Vec::new();
+    {
+        let mut tar = Builder::new(&mut buf);
+        for file in files {
+            if file.exists() {
+                let name = file.file_name().ok_or_else(|| {
+                    anyhow!("Invalid file path {}", file.display())
+                })?;
+                tar.append_path_with_name(file, name)?;
+            }
         }
+        tar.finish()?;
+    }
+    Ok(buf)
+}
+
+/// Deflate `data` as `chunks` independent gzip members, in parallel.
+///
+/// Concatenating the returned members yields a valid gzip stream decoding to
+/// exactly `data`. Split points are arbitrary byte offsets — gzip members are
+/// self-contained, so nothing has to align with a tar block.
+///
+/// Readers must handle multiple members: `flate2::read::GzDecoder` stops after
+/// the first one and reports success, so it would silently return a truncated
+/// archive. `MultiGzDecoder` is the correct type, and `gzip`/`tar` handle it
+/// natively. One user-visible cost: `gzip -l` reports the last member's
+/// uncompressed size rather than the total.
+fn gzip_members(data: &[u8], chunks: usize) -> Result<Vec<Vec<u8>>> {
+    let deflate = |part: &[u8]| -> Result<Vec<u8>> {
+        let mut enc =
+            GzEncoder::new(Vec::new(), Compression::new(COMPRESSION_LEVEL));
+        enc.write_all(part)?;
+        Ok(enc.finish()?)
+    };
+
+    // `par_chunks` yields nothing for an empty slice, which would produce a
+    // zero-byte file rather than an empty archive. A real tar is never empty
+    // (it ends in 1 KiB of zeros), but the function should not depend on that.
+    if data.is_empty() {
+        return Ok(vec![deflate(data)?]);
     }
 
-    tar.finish()?;
+    let per = data.len() / chunks.max(1) + 1;
+    data.par_chunks(per).map(deflate).collect()
+}
+
+/// Write a tar.gz archive to `path` (inner step; no atomicity).
+fn write_tarball(path: &Path, files: &[PathBuf]) -> Result<()> {
+    let tar_bytes = build_tar(files)?;
+    let members = gzip_members(&tar_bytes, gzip_chunk_count())?;
+
+    let mut out = BufWriter::new(fs::File::create(path)?);
+    for member in &members {
+        out.write_all(member)?;
+    }
+    out.flush()?;
     Ok(())
 }
 
@@ -609,7 +708,9 @@ mod tests {
     fn read_archive(path: &Path) -> Vec<(String, Vec<u8>)> {
         use std::io::Read;
         let f = fs::File::open(path).unwrap();
-        let dec = flate2::read::GzDecoder::new(f);
+        // `MultiGzDecoder`, not `GzDecoder`: O-002 emits one gzip
+        // member per chunk, and `GzDecoder` stops after the first.
+        let dec = flate2::read::MultiGzDecoder::new(f);
         let mut ar = tar::Archive::new(dec);
         let mut out = Vec::new();
         for entry in ar.entries().unwrap() {
@@ -700,6 +801,70 @@ mod tests {
         assert!(archive.exists(), "archive must exist");
         let part = out.path().join("atomic.tar.gz.part");
         assert!(!part.exists(), "stale .part left behind");
+    }
+
+    /// O-002 writes the tar as several independent gzip members. The
+    /// property that makes that safe is that concatenated members decode to
+    /// exactly the input — this pins it, and pins that a split happened at
+    /// all.
+    #[test]
+    fn gzip_members_concatenate_into_one_stream() {
+        use std::io::Read;
+        // Compressible, but not so uniform that the chunks come out equal.
+        let data: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+
+        let members = gzip_members(&data, 4).unwrap();
+        assert_eq!(members.len(), 4, "input should split into 4 members");
+
+        let joined: Vec<u8> = members.concat();
+        let mut got = Vec::new();
+        flate2::read::MultiGzDecoder::new(&joined[..])
+            .read_to_end(&mut got)
+            .unwrap();
+        assert_eq!(got, data, "members must decode to the original bytes");
+
+        // The hazard this change introduced, pinned so it cannot be
+        // reintroduced by accident: a single-member decoder reports success
+        // after reading only the first chunk.
+        let mut truncated = Vec::new();
+        flate2::read::GzDecoder::new(&joined[..])
+            .read_to_end(&mut truncated)
+            .unwrap();
+        assert!(
+            truncated.len() < data.len(),
+            "GzDecoder stopped short, as it must — if this ever fails the \
+             split has silently stopped happening"
+        );
+    }
+
+    /// One worker, or an empty buffer, must still produce a readable archive
+    /// rather than zero bytes.
+    #[test]
+    fn gzip_members_degrades_to_a_single_member() {
+        use std::io::Read;
+        for (data, chunks) in
+            [(b"abcdef".to_vec(), 1usize), (Vec::new(), 4usize)]
+        {
+            let members = gzip_members(&data, chunks).unwrap();
+            assert_eq!(members.len(), 1, "expected exactly one member");
+            let mut got = Vec::new();
+            flate2::read::MultiGzDecoder::new(&members[0][..])
+                .read_to_end(&mut got)
+                .unwrap();
+            assert_eq!(got, data);
+        }
+    }
+
+    /// The count is derived, so the derivation is what needs guarding: a zero
+    /// would mean no members at all, and an unbounded one would shred the
+    /// buffer on a large host.
+    #[test]
+    fn gzip_chunk_count_stays_in_range() {
+        let n = gzip_chunk_count();
+        assert!(
+            (1..=GZIP_MAX_CHUNKS).contains(&n),
+            "chunk count {n} outside 1..={GZIP_MAX_CHUNKS}"
+        );
     }
 
     /// Guards the constant itself: 0 would be slower *and* far larger, and
