@@ -47,11 +47,10 @@ pub const CLI_MATRIX: &[CliExample] = &[
     CliExample { cmd: "xtgeoip run -c -p", valid: true, outcome: "fetch then clean then prune then build", steps: Some(&["fetch", "clean", "prune_csv", "build"]) },
     CliExample { cmd: "xtgeoip run -c -f", valid: true, outcome: "fetch then force clean then build", steps: Some(&["fetch", "clean", "build"]) },
     CliExample { cmd: "xtgeoip run -b -p -f", valid: false, outcome: "--prune does not support the --force option", steps: None },
-    CliExample { cmd: "xtgeoip run -b -c -p", valid: false, outcome: "you must specify fetch or build separately, for the --prune option", steps: None },
     CliExample { cmd: "xtgeoip run -f", valid: false, outcome: "run does not support the --force option", steps: None },
     CliExample { cmd: "xtgeoip run -b", valid: true, outcome: "backup then fetch then build", steps: Some(&["backup", "fetch", "build"]) },
     CliExample { cmd: "xtgeoip run -b -c", valid: true, outcome: "backup then fetch then clean then build", steps: Some(&["backup", "fetch", "clean", "build"]) },
     CliExample { cmd: "xtgeoip run -b -f", valid: true, outcome: "force backup then fetch then build", steps: Some(&["backup", "fetch", "build"]) },
-    CliExample { cmd: "xtgeoip run -b -p", valid: true, outcome: "backup then fetch then prune then build", steps: Some(&["backup", "fetch", "prune_csv", "build"]) },
+    CliExample { cmd: "xtgeoip run -b -p", valid: false, outcome: "you must specify fetch or build separately, for the --prune option", steps: None },
     CliExample { cmd: "xtgeoip run -b -c -f", valid: false, outcome: "the --force option is ambiguous, you must specify exactly one of --backup or --clean", steps: None },
 ];

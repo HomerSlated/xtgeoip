@@ -408,7 +408,12 @@ commands:
     guards:
       - { require: [f], forbid: [b, c], error: run_force_no_target }
       - { require: [p, f], error: run_prune_force }
-      - { require: [b, c, p], error: run_prune_ambiguous }
+      # `-p` has two candidate targets here and only one is flag-driven:
+      # `always: [fetch]` with `fetch_mode: remote` produces a new CSV
+      # unasked, and `-b` adds a new binary tarball beside it in the same
+      # archive_dir. Hence `[b, p]`, not `[b, c, p]` — `-c` plays no part
+      # in choosing a prune target.
+      - { require: [b, p], error: run_prune_ambiguous }
       - { require: [b, c, f], error: run_force_ambiguous }
     examples:
       - case_id: R-001
@@ -442,12 +447,6 @@ commands:
         reason: { code: no_prune_force }
         maps_to: run_prune_force
         exit_status: 1
-      - case_id: R-007
-        cmd: "xtgeoip run -b -c -p"
-        valid: false
-        reason: { code: prune_target_ambiguous }
-        maps_to: run_prune_ambiguous
-        exit_status: 1
       - case_id: R-008
         cmd: "xtgeoip run -f"
         valid: false
@@ -471,9 +470,10 @@ commands:
         steps: [backup, fetch, build]
       - case_id: R-012
         cmd: "xtgeoip run -b -p"
-        valid: true
-        outcome: "backup then fetch then prune then build"
-        steps: [backup, fetch, prune_csv, build]
+        valid: false
+        reason: { code: prune_target_ambiguous }
+        maps_to: run_prune_ambiguous
+        exit_status: 1
       - case_id: R-013
         cmd: "xtgeoip run -b -c -f"
         valid: false

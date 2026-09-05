@@ -108,6 +108,15 @@ test.
 #103 documentation residual; the config-section list), the `#27` trace, and
 CI unblocked after 30 red runs (`clippy::byte_char_slices` under a stable
 four releases newer than the local one; toolchain now pinned).
+2026-09-03 — dependency advisories bumped (`f3628d6`); the advisory
+*tooling* withdrawn a day later (`3ac519b`, see DECIDED). 2026-09-04 —
+toolchain-staleness reporting (`26bb369`). 2026-09-05 — `run -b -p` now
+rejected as ambiguous: the sixth man-page defect, and the first where the
+prose was right and the spec wrong. `-p` had two candidate targets in `run`
+(a remote fetch makes a new CSV unasked; `-b` adds a tarball beside it), but
+the guard required `b ∧ c ∧ p`, copied from the `-f` shape where both targets
+are flag-driven. Now `b ∧ p`. **Breaking**: `run -b -p` exits 1; prune in two
+invocations. R-007 retired (superset of R-012 under `proof.unique_maps_to`).
 
 Several were closed as **premise-invalidated** after checking against
 source: #38, #54, #88 and #96 described code that no longer existed.

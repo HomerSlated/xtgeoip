@@ -45,7 +45,7 @@ pub const FETCH_GUARDS: &[Guard] = &[
 pub const RUN_GUARDS: &[Guard] = &[
     Guard { require: F, forbid: B | C, key: "run_force_no_target", message: error_text::NO_RUN_FORCE },
     Guard { require: P | F, forbid: 0, key: "run_prune_force", message: error_text::NO_PRUNE_FORCE },
-    Guard { require: B | C | P, forbid: 0, key: "run_prune_ambiguous", message: error_text::PRUNE_TARGET_AMBIGUOUS },
+    Guard { require: B | P, forbid: 0, key: "run_prune_ambiguous", message: error_text::PRUNE_TARGET_AMBIGUOUS },
     Guard { require: B | C | F, forbid: 0, key: "run_force_ambiguous", message: error_text::FORCE_AMBIGUOUS },
 ];
 

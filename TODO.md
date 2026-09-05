@@ -1443,6 +1443,76 @@ validator into the same pass would dilute both.
 
 ---
 
+### The sixth defect: OPTIONS prose vs the guard table ✅ FIXED (2026-09-05)
+
+Found by the docs-auditor sweep of 2026-09-04, decided by the maintainer on
+2026-09-05. `manpage-template.toml:212` says `run -b -p` "is an error: the
+prune target is ambiguous"; `cli.yaml` R-012 declared it **valid**, the guard
+`run_prune_ambiguous` required `b ∧ c ∧ p`, and the binary accepted it. Both
+halves live under `docs/spec/`, so this was the spec contradicting itself, not
+docs drifting from code — which is why it needed a decision rather than a
+patch. **The prose was right; the guard was wrong.**
+
+**The planner was never the enforcement point, and could not have been.**
+#29 proposed exactly that (option (b), planner-as-arbiter) and it was declined
+on 2026-07-16 in favour of guards. `plan_generated` returns `Plan`, not
+`Result<Plan>`; every arm is straight-line `if flag { push }`, so it has no
+failure mode by construction. But the sharper point is that **option (b) would
+not have caught this either**: `run -b -p` yields a perfectly deterministic
+`Pipeline { pre: [Backup], fetch: Remote, mid: [PruneCsv] }`, satisfying #29's
+own test. The hole was in the rule, not the mechanism.
+
+**Root cause — an implicit target broke the pattern.** Sweeping all three
+modifiers, a modifier is ambiguous exactly when the invocation offers it more
+than one candidate target:
+
+| Modifier | Targets | Implicit target? | Verdict |
+|---|---|---|---|
+| `-l` legacy | `build` only | never — always exactly one | sound |
+| `-f` force | `backup`, `clean` | never — both flag-driven | sound in all three contexts (`b ∧ c ∧ f`) |
+| `-p` prune | `prune_bin` (after backup), `prune_csv` (after remote fetch) | **yes, in `run`** | the one gap |
+
+`top_level` has no fetch, and `build` fetches `local` — it *reads* an existing
+archive, so no new CSV exists and `prune_csv` is meaningless there; both
+therefore have `prune_bin` as their only target and guard `p` against a missing
+`b`. `run` is the exception: `always: [fetch]` with `fetch_mode: remote`
+produces a new CSV **unasked**, and `-b` adds a new binary tarball beside it in
+the same `archive_dir`. Two targets. The guard was copied from the `-f` shape
+(`b ∧ c ∧ f`), where both targets are named by flags — but here one target is
+implicit, so the correct predicate is `b ∧ p`, and `-c` plays no part in
+choosing a prune target at all.
+
+**Mis-transcribed, not mis-designed.** `docs/xtgeoip-usage.yaml:61` — the
+hand-written enumeration that predates `cli.yaml` — already states the rule as
+`run_prune_ambiguous_with_backup: when: has: [b, p]`, the exact predicate now
+shipped. The intent was `b ∧ p` from the start; the `-c` was picked up in the
+move to the spec. That file's per-combination rows list both `run -b -c -p`
+and `run -b -p` as ambiguous, which is consistent: the first is an instance of
+the rule, not a separate one.
+
+**`proof.unique_maps_to` refused the first attempt**, fittingly. Tightening the
+guard made R-007 (`run -b -c -p`) and R-012 (`run -b -p`) fire the same error
+key, and the invalid example is the *sole* declared link from an error key to
+its message text (`xtgeoip-docgen.rs:708`). R-007 became a strict superset
+firing the identical guard, so it retired; R-012 carries the mapping because it
+is the case the OPTIONS prose actually names. Every surviving `case_id` still
+denotes the same command. Corpus 52 → 51 cases, `R` 13 → 12.
+
+**Breaking, and knowingly so.** `run -b -p` worked before; it under-pruned
+(tarballs accumulated, nothing destructive). It now exits 1. Any script or cron
+entry using it must split into two invocations, which is what the prose has
+always instructed: "To prune both, run the program twice."
+
+**Not done: a check for this class.** The five checks above compare prose
+against the *planner* and the *config*; nothing compares OPTIONS prose against
+the guard table, which is why this survived them. A sixth check would parse the
+"is an error" claims out of the OPTIONS `.RS` block and assert each names a
+combination the guards actually reject. Harder than the other five — the claims
+are free prose, not a structured list — and worth doing only if a second one of
+these appears.
+
+---
+
 ## MAINTENANCE / SUPPLY CHAIN
 
 ### Dependency advisories — six live, unnoticed for four and a half months ✅ BUMPED (2026-09-03)

@@ -343,16 +343,6 @@ testcases:
   - -f
   maps_to: run_prune_force
   exit_status: 1
-- case_id: R-007
-  key: f
-  cmd:
-  - xtgeoip
-  - run
-  - -b
-  - -c
-  - -p
-  maps_to: run_prune_ambiguous
-  exit_status: 1
 - case_id: R-008
   key: f
   cmd:
@@ -385,13 +375,14 @@ testcases:
   - -f
   maps_to: null
 - case_id: R-012
-  key: p
+  key: f
   cmd:
   - xtgeoip
   - run
   - -b
   - -p
-  maps_to: null
+  maps_to: run_prune_ambiguous
+  exit_status: 1
 - case_id: R-013
   key: f
   cmd:

@@ -28,6 +28,14 @@ These are now clap-rejected (unexpected argument), not code-rejected. The `maps_
 
 Top-level: `-b -f`, `-b -c -f`. Build: `-b`, `-c`, `-b -c`, `-b -f`, `-b -c -f`. Run: `-b`, `-b -c`, `-b -f`, `-b -p`, `-b -c -f`.
 
+**Superseded, 2026-09-05.** `run -b -p` was wrong in this list. It is not a
+valid combination: `run` fetches remotely (`contexts.run.fetch_mode: remote`),
+so a new CSV archive exists whether or not a flag asked for it, and `-b` adds a
+new binary tarball beside it in the same `archive_dir`. `-p` therefore has two
+candidate targets, exactly as `manpage-template.toml` has always said. Adding it
+here as *valid* is how R-012 came to contradict the man page. The `run` guard is
+now `[b, p]`; see Section 6.
+
 Note: `-b -p -f` was initially listed here for both build and run, but is invalid under the `no_prune_force` rule (`--prune does not support the --force option`). Including it as an invalid case would duplicate the `maps_to` values already used by B-007 (`build_prune_force`) and R-006 (`run_prune_force`), violating `proof.unique_maps_to`. Omitted.
 
 ---
@@ -36,6 +44,16 @@ Note: `-b -p -f` was initially listed here for both build and run, but is invali
 
 - Clap-redundant: F-003 to F-006 (post-#28), C-001 (ArgGroup).
 - Planner-redundant: R-006 (`run -c -p -f`) and B-007 (`build -b -c -p -f`) — planner produces deterministic plans. R-007 (`run -b -c -p`) is genuinely semantically ambiguous (prune target) and should stay.
+
+**Amended, 2026-09-05.** R-007's ambiguity was real but its *predicate* was
+wrong. `-c` plays no part in choosing a prune target; `-b` does. The guard was
+copied from the `-f` pattern (`b ∧ c ∧ f`), where both targets are named by
+flags — but `run`'s second prune target is implicit in `always: [fetch]`, so the
+correct predicate is `b ∧ p`. R-007 (`run -b -c -p`) is now a strict superset of
+R-012 (`run -b -p`) firing the identical guard, and `proof.unique_maps_to`
+permits one canonical example per error case. R-007 retired; R-012 carries
+`maps_to: run_prune_ambiguous` and is the case the man page names. All 136
+combinations remain covered by `cli::snapshot`.
 
 ---
 

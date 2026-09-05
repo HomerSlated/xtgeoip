@@ -122,7 +122,3 @@
 
 `xtgeoip run -b -f`
 
-- backup then fetch then prune then build:
-
-`xtgeoip run -b -p`
-

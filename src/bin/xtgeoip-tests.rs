@@ -853,7 +853,7 @@ mod tests {
 
     #[test]
     fn corpus_parses_with_expected_case_count() {
-        assert_eq!(load().len(), 52);
+        assert_eq!(load().len(), 51);
     }
 
     #[test]
@@ -913,7 +913,7 @@ mod tests {
 
         assert_eq!(
             groups,
-            vec![("TL", 15), ("B", 13), ("C", 5), ("F", 6), ("R", 13)],
+            vec![("TL", 15), ("B", 13), ("C", 5), ("F", 6), ("R", 12)],
             "emission order changed — top-level first, then commands \
              alphabetically (build, conf, fetch, run). See #77: do not sort \
              by case_id."
@@ -929,7 +929,7 @@ mod tests {
             .iter()
             .filter_map(|tc| tc.case_id.as_deref())
             .collect();
-        assert_eq!(ids.len(), 52, "every case needs a case_id");
+        assert_eq!(ids.len(), 51, "every case needs a case_id");
         let unique: std::collections::BTreeSet<&str> =
             ids.iter().copied().collect();
         assert_eq!(unique.len(), ids.len(), "duplicate case_id");

@@ -321,3 +321,61 @@ and treat the lib as an independent #88 decision.
 Reviewer sign-off (2026-06-08): §3.1 (`reject`/`guards` split) and §3.2 (conf
 scoped out, surface-syntax mismatch logged separately) **approved**. Cleared to
 implement per §7.
+
+---
+
+## 10. Field evidence: the `run -b -p` change (2026-09-05)
+
+The first substantive *semantic* change since the validator shipped, recorded
+because it exercised the architecture in both directions.
+
+**What it bought.** The behavioural change was one line — the `run` guard's
+`require: [b, c, p]` → `[b, p]`. Regeneration propagated it to six artefacts
+(`cli_rules.rs`, `cli_matrix.rs`, `testcases.yaml`, the man page, `usage.md`,
+`tldr.md`) with no hand-editing. The blast radius was predictable *before* the
+edit and confirmed exactly afterwards: two rows of `cli_snapshot.golden`, and
+nothing else in 136 combinations. Guard precedence needed no thought —
+`{require: [p, f]}` still pre-empts, so the `-f` variants kept their existing
+error, and the snapshot proved it rather than the author asserting it.
+
+**What it enforced.** `proof.unique_maps_to` refused the naive edit. Tightening
+the guard made `run -b -c -p` and `run -b -p` fire the same error key, and the
+invalid example is the *sole* declared link from an error key to its message
+text (§5.1). Codegen aborted rather than emit an ambiguous mapping — in a change
+whose entire subject was ambiguity. The forced resolution was the right one:
+retire the case that had become a strict superset, keep the one the prose names,
+and leave every surviving `case_id` denoting the same command.
+
+**What it could not do, and this is the part worth recording.** Every generated
+layer *agreed with the defect*. `cli.yaml` said `run -b -p` was valid; the
+guards accepted it; the matrix documented it; the man page's EXAMPLES listed it;
+the snapshot pinned it; `testcases.yaml` asserted it. Nothing was inconsistent,
+so nothing could fail. §1 of this document identified the general hazard — "a
+wrongly-accepted combination simply has no example that could catch it" — and
+answered it with the exhaustive snapshot. That answer holds for *drift*, and
+does not hold here: the snapshot pins what the function **is**, not what it
+**ought to be**, so a wrong premise in the spec is not caught by it but
+faithfully locked in as a golden. Derivation propagates a correct premise and a
+mistaken one with equal fidelity, and multiplies the artefacts asserting it.
+
+**What actually caught it** was an artefact *outside* the derivation: hand-written
+prose in `manpage-template.toml`, which had said since it was authored that
+`run -b -p` is an error because the prune target is ambiguous. That prose was
+independently corroborated by `docs/xtgeoip-usage.yaml`, the pre-spec
+enumeration, which states the rule as `when: has: [b, p]` — the exact predicate
+now shipped. Both are hand-maintained, and both were right where the generated
+tree was wrong. The guard had been mis-transcribed when `cli.yaml` was authored,
+not mis-designed.
+
+The generalisation: **single-source-of-truth detects drift; only redundancy
+detects a wrong premise.** A hand-written artefact that restates a rule in a
+different vocabulary is not duplication to be eliminated — it is the only
+oracle a derived tree cannot supply for itself. Both survivors here were prose,
+which is why neither was checked by anything, and why the follow-up logged in
+`TODO.md` is a check comparing OPTIONS prose against the guard table.
+
+**Cost profile.** The spec edit and regeneration were free. The whole manual
+cost sat in the hand-maintained satellites: three corpus-count assertions in
+`xtgeoip-tests.rs` (52 → 51 cases; `R` 13 → 12). That is the accurate price of
+a semantic change under this architecture — proportional to what is *not* yet
+derived, not to the size of the change.
