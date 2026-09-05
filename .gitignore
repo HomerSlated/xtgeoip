@@ -47,6 +47,9 @@
 
 # Private / personal documentation
 *.pdf
+# ...except papers written for this project, which are published with it.
+# Narrow by design: the *.pdf guard above still catches everything else.
+!docs/papers/*.pdf
 
 # Personal local config (not project-relevant)
 *.fish
