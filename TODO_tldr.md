@@ -38,7 +38,7 @@ construction from the spec rather than hand-writing it.
 `FetchMode`.
 
 **Not blocked — undecided.** #27 was never a ticket. It is the orphaned half
-of `#27/#31`, trimmed at `2baa194` when #31 landed (full trace in
+of `#27/#31`, trimmed at `2250465` when #31 landed (full trace in
 `TODO.md`); #26 is in the same state. The remaining work is fully described
 in the `TODO.md` OVERVIEW and the two design notes, so the next step is a
 decision, not an investigation.
@@ -74,7 +74,7 @@ test.
 ## DECIDED — do not re-propose
 
 - **`restore` primitive: REJECTED.** Backups are context-free; restores are not. Restoring means adopting responsibility for a problem you have not diagnosed. `docs/design/98-state-ownership-recovery.md` §0. General test: **if an operation is only correct given knowledge of *why* it is being performed, it does not belong in this tool**
-- **Rollback and atomic swap (#24 stages 2–3): REJECTED.** Stage 3 was implemented once (`b4ec1db`) and caused data loss
+- **Rollback and atomic swap (#24 stages 2–3): REJECTED.** Stage 3 was implemented once (`d2bce08`) and caused data loss
 - **Cached-archive fallback on failed fetch: REJECTED.** Rebuilding the same version over an intact install is a guaranteed no-op with real risk. `build` already spells that request
 - **Unattended cron: removed by design (#103).** Do not restore it by stashing the passphrase anywhere
 - **Fuzzing/proptest for CLI semantics: dropped.** 136 total combinations; `cli::snapshot` already enumerates all of them exhaustively
@@ -100,22 +100,22 @@ test.
 ## RECENTLY CLOSED
 
 2026-09-05 — **v0.3.0**. 76 commits since 0.2.0; the bump is earned by
-`ed2b8ba`, which makes `run -b -p` exit 1 where it used to run. One line in
+`62e554a`, which makes `run -b -p` exit 1 where it used to run. One line in
 `Cargo.toml`; the man page, `--version` and the MaxMind `User-Agent` all derive
 from it. No tag — this repo has never used them.
 
 2026-07-18/19 — #2, #22, #24, #29, #38, #54, #57, #71, #75, #76, #77, #79,
 #81, #87, #88, #92 (test-time part), #93, #94, #95, #96, #97, #99, #101,
-#102. 2026-07-20 — #103 (`c2be6a3`). 2026-09-01 — #104 (`b804fa2`), #89
+#102. 2026-07-20 — #103 (`efec662`). 2026-09-01 — #104 (`253a4af`), #89
 (closed unimplemented — guarded by a structural invariant already, see
 `TODO.md`), #98 documentation half. 2026-09-02 — #1 (residual: `--log-file`/`--no-log`), #100, #98 preconditions, #92's motivating case; man-page corrections
 (step ordering vs `plan()`; `conf -c` / encrypted-credential workflow, a
 #103 documentation residual; the config-section list), the `#27` trace, and
 CI unblocked after 30 red runs (`clippy::byte_char_slices` under a stable
 four releases newer than the local one; toolchain now pinned).
-2026-09-03 — dependency advisories bumped (`f3628d6`); the advisory
-*tooling* withdrawn a day later (`3ac519b`, see DECIDED). 2026-09-04 —
-toolchain-staleness reporting (`26bb369`). 2026-09-05 — `run -b -p` now
+2026-09-03 — dependency advisories bumped (`6f4163c`); the advisory
+*tooling* withdrawn a day later (`1095988`, see DECIDED). 2026-09-04 —
+toolchain-staleness reporting (`93c8e7c`). 2026-09-05 — `run -b -p` now
 rejected as ambiguous: the sixth man-page defect, and the first where the
 prose was right and the spec wrong. `-p` had two candidate targets in `run`
 (a remote fetch makes a new CSV unasked; `-b` adds a tarball beside it), but

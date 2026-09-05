@@ -20,7 +20,7 @@ The examples are *samples*, not a *function*. Worse, `proof.unique_maps_to`
 forbids a second example per error case, so a wrongly-accepted combination
 simply has **no example that could catch it**. This is exactly how the p⊕f leak
 (`build -b -p -f` accepted) and the top-level `-b -c -p` over-rejection survived
-(fixed in `a6db27b`; #92).
+(fixed in `eafcf71`; #92).
 
 **Goal:** make `cli.yaml` the single source of truth for CLI *semantics* (not
 just samples), generate the rule table, and rewrite the guard chains as a generic
@@ -32,7 +32,7 @@ data-driven evaluator — so the rules cannot drift from the code, and docgen ca
 ## 2. Key finding: every guard is a pure conjunction
 
 I extracted all 17 guards from `normalize_cli_to_action` at design time. Three
-`force_ambiguous` guards were added post-approval (`2c090bd`), bringing the
+`force_ambiguous` guards were added post-approval (`c2bfcfd`), bringing the
 total to **20 table rows** (19 implemented; the conf row leaves the guard model,
 §3.2). **Every one is a conjunction of flag literals** — a set of flags that
 must be PRESENT and a set that must be ABSENT. No disjunction is needed in
@@ -47,7 +47,7 @@ by De Morgan — still a conjunction).
 | top_level | `c ∧ p ∧ f ∧ ¬b` | top_level_prune_clean_force | |
 | top_level | `c ∧ p ∧ ¬b` | top_level_prune_with_clean | |
 | top_level | `b ∧ p ∧ f` | top_level_prune_force | |
-| top_level | `b ∧ c ∧ f` | top_level_force_ambiguous | added `2c090bd` |
+| top_level | `b ∧ c ∧ f` | top_level_force_ambiguous | added `c2bfcfd` |
 | fetch | `l` | fetch_no_legacy | |
 | fetch | `b` | fetch_no_backup | |
 | fetch | `c` | fetch_no_clean | |
@@ -55,11 +55,11 @@ by De Morgan — still a conjunction).
 | build | `f ∧ ¬b ∧ ¬c` | build_force_no_target | |
 | build | `p ∧ ¬b` | build_prune_no_backup | |
 | build | `p ∧ f` | build_prune_force | |
-| build | `b ∧ c ∧ f` | build_force_ambiguous | added `2c090bd` |
+| build | `b ∧ c ∧ f` | build_force_ambiguous | added `c2bfcfd` |
 | run | `f ∧ ¬b ∧ ¬c` | run_force_no_target | |
 | run | `p ∧ f` | run_prune_force | |
 | run | `b ∧ c ∧ p` | run_prune_ambiguous | |
-| run | `b ∧ c ∧ f` | run_force_ambiguous | added `2c090bd` |
+| run | `b ∧ c ∧ f` | run_force_ambiguous | added `c2bfcfd` |
 | conf | `¬d ∧ ¬s ∧ ¬e` | conf_missing_flag | |
 
 Consequence: the entire validator reduces to **per-context ordered lists of
@@ -294,7 +294,7 @@ and treat the lib as an independent #88 decision.
    silent.
 5. Delete the now-dead `NO_*` imports / if-branches. Re-run snapshot + docgen.
 6. `cargo +nightly fmt`, clippy, then sync (`cargo test` is wired into sync.py
-   and CI as of `3f768be`; #96 done).
+   and CI as of `cc9ad5b`; #96 done).
 
 ## 8. Outside the guard model (owned by the construction tail)
 - **ShowHelp is two-layer.** At the `normalize` layer, bare `xtgeoip` returns

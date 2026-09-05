@@ -455,7 +455,7 @@ mod tests {
     /// The spec's `steps:` must match what `plan()` actually does.
     ///
     /// This is the check whose absence let three `outcome:` strings claim
-    /// clean-before-fetch for six weeks after `0712783` (#24 stage 1) reversed
+    /// clean-before-fetch for six weeks after `850bfd8` (#24 stage 1) reversed
     /// that order — R-004, R-005 and R-010 shipped into the man page saying so,
     /// and were found by reading, not by tooling. `outcome:` stays authored
     /// prose; `steps:` is the machine-checkable half, and this compares it
@@ -684,7 +684,7 @@ mod tests {
     /// exact sequence of steps it produces. That is the same claim
     /// `spec_steps_agree_with_plan` checks for `cli.yaml`'s `steps:` — but
     /// written a second time, by hand, in prose, where nothing looked at it.
-    /// It went stale exactly as you would expect: #24 stage 1 (`0712783`)
+    /// It went stale exactly as you would expect: #24 stage 1 (`850bfd8`)
     /// moved `Clean` after `Fetch` and this section still described the old
     /// order six weeks later, found by reading rather than by tooling
     /// (2026-09-02). Three defects were found in this template that day; the

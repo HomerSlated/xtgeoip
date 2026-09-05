@@ -5,7 +5,7 @@ reasoning is a permanent scope boundary, not a one-off decision.
 Date: 2026-07-18
 Covers: #98 (test setup/teardown), #24 (no rollback on mid-pipeline failure),
 #89 (orphan scenarios), plus the "reject unknown flags" item carried into #98.
-Related: #87 (integration nature, done), the reverted atomic swap (`4909da4`),
+Related: #87 (integration nature, done), the reverted atomic swap (`f2a68bd`),
 [`29-ambiguity-planner-vs-guards.md`](29-ambiguity-planner-vs-guards.md).
 
 ---
@@ -147,7 +147,7 @@ Stated by the user, 2026-07-18, and binding on everything below:
    is already invocable two ways; that is a documentation matter, not a design
    gap.
 
-Principle 1 is exactly what the reverted atomic swap violated: `b4ec1db`
+Principle 1 is exactly what the reverted atomic swap violated: `d2bce08`
 `remove_dir_all`'d the whole `output_dir`, destroying files `build` never
 created. See §6.
 
@@ -236,7 +236,7 @@ snapshot and the honest answer is that recovery is impossible. Do **not**
 silently take a backup the user didn't ask for.
 
 **Stage 3 — atomic swap: still rejected.** `#24` records the constraint from
-the `b4ec1db` data-loss incident: a swap must respect manifest ownership and
+the `d2bce08` data-loss incident: a swap must respect manifest ownership and
 never delete unowned files. But an install step that removed stale-owned files
 would be doing cleanup, which principle 3 forbids `build` from doing. Stages 1
 and 2 capture the value without that conflict.
@@ -267,7 +267,7 @@ Now that the cycle is confirmed working, the scenarios are precise:
    `xtgeoip.conf.example` **still present** (the unowned-file guarantee).
 
 Case 3's final assertion is the important one: it is the regression test for
-the `b4ec1db` data-loss bug.
+the `d2bce08` data-loss bug.
 
 Requires `requires:`/`rebuild:` support in `testcases.yaml` per #89.
 
@@ -333,4 +333,4 @@ requires a recovery primitive.
    restore. Unit-testable; verifiable with a free `build -c` (Local fetch).
 5. **#89 integration cases** (§8) — the legacy-flip cycle, whose final
    assertion (`xtgeoip.conf.example` survives) is the regression test for the
-   `b4ec1db` data-loss bug. Needs no restore, only a defined starting point.
+   `d2bce08` data-loss bug. Needs no restore, only a defined starting point.

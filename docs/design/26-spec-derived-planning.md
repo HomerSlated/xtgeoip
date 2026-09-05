@@ -15,7 +15,7 @@ done: `cli.yaml` `guards:` compile to `src/generated/cli_rules.rs` and
 `cli.rs` evaluates them generically. **Ordering** — what a legal combination
 *does* — is not: `action.rs::plan()` is a hand-written `match`.
 
-As of `31fa77a` the spec *declares* the order for all 30 plan-bearing
+As of `611a956` the spec *declares* the order for all 30 plan-bearing
 documented invocations (`steps:`), and `spec_steps_agree_with_plan` enforces
 agreement. So the remaining question is narrow:
 

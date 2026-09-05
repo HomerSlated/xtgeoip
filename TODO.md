@@ -19,8 +19,8 @@ This applies globally. Every item in this TODO must be assessed against these co
 
 ## ✅ v0.3.0 — version bump ✅ DONE (2026-09-05)
 
-76 commits since `2c090bd` set 0.2.0 on 2026-06-09. The bump is warranted by
-the one **breaking** change among them: `ed2b8ba` rejects `run -b -p`, which
+76 commits since `c2bfcfd` set 0.2.0 on 2026-06-09. The bump is warranted by
+the one **breaking** change among them: `62e554a` rejects `run -b -p`, which
 previously ran. Note the symmetry — 0.2.0's own bump commit was also a
 flag-ambiguity rejection (`-b -c -f`), so the precedent for what earns a minor
 bump in 0.x here is "a combination that used to run now exits 1".
@@ -40,7 +40,7 @@ repo has never used version tags.
 
 ---
 
-## ✅ build: reverted atomic swap ✅ DONE (2026-06-13, `4909da4`)
+## ✅ build: reverted atomic swap ✅ DONE (2026-06-13, `f2a68bd`)
 
 `build.rs::atomic_swap` removed; write-in-place + `detect_orphans` reinstated.
 `CountryCode` enum and incremental hasher retained (behaviour-neutral). Proven:
@@ -52,10 +52,10 @@ for the constraint that must hold if an atomic swap is ever revisited.
 ## ✅ Spec-driven validator — COMPLETE (v0.2.0, 2026-06-09)
 
 Design of record: `docs/design/spec-driven-validator.md` (approved 2026-06-08).
-Gate 1 (`23c4375`): CLI rules declared in `cli.yaml`; docgen validates + cross-checks.
-Gate 2 (`dfc14a9`): `cli.rs` drives generated `cli_rules.rs` guard tables (u8 bitmask,
+Gate 1 (`99e3362`): CLI rules declared in `cli.yaml`; docgen validates + cross-checks.
+Gate 2 (`7d072ba`): `cli.rs` drives generated `cli_rules.rs` guard tables (u8 bitmask,
 `first_guard` evaluator); snapshot green byte-for-byte across all 136 combos.
-Proven live (`2c090bd`): `-b -c -f` → `force_ambiguous` added purely through `cli.yaml`.
+Proven live (`c2bfcfd`): `-b -c -f` → `force_ambiguous` added purely through `cli.yaml`.
 
 Open follow-up resolved (2026-07-11): spec `conf` block changed from
 `positional: {name: mode}` to `selector_flags: {choices: …}` with
@@ -103,14 +103,14 @@ Note [#32]: Preserve the `Action` construction pattern — the change is in the 
 Of the four named above, #22 is closed (subsumed), #29 is closed and #93 is
 done, which left **#27** looking like the last live enabler. It is not one.
 It has never been an entry in any revision of this file. In the first
-numbered `TODO.md` (`d50e56f`, 2026-04-19) it appeared exactly twice: in the
+numbered `TODO.md` (`ebf7313`, 2026-04-19) it appeared exactly twice: in the
 header above, and in this sentence —
 
 > items #5, #17, #19, #20, #22, **#27/#31**, #28, #29 are the key structural
 > enablers
 
 `#31` was *"cli.rs: validation error strings are hand-written and
-inconsistent — wire them to the spec's `reason_templates`."* At `2baa194`
+inconsistent — wire them to the spec's `reason_templates`."* At `2250465`
 (2026-05-02, "Spec rewrite, wire error constants") that work landed: the
 same commit deleted the `### #31` entry and rewrote `#27/#31` to `#27`. The
 surviving half has read as an independent undefined ticket ever since.
@@ -172,7 +172,7 @@ selecting `build` without `fetch` produces code that does not compile — the
 Fetch-before-Build guarantee stays in the type system rather than degrading to
 a runtime check.
 
-✅ **Stage 4 — deleting `plan()` — DONE (2026-09-02, `3a42ae0`).** Sign-off
+✅ **Stage 4 — deleting `plan()` — DONE (2026-09-02, `98d5015`).** Sign-off
 given. `action.rs` lost 98 lines of hand-written `plan()` and gained
 `use crate::generated::plan::plan_generated as plan;`, so every call site and
 every test kept working unchanged and the generated planner now drives
@@ -185,7 +185,7 @@ Both follow-ups are also closed, one by doing and one by deciding:
 
 - ✅ **canonical-order enumeration is now a permanent test** —
   `action::tests::manpage_execution_order_agrees_with_the_planner`
-  (2026-09-03, `3548a1b`), which parses the four `.TP` pairs out of the
+  (2026-09-03, `bd1c56c`), which parses the four `.TP` pairs out of the
   generated `.1` and compares them against the real planner. It pins exactly
   the property the man page's EXECUTION ORDER section promises users.
 - ✅ **`outcome:` versus `plan()` (the #92 remainder) — resolved by
@@ -551,7 +551,7 @@ Behavior-preserving — the CLI-semantics snapshot stayed green byte-for-byte.
 
 **Original premise was stale and the fix inverted it.** The double-print the entry
 described only existed when `main` did `eprintln!("Error: {e}")`; that print was
-removed in commit `926a335`, after which the `error()`+`bail!()` pairs were *not*
+removed in commit `410a482`, after which the `error()`+`bail!()` pairs were *not*
 redundant — `error()` was the only thing reporting (it logs via the custom handler;
 the propagated `bail!()` was dropped silently by `main`'s `process::exit`). Deleting
 the `error()` calls verbatim would have made those errors silent.
@@ -934,7 +934,7 @@ Verified to have teeth by reverting the spec, twice:
                          plan() gives ["fetch", "clean", "prune_csv", "build"]
     "xtgeoip build -b -c": reaches Action but declares no `steps:` in cli.yaml
 
-The first is the *actual* historical bug — R-004's order between `0712783` and
+The first is the *actual* historical bug — R-004's order between `850bfd8` and
 2026-09-02 — so the check demonstrably catches the thing that motivated it.
 
 ✅ **The generation-side validator landed 2026-09-02** — `validate_plan()`,
@@ -976,7 +976,7 @@ closure and `tests/` being empty both keep running into.
 are free text that docgen copies verbatim into the man page, and their
 *content* is never checked — `xtgeoip-docgen.rs` asserts only that a valid
 example has one, and `xtgeoip-tests.rs` never reads the field. Three of them
-had been wrong since `0712783` (#24 stage 1, 2026-07-18) moved `Clean` after
+had been wrong since `850bfd8` (#24 stage 1, 2026-07-18) moved `Clean` after
 `Fetch`: R-004 `run -c -p`, R-005 `run -c -f` and R-010 `run -b -c` all still
 claimed clean-before-fetch, as did the man page's EXECUTION ORDER section —
 i.e. the shipped docs described the behaviour that change was written to
@@ -1190,7 +1190,7 @@ Verified root-free by running the release binary with `--case NOSUCH` under both
 mechanism to guard a path that already has two guards, one of them
 structural.
 
-- **The bug it would regression-test is in deleted code.** `b4ec1db`'s data
+- **The bug it would regression-test is in deleted code.** `d2bce08`'s data
   loss came from the atomic swap, which was reverted; #24 stages 2–3 are
   permanently rejected. The regression test would guard a feature on a
   do-not-implement list.
@@ -1229,7 +1229,7 @@ gap here — see below. The design note's own author got the `build -c` vs
 `build -c -f` distinction wrong from reading the code, which is direct
 evidence the behaviour is confusing. Documented 2026-09-01.
 
-**Premise partly wrong.** The *detection* exists (`detect_orphans`, called after every build, 6 unit tests) and the full legacy→default→clean cycle was demonstrated working on 2026-07-18. What is missing is an *integration* case and documentation of which clean form applies when (`build -c` during the switch back, `build -c -f` after the fact — see §4 of the design note). Concrete scenarios in §8; the final assertion (`xtgeoip.conf.example` survives) is the regression test for the `b4ec1db` data-loss bug.
+**Premise partly wrong.** The *detection* exists (`detect_orphans`, called after every build, 6 unit tests) and the full legacy→default→clean cycle was demonstrated working on 2026-07-18. What is missing is an *integration* case and documentation of which clean form applies when (`build -c` during the switch back, `build -c -f` after the fact — see §4 of the design note). Concrete scenarios in §8; the final assertion (`xtgeoip.conf.example` survives) is the regression test for the `d2bce08` data-loss bug.
 
 Orphaned files from legacy/default mode switching are not covered by the rebuild logic. Add two explicit test scenarios:
 
@@ -1239,11 +1239,11 @@ Orphaned files from legacy/default mode switching are not covered by the rebuild
 
 ### #96 — CI / sync: run `cargo test` so the snapshot guard is enforced ✅ DONE (2026-07-18)
 
-Original complaint: `scripts/sync.py` ran docgen → clippy → `+nightly fmt --check` → `build --release`, but **not** `cargo test`, so the CLI-semantics snapshot (`cli::snapshot::cli_semantics_snapshot`, golden at `src/cli_snapshot.golden`, commit `33ddeaa`) and any future `#[cfg(test)]` unit tests (#88) weren't enforced automatically.
+Original complaint: `scripts/sync.py` ran docgen → clippy → `+nightly fmt --check` → `build --release`, but **not** `cargo test`, so the CLI-semantics snapshot (`cli::snapshot::cli_semantics_snapshot`, golden at `src/cli_snapshot.golden`, commit `6a92c6f`) and any future `#[cfg(test)]` unit tests (#88) weren't enforced automatically.
 
 **Stale as written (found 2026-07-18).** `cargo test` was wired in at some point after this was filed and the ticket was never updated: `scripts/sync.py:87` and the `test` job in `.github/workflows/rust.yml` both run it. The snapshot guard has in fact been enforced.
 
-The real residual was narrower: both gates ran `cargo clippy --` **without** `--all-targets`, so lints in `#[cfg(test)]` code were never gated — test code compiles under `cargo test`, so this was lint coverage, not correctness. It let the `build.rs` `items_after_test_module` lint sit undetected until a manual `--all-targets` run caught it (fixed `22b3645`). Both gates now pass `--all-targets`, matching the `build` job, which already used it.
+The real residual was narrower: both gates ran `cargo clippy --` **without** `--all-targets`, so lints in `#[cfg(test)]` code were never gated — test code compiles under `cargo test`, so this was lint coverage, not correctness. It let the `build.rs` `items_after_test_module` lint sit undetected until a manual `--all-targets` run caught it (fixed `4e610d7`). Both gates now pass `--all-targets`, matching the `build` job, which already used it.
 
 ---
 
@@ -1339,7 +1339,7 @@ broken.** `clippy::byte_char_slices` was a *style* lint introduced in a Rust
 newer than the local one: CI resolved `@stable` at run time and got 1.98.0
 while a rustup **directory override** held this repo at 1.94.0, invisible
 because such an override outranks `rust-toolchain.toml`. `-D warnings` did the
-rest. Fixed in `1177bfc`; both toolchains pinned in `d9e72a8`.
+rest. Fixed in `78df343`; both toolchains pinned in `4ef7aa1`.
 
 **Pinning solved that and created its successor.** `_check_toolchain` catches
 the local toolchain diverging from the pin. Nothing caught the **pin itself**
@@ -1642,7 +1642,7 @@ single ENOSPC/EACCES/EIO aborts the build only after most files have landed;
 `generate_manifest` never runs, and `output_dir` then holds a partially written
 database while `version` and the manifest still describe the previous one. An
 atomic swap is not the answer and is not on the table (#24 stages 2–3, rejected
-— `b4ec1db` lost data). Two smaller changes instead:
+— `d2bce08` lost data). Two smaller changes instead:
 
 1. **The pointer is written last.** `generate_manifest` wrote `version` before
    the manifest, so a failure between the two left `version` naming a manifest
@@ -1804,7 +1804,7 @@ is a knee rather than an optimum and the comment now says so.
 The 2026-09-02 toolchain work closed *compiler* drift and left a matching hole
 open: `HOUSEKEEPING` predicted that nothing reported whether crate updates or
 advisories had gone stale. Checking that prediction turned it from a process
-gap into a live exposure. `cargo audit` against the lockfile at `1cf6038`:
+gap into a live exposure. `cargo audit` against the lockfile at `ec1691a`:
 
 | Crate | Advisory | Reachable here? |
 |---|---|---|
@@ -1829,7 +1829,7 @@ otherwise point at the wrong row.
 **Fixed by `cargo update` alone** — lockfile only, no `Cargo.toml` change:
 
 ```
-cargo audit on the lock at 1cf6038  -> exit 1  (6 vulnerabilities, 4 warnings)
+cargo audit on the lock at ec1691a  -> exit 1  (6 vulnerabilities, 4 warnings)
 cargo audit after cargo update      -> exit 0
 ```
 
@@ -1924,7 +1924,7 @@ would have made the decision for you.
 
 **Nothing actionable remains.** Stage 1 (reorder `Clean` after `Fetch`) and
 the ephemeral-cleanup half both shipped; stages 2 (rollback) and 3 (atomic
-swap) are rejected, the latter twice — it was implemented once as `b4ec1db`
+swap) are rejected, the latter twice — it was implemented once as `d2bce08`
 and caused data loss. Closed 2026-09-01 after a cross-check found the
 heading still flagged open while every part of the body had resolved.
 
@@ -1953,7 +1953,7 @@ Replaced both manual cleanups with a `PartialDownload` RAII guard (`Drop` remove
 
 `backup → clean → fetch → build` has no rollback. A failure mid-way leaves system in partially-destroyed state. Future improvement: write to temp output directory, atomic swap on success. Execution planner (#17) is the right place to manage temp directory as a pipeline-level concern.
 
-**⚠ See #1 PRIORITY.** This exact idea was implemented early (`b4ec1db`) and caused a data-loss bug: the atomic swap `remove_dir_all`s the whole `output_dir`, deleting files build never created. It has been reverted. If revisited, the temp/swap MUST respect manifest ownership — never delete unowned files, force-delete only build-created types (`.iv4`/`.iv6`).
+**⚠ See #1 PRIORITY.** This exact idea was implemented early (`d2bce08`) and caused a data-loss bug: the atomic swap `remove_dir_all`s the whole `output_dir`, deleting files build never created. It has been reverted. If revisited, the temp/swap MUST respect manifest ownership — never delete unowned files, force-delete only build-created types (`.iv4`/`.iv6`).
 
 ### #38 [also build.rs] — CSV materialisation: high memory risk ❌ CLOSED — premise invalidated (2026-07-18)
 

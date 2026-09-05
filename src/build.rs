@@ -216,7 +216,7 @@ fn write_outputs(
 /// stray file is swept up by `detect_orphans` on the next successful build, and
 /// collected by `all_blake3_files` on the force path.
 ///
-/// This is not an atomic swap (#24 stages 2–3, rejected — `b4ec1db` lost data).
+/// This is not an atomic swap (#24 stages 2–3, rejected — `d2bce08` lost data).
 /// Nothing is renamed, staged, or rolled back; one write simply precedes the
 /// other.
 fn generate_manifest(
