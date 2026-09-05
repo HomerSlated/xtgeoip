@@ -34,6 +34,19 @@ pub struct Spec {
     #[serde(default)]
     pub global_options: BTreeMap<String, FlagDef>,
 
+    /// Options belonging to a single subcommand, keyed by command name then
+    /// by short flag. Kept out of both `flags` and `global_options`: they are
+    /// neither part of the guard bitmask nor applicable everywhere.
+    ///
+    /// `conf`'s four are the only ones today, and until 2026-09-05 they were
+    /// declared nowhere in the spec at all — they existed solely in `cli.rs`
+    /// and in the man-page template. That gap is what
+    /// `validate_manpage_template` needs closed to have a complete universe
+    /// of option names to check the template against; without it the check
+    /// would have to carve out the four flags most likely to be renamed.
+    #[serde(default)]
+    pub subcommand_options: BTreeMap<String, BTreeMap<String, FlagDef>>,
+
     /// Execution planning (#26/#27). See
     /// `docs/design/26-spec-derived-planning.md`.
     #[serde(default)]

@@ -86,6 +86,7 @@ fn main() -> anyhow::Result<()> {
 
     let toml_str = fs::read_to_string("docs/spec/manpage-template.toml")?;
     let tmpl: ManpageTemplate = toml::from_str(&toml_str)?;
+    validate_manpage_template(&spec, &tmpl)?;
 
     let outputs = render_outputs(&spec, &tmpl)?;
 
@@ -1573,8 +1574,268 @@ fn generate_manpage(
     Ok(out)
 }
 
+/// Strip roff font escapes (`\fB`, `\fI`, `\fR`, `\fP`) so they cannot mask an
+/// option boundary.
+///
+/// This is not cosmetic. `\fB\-\-legacy\fR` ends in `B` immediately before the
+/// `\-`, and the boundary rule below rejects an option preceded by an
+/// alphanumeric — so without stripping, that token is read as the short flag
+/// `-legacy` rather than the long `--legacy`. Observed on the real template.
+fn strip_roff_fonts(body: &str) -> String {
+    let c: Vec<char> = body.chars().collect();
+    let mut out = String::with_capacity(body.len());
+    let mut i = 0;
+    while i < c.len() {
+        if c[i] == '\\'
+            && i + 2 < c.len()
+            && c[i + 1] == 'f'
+            && matches!(c[i + 2], 'B' | 'I' | 'R' | 'P')
+        {
+            i += 3;
+            continue;
+        }
+        out.push(c[i]);
+        i += 1;
+    }
+    out
+}
+
+/// Every option token a roff body names, as `-b` / `--backup`.
+///
+/// The discriminating rule is the one preceding character: roff writes a
+/// literal hyphen as `\-` too, so `stale\-owned` and `spec\-driven` look
+/// exactly like options to a naive scan. An option's `\-` is never preceded by
+/// an alphanumeric; a prose hyphen always is. On the real template that single
+/// rule is the difference between 6 spurious tokens and none.
+///
+/// A short name is not constrained to one character on purpose: `\-legacy`
+/// (a plausible typo for `\-\-legacy`) should be reported as unknown rather
+/// than silently truncated to `-l`, which exists.
+fn roff_option_tokens(body: &str) -> BTreeSet<String> {
+    let c: Vec<char> = strip_roff_fonts(body).chars().collect();
+    let mut found = BTreeSet::new();
+    let mut i = 0;
+    while i + 1 < c.len() {
+        if c[i] != '\\' || c[i + 1] != '-' {
+            i += 1;
+            continue;
+        }
+        if i > 0 && c[i - 1].is_ascii_alphanumeric() {
+            i += 2;
+            continue;
+        }
+        let mut j = i + 2;
+        let long = j + 1 < c.len() && c[j] == '\\' && c[j + 1] == '-';
+        if long {
+            j += 2;
+        }
+        if j >= c.len() || !c[j].is_ascii_alphabetic() {
+            i += 2;
+            continue;
+        }
+        let mut name = String::new();
+        while j < c.len() {
+            if c[j].is_ascii_alphanumeric() {
+                name.push(c[j]);
+                j += 1;
+            } else if c[j] == '\\'
+                && j + 2 < c.len()
+                && c[j + 1] == '-'
+                && c[j + 2].is_ascii_alphanumeric()
+            {
+                name.push('-');
+                j += 2;
+            } else {
+                break;
+            }
+        }
+        found.insert(if long {
+            format!("--{name}")
+        } else {
+            format!("-{name}")
+        });
+        i = j;
+    }
+    found
+}
+
+/// The man-page template may name no option or command the spec does not
+/// declare (#92, generation-time half).
+///
+/// The five man-page checks that landed 2026-09-03 all live at *test* time and
+/// compare a documented *claim* against the program's behaviour. This is the
+/// other half, and it is purely spec-internal, which is what makes it
+/// admissible here: it needs nothing from the program's semantics, only two
+/// spec sections and a template. The boundary #92 settled — generation time
+/// owns spec-internal contradictions, test time owns spec-versus-program
+/// agreement — is what puts it on this side.
+///
+/// Scope, stated so it is not mistaken for more than it is: this catches a
+/// **rename or a typo**, not a false claim. `-c` is `--clean` under `build`
+/// and `--set-credentials` under `conf`, and the check deliberately does not
+/// model per-command validity — only that a name exists somewhere in the
+/// declared surface. Modelling context would duplicate the guard table, which
+/// test time already checks against the parser.
+///
+/// `description` is excluded. It is prose about the problem domain and the one
+/// section that legitimately names a *different* program's options —
+/// `xt_geoip`'s `--src-cc`, an iptables match option this tool never accepts.
+/// Every other section documents this program's own interface, so a foreign
+/// flag appearing in one would itself be a defect.
+fn validate_manpage_template(
+    spec: &Spec,
+    tmpl: &ManpageTemplate,
+) -> anyhow::Result<()> {
+    let mut known: BTreeSet<String> = BTreeSet::new();
+    for (short, def) in &spec.flags {
+        known.insert(format!("-{short}"));
+        known.insert(format!("--{}", def.long));
+    }
+    for def in spec.global_options.values() {
+        known.insert(format!("--{}", def.long));
+    }
+    for per_command in spec.subcommand_options.values() {
+        for (short, def) in per_command {
+            known.insert(format!("-{short}"));
+            known.insert(format!("--{}", def.long));
+        }
+    }
+    // clap supplies these and no spec map declares them, by design.
+    for builtin in ["-h", "--help", "-V", "--version"] {
+        known.insert(builtin.to_string());
+    }
+
+    let sections: [(&str, &str); 9] = [
+        ("commands", &tmpl.commands),
+        ("options", &tmpl.options),
+        ("execution_order", &tmpl.execution_order),
+        ("file_ownership", &tmpl.file_ownership),
+        ("legacy_mode", &tmpl.legacy_mode),
+        ("configuration", &tmpl.configuration),
+        ("files", &tmpl.files),
+        ("see_also", &tmpl.see_also),
+        ("authors", &tmpl.authors),
+    ];
+
+    let mut problems: Vec<String> = Vec::new();
+    for (name, body) in sections {
+        for token in roff_option_tokens(body) {
+            if !known.contains(&token) {
+                problems.push(format!(
+                    "manpage-template.toml `{name}` names option `{token}`, \
+                     which no spec section declares (checked: flags, \
+                     global_options, subcommand_options, and clap's built-ins)"
+                ));
+            }
+        }
+    }
+
+    // Commands, both directions. `.BI "<name> "` is the template's own
+    // anchor for a command entry, so this reads the structure rather than
+    // guessing at prose.
+    let mut documented: BTreeSet<&str> = BTreeSet::new();
+    for line in tmpl.commands.lines() {
+        if let Some(rest) = line.strip_prefix(".BI \"")
+            && let Some(name) = rest.split('"').next()
+            && !name.trim().is_empty()
+        {
+            documented.insert(name.trim());
+        }
+    }
+    for name in &documented {
+        if !spec.commands.contains_key(*name) {
+            problems.push(format!(
+                "manpage-template.toml `commands` documents `{name}`, which \
+                 cli.yaml `commands:` does not declare"
+            ));
+        }
+    }
+    for name in spec.commands.keys() {
+        if !documented.contains(name.as_str()) {
+            problems.push(format!(
+                "cli.yaml declares command `{name}`, which \
+                 manpage-template.toml `commands` does not document"
+            ));
+        }
+    }
+
+    if !problems.is_empty() {
+        anyhow::bail!(
+            "manpage template disagrees with the spec:\n  - {}",
+            problems.join("\n  - ")
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+
+    // ── manpage template vs spec (#92, generation-time half) ──────────────
+
+    /// The shipped template and the shipped spec must agree. This is the
+    /// check docgen runs; asserting it here means `cargo test` reports the
+    /// disagreement directly rather than as a docgen failure during a build.
+    #[test]
+    fn shipped_manpage_template_agrees_with_the_spec() {
+        let yaml = std::fs::read_to_string("docs/spec/cli.yaml")
+            .expect("docs/spec/cli.yaml missing");
+        let spec: Spec =
+            serde_saphyr::from_str(&yaml).expect("cli.yaml does not parse");
+        let toml_str =
+            std::fs::read_to_string("docs/spec/manpage-template.toml")
+                .expect("docs/spec/manpage-template.toml missing");
+        let tmpl: ManpageTemplate =
+            toml::from_str(&toml_str).expect("template does not parse");
+        validate_manpage_template(&spec, &tmpl)
+            .expect("shipped template disagrees with shipped spec");
+    }
+
+    /// The discriminating case for the whole scan. roff writes a literal
+    /// hyphen as `\-`, so prose compounds are indistinguishable from options
+    /// to a naive reading — on the real template a bare scan yields six
+    /// spurious tokens (`\-owned`, `\-src`, `\-cc`, `\-Z`, `\-no`,
+    /// `\-file`). The preceding-character rule is what removes them.
+    #[test]
+    fn prose_hyphens_are_not_read_as_options() {
+        let body = "Files are stale\\-owned under a spec\\-driven model, \
+                    matching [A\\-Z0\\-9] only.";
+        assert!(
+            roff_option_tokens(body).is_empty(),
+            "prose hyphens leaked in: {:?}",
+            roff_option_tokens(body)
+        );
+    }
+
+    /// `\fB` ends in an alphanumeric, so without font stripping the boundary
+    /// rule rejects the first `\-` and the token is misread as the short
+    /// flag `-legacy` instead of the long `--legacy`. Observed on the real
+    /// template before `strip_roff_fonts` existed.
+    #[test]
+    fn font_escapes_do_not_mask_a_long_option() {
+        let toks = roff_option_tokens("ran with \\fB\\-\\-legacy\\fR and");
+        assert!(toks.contains("--legacy"), "expected --legacy, got {toks:?}");
+        assert!(
+            !toks.contains("-legacy"),
+            "font escape masked the long form: {toks:?}"
+        );
+    }
+
+    /// Both option forms are recognised, and a short flag is not truncated:
+    /// `\-legacy` (a plausible typo for `\-\-legacy`) must surface as
+    /// unknown rather than silently reading as `-l`, which exists.
+    #[test]
+    fn short_and_long_forms_are_both_recognised() {
+        let toks = roff_option_tokens(".BR \\-b \", \" \\-\\-backup");
+        assert!(toks.contains("-b"), "{toks:?}");
+        assert!(toks.contains("--backup"), "{toks:?}");
+
+        let typo = roff_option_tokens("run with \\-legacy");
+        assert!(
+            typo.contains("-legacy"),
+            "a mistyped long option must not truncate to -l: {typo:?}"
+        );
+    }
     use super::*;
 
     fn example(valid: bool) -> Example {
@@ -1708,6 +1969,7 @@ mod tests {
             proof: None,
             flags: BTreeMap::new(),
             global_options: BTreeMap::new(),
+            subcommand_options: BTreeMap::new(),
             plan: None,
             error_cases: None,
             top_level: Some(CommandSpec::FlagCommand {

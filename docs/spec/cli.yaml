@@ -49,6 +49,33 @@ global_options:
     kind: bool
     summary: Disable file logging, overriding [logging] in the config.
 
+# Options belonging to one subcommand only. Neither part of the guard bitmask
+# (they constrain nothing across commands) nor global, so they are declared
+# here rather than in `flags:` or `global_options:`.
+#
+# Added 2026-09-05. Before that these four existed only in `cli.rs` and in the
+# man-page template, so the spec's claim to describe the whole CLI surface was
+# false, and `validate_manpage_template` would have had to carve them out —
+# leaving the flags most likely to be renamed as the ones it could not check.
+subcommand_options:
+  conf:
+    d:
+      long: default
+      kind: bool
+      summary: Show the default (example) configuration.
+    e:
+      long: edit
+      kind: bool
+      summary: Open the system configuration in $EDITOR.
+    s:
+      long: show
+      kind: bool
+      summary: Show the current system configuration.
+    c:
+      long: set-credentials
+      kind: bool
+      summary: Prompt for MaxMind credentials and store them encrypted.
+
 # Execution planning (#26/#27). Design: docs/design/26-spec-derived-planning.md
 #
 # Every plan the program can produce is a subsequence of one fixed order, so
