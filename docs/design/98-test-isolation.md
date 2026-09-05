@@ -22,8 +22,10 @@ The motivating instruction: *testing should not modify production files*, and
 3. **Redirecting `output_dir` / `archive_dir` is a config change, not a code
    change** — both are `[paths]` keys. But the config *path* is hardcoded, so
    reaching those keys is the whole problem. §4.
-4. **Redirecting the paths also removes the root requirement**, which is
-   incidental to the directories being root-owned, not intrinsic to the suite.
+4. **Redirecting the paths removes the root requirement at the filesystem
+   level but not at the program level.** `Action::requires_root()` is a blanket
+   euid test on everything except `conf`, independent of where the paths point,
+   so a temp tree alone is not enough. §4(d).
 5. **A local https stub needs no production change.** `reqwest` here resolves
    to `rustls-platform-verifier` → `rustls-native-certs`, so the binary
    verifies against the *system* trust store. §5.
@@ -155,39 +157,91 @@ error text, not configurability. I found no recorded decision that the path
 
 Three routes, and this is a decision I am explicitly not taking:
 
-**(a) A `--config PATH` global flag.** Cleanest to use, largest blast radius.
-This repo is spec-driven: the flag would go in `cli.yaml`, which regenerates
-`cli_rules.rs`, `cli_matrix.rs`, `plan.rs`, the man page, the 136-combination
-snapshot — **and `testcases.yaml`, the corpus this work exists to fix.** It also
-widens the flag space per context. A production flag added for testing's sake
-also has to be justified on its own merits to operators.
+**(a) A `--config PATH` global option.** *Corrected 2026-09-05 — the first
+draft of this section costed this wrongly.* It claimed the option would widen
+the flag space and regenerate `testcases.yaml`, "the corpus this work exists to
+fix". It would not. `cli.yaml` already has a **`global_options:`** section,
+deliberately separate from `flags:`, for exactly this shape — options that
+"apply to every command and carry no combination semantics". The comment there
+states the reason: `flags:` is the universe the guard bitmask is built from, and
+`every_flag_is_referenced_by_some_guard` requires each bit to be mentioned by
+some guard, so a non-constraining option cannot live there.
+
+`--log-file` and `--no-log` are the existing precedent. Measured: they appear
+**zero** times in `docs/generated/testcases.yaml`, `src/generated/cli_matrix.rs`
+and `src/generated/cli_rules.rs`. A third entry would behave the same — the
+5-bit space stays 32 combinations per context, the 136-case snapshot is
+untouched, and the corpus is not regenerated. The cost is one spec entry plus
+the man-page documentation that `cli::tests::global_options_are_documented`
+already enforces.
+
+Decisively, an **argument passes through `sudo` unchanged**, which is the
+property (b) lacks.
 
 **(b) An environment-variable override**, e.g. `XTGEOIP_CONFIG`, read by
-`load_config` and documented as a testing hook. Small, no spec change, no new
-CLI surface. One real trap: cases are spawned via `sudo`, which resets the
-environment by default — the runner must pass it inline
-(`sudo XTGEOIP_CONFIG=… xtgeoip …`) or via `sudo -E` with `env_keep`, or it
-silently does not apply and every case reads the production config while
-appearing to pass. That failure is the same shape as the `--rebuil` typo #98
-already records.
+`load_config`. Small and needs no spec change — but it does not survive `sudo`,
+and cases are spawned via `sudo` today. `sudo` runs with `env_reset` on by
+default; passing `VAR=value` inline requires the sudoers `setenv` option, and
+`sudo -E` requires the `SETENV` tag — neither is on by default on Debian or
+Ubuntu. So this route needs **a sudoers change on every host that runs the
+suite**, which is a far worse prerequisite than the one it removes. (Not
+verified on this host: `sudo -n` requires a password here, so it could not be
+tested without one. Stated from sudo's documented behaviour, not observation.)
+
+It becomes viable only if `sudo` leaves the spawn path entirely — see (d).
 
 **(c) A bind mount** over `/etc/xtgeoip.conf` in a private mount namespace —
 zero production change, already recorded at `TODO.md:506`. Blocked here:
 `kernel.apparmor_restrict_unprivileged_userns = 1` means it needs root, and
 needing root is one of the things we are trying to remove.
 
-My reading: **(b)** is the proportionate one, and its trap is testable. But (a)
-is the only one that is honest about being a user-facing capability, and the
-choice depends on whether a config override is wanted in the shipped tool at
-all. That is the maintainer's call.
+**(d) Make the root check reflect what it actually guards.** Added after (b)'s
+`sudo` problem surfaced the reason `sudo` cannot simply be dropped:
+`Action::requires_root()` is `!matches!(self, Action::Conf(_))` — a **blanket
+euid test on every command except `conf`, independent of where the paths
+point**. So even with a temp tree owned by the invoking user, `xtgeoip build`
+refuses to run. §4's premise that redirecting `[paths]` removes the root
+requirement is therefore true of the *filesystem* and false of the *program*,
+until this check changes.
 
-### Root falls out for free
+The check asks "am I root?" where the question is "can I write to the
+configured `output_dir` and `archive_dir`?". On a default install the two
+coincide; on any other configuration the tool refuses work it could do. This
+repo already has the right pattern: `conf.rs::check_system_config_writable`
+probes writability by actually attempting `NamedTempFile::new_in(dir)` and
+treats root as *advice* in the error text ("Re-run as root (e.g. with sudo)")
+rather than as a gate. `requires_root` has **no test coverage** — one call site,
+no tests — so it is also the least-pinned thing being proposed here.
 
-Root is required only because `/usr/share/xt_geoip` and `/var/lib/xt_geoip` are
-root-owned. With both under a temp tree the cases write as the invoking user,
-`sudo` drops out of the spawn path, and `check_preconditions`' root check
-becomes conditional rather than absolute. That removes the passwordless-sudo
-requirement and makes the suite runnable in CI — which it has never been.
+This is a small correctness improvement on its own merits, independent of
+testing. It is also the only route that removes `sudo`, and removing `sudo` is
+what makes the suite CI-runnable.
+
+**Recommendation: (a), and (d) on its own merits.** (a) is immune to sudo
+policy, costs one `global_options` entry, and is the only route that works
+without touching either host configuration or the root check. (d) is worth
+doing regardless — it fixes a real if minor defect and would let the suite drop
+`sudo` — but it is a behaviour change to a security-relevant check and should
+be decided separately, not smuggled in as test infrastructure. (b) is dead
+unless (d) lands first. The maintainer's call stands on whether a config
+override belongs in the shipped tool at all; the earlier draft overstated its
+cost, and this is the correction.
+
+### Root does *not* fall out for free
+
+An earlier draft said it did. It does not. `/usr/share/xt_geoip` and
+`/var/lib/xt_geoip` being root-owned is only half the reason root is required;
+the other half is `Action::requires_root()`, which tests euid and nothing else
+(§4(d)). Under a temp tree the *filesystem* no longer needs root and the
+*program* still insists on it.
+
+With (d) as well, the cases write as the invoking user, `sudo` leaves the spawn
+path, and `check_preconditions`' root check becomes conditional rather than
+absolute — which removes the passwordless-sudo requirement and makes the suite
+runnable in CI, which it has never been. Worth noting that requirement is not
+hypothetical: on the maintainer's own machine `sudo -n` requires a password, so
+`sudo_is_passwordless()` returns false and `check_preconditions` refuses the
+run. The suite cannot execute there today without an interactive password.
 
 ---
 
