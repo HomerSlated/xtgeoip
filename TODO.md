@@ -185,7 +185,7 @@ Both follow-ups are also closed, one by doing and one by deciding:
 
 - ✅ **canonical-order enumeration is now a permanent test** —
   `action::tests::manpage_execution_order_agrees_with_the_planner`
-  (2026-09-03, `b6a2fdb`), which parses the four `.TP` pairs out of the
+  (2026-09-04, `b6a2fdb`), which parses the four `.TP` pairs out of the
   generated `.1` and compares them against the real planner. It pins exactly
   the property the man page's EXECUTION ORDER section promises users.
 - ✅ **`outcome:` versus `plan()` (the #92 remainder) — resolved by
@@ -550,13 +550,23 @@ Behavior-preserving — the CLI-semantics snapshot stayed green byte-for-byte.
 ### #94 — backup.rs / fetch.rs: remove double-error reporting ✅ DONE
 
 **Original premise was stale and the fix inverted it.** The double-print the entry
-described only existed when `main` did `eprintln!("Error: {e}")`; that print was
-removed in commit `410a482`, after which the `error()`+`bail!()` pairs were *not*
-redundant — `error()` was the only thing reporting (it logs via the custom handler;
-the propagated `bail!()` was dropped silently by `main`'s `process::exit`). Deleting
-the `error()` calls verbatim would have made those errors silent.
+described would have needed `main`'s error funnel to print the propagated error, and
+it never did: from `164aec3` (initial commit) to `f48c0e0` the `if let Err(e) =
+run(cli)` block reported nothing and only called `process::exit`. So the
+`error()`+`bail!()` pairs were *not* redundant — `error()` was the only thing
+reporting (it logs via the custom handler; the propagated `bail!()` was dropped
+silently by `main`'s `process::exit`). Deleting the `error()` calls verbatim would
+have made those errors silent.
 
-Resolution: centralised reporting in `main` instead — `messages::error(&format!("{e:#}"))`
+*(Corrected 2026-09-05. This paragraph previously said the print "was removed in
+commit `410a482`". `410a482` is a real commit and did touch `main.rs`, but it
+replaced the bare exit codes with `EXIT_CLI_ERROR`/`EXIT_RUNTIME_ERROR`; it removed
+no error print, and the funnel had none to remove. The two surviving
+`eprintln!("Error: {e}")` sites are in `run()`'s `normalize_cli_to_action` `map_err`
+and the `ShowHelp` arm — neither is the funnel.)*
+
+Resolution (`f48c0e0`, 2026-06-07): centralised reporting in `main` instead —
+`messages::error(&format!("{e:#}"))`
 on the propagated error before exit — then removed the now-redundant inline `error()`
 calls across `backup.rs` (verify_manifest_files, gather_files, backup, delete,
 prune_archives) and `fetch.rs` (credentials). Kept `delete_all`'s per-file `error()`
@@ -889,7 +899,7 @@ The proper "one source" endpoint is #26/#27 (spec-derived plan).
 ## SPEC-DRIVEN ARCHITECTURE: SPECIFIC TASKS
 
 
-### #92 — docgen / tests: expand spec validation and utilise CLI matrix
+### #92 — docgen / tests: expand spec validation and utilise CLI matrix ✅ DONE (2026-09-02)
 
 `proof.unique_maps_to` is now enforced by the validator. Remaining: expand validation to catch logical contradictions (declared but never used flags, undeclared mutual exclusions, unreachable valid states). Also: `pub const CLI_MATRIX: &[CliExample]` is generated but underutilised — use for fuzzing (seed corpus), property testing (`proptest`/`quickcheck`), and exhaustive parser validation.
 
@@ -1155,6 +1165,21 @@ Still open under #98: the setup/teardown lifecycle itself — a known-good
 initial state and a teardown that survives a mid-run failure. Unresolved, and
 not addressed here; the `restore` framing was rejected (§0 above) and #89,
 which shared the assertion-vocabulary cost, is closed.
+
+**Analysed 2026-09-05 — [`docs/design/98-test-isolation.md`](design/98-test-isolation.md).**
+Still not implemented, and one decision is outstanding (§4), but the shape has
+changed. Three findings: the suite **cannot run on a clean system at all** —
+`TL-006` (`xtgeoip -b`) is the sixth case, is the first needing a populated
+`output_dir`, and nothing before it builds, so the suite silently depends on
+production state it cannot itself create (and `--rebuild` cannot repair that,
+because `build` is `fetch_mode: local` and needs a CSV archive that is equally
+absent). Only **10 of 51** cases reach the WAN — 21 are rejected at argument
+validation, the whole `build` context is `fetch_mode: local`, and `top_level`
+has no fetch step — so the network cost is a property of two contexts, not of
+the suite. And redirecting `[paths]` to a temp tree also removes the root
+requirement, which is incidental to the production directories being
+root-owned. The blocker is that `SYSTEM_CONFIG` is hardcoded with no override;
+§4 sets out the three routes and takes none of them.
 
 Split out of #87 (2026-07-18) because it is a behaviour change to an order-dependent suite, not documentation, and bundling the two would have made a cheap verifiable change risky.
 

@@ -14,14 +14,17 @@ listing thirteen already-closed items as open.
 ## WIP
 
 - Packaging and deployment — early; staging exists (`conf/etc`, `conf/usr`, `extra/dkms`, `extra/ufw`), no `debian/` or spec file yet
-- CLI codegen from spec (`xtgeoip-docgen`) — in progress
+- CLI codegen from spec (`xtgeoip-docgen`) — **complete**. Validity and ordering
+  both derive from `cli.yaml`: `guards:` → `src/generated/cli_rules.rs`, `plan:` →
+  `src/generated/plan.rs`. `action::plan()` was deleted 2026-09-02 and `action.rs`
+  now imports `plan_generated as plan`. Kept here only as the standing home of the
+  codegen pipeline; there is no open work in it
 
 ---
 
 ## OPEN
 
-- **[#92]** ✅ DONE — docgen: spec validator on the *generation* side — catch contradictions at codegen time, not just test time. Test-time checks (`cli::contradiction`, 4 tests) landed 2026-07-18. The motivating case is **closed** (2026-09-02): examples carry a `steps:` list, checked against the real `plan()` by `action::tests::spec_steps_agree_with_plan`, which also rejects a plan-bearing example that omits the field. **Closed 2026-09-02**: `validate_plan()` runs before any output is written and rejects duplicate ranks, a context that builds without fetching, dead steps, unknown flags, empty `why:`, and undeclared step names. The boundary it settled: docgen links the library built from the *previously generated* sources, so spec-vs-program checks are inherently one generation behind and must stay at test time — **generation time owns spec-internal contradictions, test time owns spec-versus-program agreement**
-- **[#98 residual]** tests: the setup/teardown lifecycle — a known-good initial state, and a teardown that survives a mid-run failure. Two of three halves are now done: documentation (2026-09-01, man-page `FILE OWNERSHIP` + the `build -c` vs `build -c -f` timing distinction) and **fail-fast preconditions** (2026-09-02: `HELP`'s REQUIREMENTS were enforced by nothing; now checked before the first case, all faults reported at once). The `restore`-based plan is **rejected** — see below
+- **[#98 residual]** tests: the setup/teardown lifecycle — a known-good initial state, and a teardown that survives a mid-run failure. Two of three halves are now done: documentation (2026-09-01, man-page `FILE OWNERSHIP` + the `build -c` vs `build -c -f` timing distinction) and **fail-fast preconditions** (2026-09-02: `HELP`'s REQUIREMENTS were enforced by nothing; now checked before the first case, all faults reported at once). The `restore`-based plan is **rejected** — see below. **Analysed 2026-09-05** (`docs/design/98-test-isolation.md`): the suite cannot run on a clean system at all — it depends on production state it cannot create — and only 10 of 51 cases reach the WAN. Redirecting `[paths]` to a temp tree fixes both and drops the root requirement; the blocker is the hardcoded config path, and choosing the override route is an open decision
 
 ---
 
@@ -98,6 +101,8 @@ test.
 ---
 
 ## RECENTLY CLOSED
+
+2026-09-02 — **#92 closed in full.** spec validator on the *generation* side — catch contradictions at codegen time, not just test time. Test-time checks (`cli::contradiction`, 4 tests) landed 2026-07-18. The motivating case is **closed** (2026-09-02): examples carry a `steps:` list, checked against the real `plan()` by `action::tests::spec_steps_agree_with_plan`, which also rejects a plan-bearing example that omits the field. **Closed 2026-09-02**: `validate_plan()` runs before any output is written and rejects duplicate ranks, a context that builds without fetching, dead steps, unknown flags, empty `why:`, and undeclared step names. The boundary it settled: docgen links the library built from the *previously generated* sources, so spec-vs-program checks are inherently one generation behind and must stay at test time — **generation time owns spec-internal contradictions, test time owns spec-versus-program agreement**
 
 2026-09-05 — **v0.3.0**. 76 commits since 0.2.0; the bump is earned by
 `62e554a`, which makes `run -b -p` exit 1 where it used to run. One line in
