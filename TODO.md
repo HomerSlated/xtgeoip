@@ -185,7 +185,7 @@ Both follow-ups are also closed, one by doing and one by deciding:
 
 - ✅ **canonical-order enumeration is now a permanent test** —
   `action::tests::manpage_execution_order_agrees_with_the_planner`
-  (2026-09-03, `bd1c56c`), which parses the four `.TP` pairs out of the
+  (2026-09-03, `b6a2fdb`), which parses the four `.TP` pairs out of the
   generated `.1` and compares them against the real planner. It pins exactly
   the property the man page's EXECUTION ORDER section promises users.
 - ✅ **`outcome:` versus `plan()` (the #92 remainder) — resolved by
@@ -610,7 +610,7 @@ Requires `dashmap` or `Mutex<HashMap>`. **Check against invariant #5.**
 
 ### #57 — fetch.rs: `fetch()` mixes version resolution, acquisition, and extraction ✅ DONE (2026-07-16)
 
-Landed as two commits: the fetch.rs test net (`6ae8735`), then the
+Landed as two commits: the fetch.rs test net (`a654c71`), then the
 behaviour-preserving decomposition. `fetch()` is now a recognisable orchestrator
 calling `resolve_version(&resp)`, `check_download_size(&resp)`,
 `acquire_remote_archive(resp)`, and `extract_and_validate(path)` — the last a
