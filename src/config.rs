@@ -996,11 +996,15 @@ mod tests {
     ///
     /// Asserted by parsing, not by grepping for the sentence: the claim is
     /// about the program's behaviour, so only the program can confirm it.
-    /// `[paths]`, `[logging]` and `[processing]` carry no
-    /// `deny_unknown_fields` and would silently accept a stray key — that
-    /// asymmetry is recorded in TODO.md HOUSEKEEPING as needing a migration
-    /// story, and the man page deliberately claims strictness only for the
-    /// section that has it.
+    ///
+    /// This test predates the 2026-09-05 change that extended
+    /// `deny_unknown_fields` to every table. Its comment used to note that
+    /// `[paths]`, `[logging]` and `[processing]` carried none, and that the
+    /// man page therefore claimed strictness only for `[maxmind]`. Both halves
+    /// are now false: the man page states the rule generally, and
+    /// `every_config_table_rejects_unknown_keys` covers the other tables. Kept
+    /// as the `[maxmind]`-specific case because the man page still names that
+    /// section explicitly.
     #[test]
     fn unknown_maxmind_key_is_rejected_as_documented() {
         let base = "[paths]\narchive_dir = \"/a\"\narchive_prune = 3\n\

@@ -191,7 +191,7 @@ tested without one. Stated from sudo's documented behaviour, not observation.)
 It becomes viable only if `sudo` leaves the spawn path entirely — see (d).
 
 **(c) A bind mount** over `/etc/xtgeoip.conf` in a private mount namespace —
-zero production change, already recorded at `TODO.md:506`. Blocked here:
+zero production change, already recorded under #104 in `DONE.md`. Blocked here:
 `kernel.apparmor_restrict_unprivileged_userns = 1` means it needs root, and
 needing root is one of the things we are trying to remove.
 

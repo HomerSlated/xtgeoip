@@ -1,8 +1,17 @@
-# TODO — TL;DR
+# DONE — TL;DR archive
+
+**Archived 2026-09-06**, alongside [`DONE.md`](DONE.md). Nothing here is open.
+The summary format is retired: current work is tracked in a single
+[`TODO.md`](TODO.md) with no TL;DR companion, because keeping two files in step
+is what produced this one's own recorded defect twice over.
+
+Original header follows.
+
+---
 
 Open work only. Full history, reasoning, and closed entries are in
-[`TODO.md`](TODO.md). Rewritten 2026-09-01 after an audit found this file
-listing thirteen already-closed items as open.
+`DONE.md` (then named `TODO.md`). Rewritten 2026-09-01 after an audit found
+this file listing thirteen already-closed items as open.
 
 ## INVARIANTS
 
