@@ -14,9 +14,7 @@ use toml_edit::DocumentMut;
 use zeroize::Zeroize;
 
 use crate::{
-    config::{
-        Credentials, SYSTEM_CONFIG, sanitize_toml_error, system_config_path,
-    },
+    config::{Credentials, sanitize_toml_error, system_config_path},
     secrets,
 };
 
@@ -50,10 +48,10 @@ impl ConfAction {
 fn require_existing_system_config(verb: &str) -> Result<()> {
     ensure_system_config_exists()?;
     if !system_config_path().exists() {
+        let cfg_path = system_config_path().display();
         bail!(
-            "Cannot {verb}: {SYSTEM_CONFIG} does not exist. Run `xtgeoip conf \
-             -d` to view the default config, then create {SYSTEM_CONFIG} \
-             manually."
+            "Cannot {verb}: {cfg_path} does not exist. Run `xtgeoip conf -d` \
+             to view the default config, then create {cfg_path} manually."
         );
     }
     Ok(())
@@ -78,24 +76,34 @@ fn ensure_default_config_exists() -> Result<()> {
 
 fn create_default_config() -> Result<()> {
     ensure_default_config_exists()?;
-    fs::copy(DEFAULT_CONFIG, SYSTEM_CONFIG).with_context(|| {
-        format!("Failed to copy {DEFAULT_CONFIG} to {SYSTEM_CONFIG}")
+    fs::copy(DEFAULT_CONFIG, system_config_path()).with_context(|| {
+        format!(
+            "Failed to copy {DEFAULT_CONFIG} to {}",
+            system_config_path().display()
+        )
     })?;
-    println!("Created {SYSTEM_CONFIG} from default example.");
+    println!(
+        "Created {} from default example.",
+        system_config_path().display()
+    );
     Ok(())
 }
 
 /// Returns `true` if the user confirmed creation, `false` if they declined.
 fn prompt_create_config() -> Result<bool> {
     if !io::stdin().is_terminal() {
+        let cfg_path = system_config_path().display();
         bail!(
-            "{SYSTEM_CONFIG} does not exist and stdin is not a terminal. Run \
+            "{cfg_path} does not exist and stdin is not a terminal. Run \
              `xtgeoip conf -d` to view the default config, then create \
-             {SYSTEM_CONFIG} manually."
+             {cfg_path} manually."
         );
     }
 
-    println!("Configuration file not found at {SYSTEM_CONFIG}.");
+    println!(
+        "Configuration file not found at {}.",
+        system_config_path().display()
+    );
     print!("Do you want to create it from the default example? [y/N] ");
     io::stdout().flush()?;
 
@@ -135,7 +143,7 @@ pub fn run_conf(action: ConfAction) -> Result<()> {
         }
         ConfAction::Show => {
             if system_config_path().exists() {
-                let contents = fs::read_to_string(SYSTEM_CONFIG)?;
+                let contents = fs::read_to_string(system_config_path())?;
                 println!("{contents}");
             } else {
                 println!("No system config exists to show.");
@@ -147,7 +155,7 @@ pub fn run_conf(action: ConfAction) -> Result<()> {
                 .filter(|e| !e.is_empty())
                 .unwrap_or_else(|| "vi".to_string());
             let status = Command::new(&editor)
-                .arg(SYSTEM_CONFIG)
+                .arg(system_config_path())
                 .status()
                 .with_context(|| {
                     format!("Failed to launch editor '{editor}'")
@@ -174,9 +182,9 @@ fn read_line_trimmed(prompt: &str) -> Result<String> {
 
 /// `true` if the operator confirmed overwriting existing credentials.
 fn confirm_overwrite_credentials() -> Result<bool> {
+    let cfg_path = system_config_path().display();
     print!(
-        "MaxMind credentials are already set in {SYSTEM_CONFIG}. Overwrite? \
-         [y/N] "
+        "MaxMind credentials are already set in {cfg_path}. Overwrite? [y/N] "
     );
     io::stdout().flush()?;
     let mut input = String::new();
@@ -191,7 +199,10 @@ fn confirm_overwrite_credentials() -> Result<bool> {
 /// EACCES at the very last step.
 fn check_system_config_writable() -> Result<()> {
     let dir = system_config_path().parent().ok_or_else(|| {
-        anyhow::anyhow!("{SYSTEM_CONFIG} has no parent directory")
+        anyhow::anyhow!(
+            "{} has no parent directory",
+            system_config_path().display()
+        )
     })?;
     tempfile::NamedTempFile::new_in(dir).with_context(|| {
         format!(
@@ -207,15 +218,21 @@ fn check_system_config_writable() -> Result<()> {
 /// leave the one file this whole scheme depends on half-written.
 fn write_system_config_atomically(contents: &str) -> Result<()> {
     let dir = system_config_path().parent().ok_or_else(|| {
-        anyhow::anyhow!("{SYSTEM_CONFIG} has no parent directory")
+        anyhow::anyhow!(
+            "{} has no parent directory",
+            system_config_path().display()
+        )
     })?;
     let mut tmp = tempfile::NamedTempFile::new_in(dir).with_context(|| {
         format!("Failed to create a temp file in {}", dir.display())
     })?;
     tmp.write_all(contents.as_bytes())
         .context("Failed to write new config contents")?;
-    tmp.persist(SYSTEM_CONFIG).with_context(|| {
-        format!("Failed to atomically replace {SYSTEM_CONFIG}")
+    tmp.persist(system_config_path()).with_context(|| {
+        format!(
+            "Failed to atomically replace {}",
+            system_config_path().display()
+        )
     })?;
     Ok(())
 }
@@ -305,8 +322,9 @@ fn set_credentials() -> Result<()> {
     // EACCES at the last step.
     check_system_config_writable()?;
 
-    let raw = fs::read_to_string(SYSTEM_CONFIG)
-        .with_context(|| format!("Failed to read {SYSTEM_CONFIG}"))?;
+    let raw = fs::read_to_string(system_config_path()).with_context(|| {
+        format!("Failed to read {}", system_config_path().display())
+    })?;
 
     let has_existing = parse_document(&raw)?
         .get("maxmind")
@@ -335,7 +353,10 @@ fn set_credentials() -> Result<()> {
 
     let spliced = splice_credentials(&raw, &creds)?;
     write_system_config_atomically(&spliced)?;
-    println!("MaxMind credentials encrypted and saved to {SYSTEM_CONFIG}.");
+    println!(
+        "MaxMind credentials encrypted and saved to {}.",
+        system_config_path().display()
+    );
     Ok(())
 }
 

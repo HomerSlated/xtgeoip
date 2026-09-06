@@ -243,6 +243,28 @@ Terminal output is unaffected \(em only the file sink is conditional, so
 messages still reach stdout and stderr.
 Conflicts with
 .BR \-\-log\-file .
+.TP
+.BI \-\-config " PATH"
+Read configuration from
+.I PATH
+instead of
+.BR /etc/xtgeoip.conf .
+Applies to every command,
+.B conf
+included: reads and writes both follow it, so
+.B "conf \-\-set\-credentials \-\-config PATH"
+encrypts into
+.IR PATH .
+Intended for a non-default installation, and for driving the program against a
+temporary tree \(em
+.I output_dir
+and
+.I archive_dir
+are ordinary
+.B [paths]
+keys, so redirecting the configuration redirects everything the program reads
+or writes.
+The path is resolved once, before any configuration is read.
 .SH EXECUTION ORDER
 The order in which flags are given on the command line is always ignored.
 The execution order is fixed and determined by the most logical sequence for

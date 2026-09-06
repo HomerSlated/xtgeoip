@@ -2,15 +2,50 @@
 /// xtgeoip configuration data and loading. Pure: no output, no
 /// subprocesses, no prompts — see `conf.rs` for the `conf` subcommand
 /// handler.
-use std::{fs, ops::Range, path::Path};
+use std::{
+    fs,
+    ops::Range,
+    path::{Path, PathBuf},
+    sync::OnceLock,
+};
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
+/// The default configuration path. Still a `const` because it is what the
+/// man page, the `conf` messages and the installer all name; `--config`
+/// overrides where the program *reads*, not what the default *is*.
 pub(crate) const SYSTEM_CONFIG: &str = "/etc/xtgeoip.conf";
 
+/// Process-wide override for the configuration path, set at most once from
+/// `--config` before anything reads it.
+///
+/// A `OnceLock` rather than a threaded parameter: the path is genuinely
+/// process-global and immutable after argument parsing, and threading it
+/// would touch every `conf` operation for no gain in expressiveness. Write-once
+/// is what makes that safe — nothing can change the path midway through a run
+/// and leave two operations disagreeing about which file they acted on.
+static CONFIG_PATH_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Point every subsequent config read and write at `path`.
+///
+/// Returns `Err` with the unused path if it has already been set, which can
+/// only happen if `main` calls this twice — a bug, not a user error.
+pub fn set_config_path(path: PathBuf) -> Result<(), PathBuf> {
+    CONFIG_PATH_OVERRIDE.set(path)
+}
+
+/// The configuration path in force: the `--config` override if one was given,
+/// otherwise [`SYSTEM_CONFIG`].
+///
+/// Every message that names the configuration file must go through this, not
+/// through `SYSTEM_CONFIG` directly. An error that says `/etc/xtgeoip.conf`
+/// while the program actually read somewhere else is worse than no path at
+/// all: it sends the reader to a file that may be perfectly valid.
 pub(crate) fn system_config_path() -> &'static Path {
-    Path::new(SYSTEM_CONFIG)
+    CONFIG_PATH_OVERRIDE
+        .get()
+        .map_or_else(|| Path::new(SYSTEM_CONFIG), PathBuf::as_path)
 }
 
 #[derive(Debug, Deserialize)]
@@ -217,11 +252,14 @@ pub(crate) fn sanitize_toml_error(
         Some(span) => {
             let (line, column) = line_col(source, span.start);
             format!(
-                "Failed to parse {SYSTEM_CONFIG} at line {line}, column \
-                 {column}: {message}"
+                "Failed to parse {} at line {line}, column {column}: {message}",
+                system_config_path().display()
             )
         }
-        None => format!("Failed to parse {SYSTEM_CONFIG}: {message}"),
+        None => format!(
+            "Failed to parse {}: {message}",
+            system_config_path().display()
+        ),
     }
 }
 
@@ -308,10 +346,11 @@ fn parse_config(source: &str) -> Result<Config> {
             )
         } else {
             anyhow::anyhow!(
-                "{SYSTEM_CONFIG} still holds MaxMind credentials in plaintext \
-                 ({}). Run `sudo xtgeoip conf --set-credentials` to encrypt \
-                 them; it removes the plaintext as it writes. Treat the old \
-                 key as exposed and consider rotating it at MaxMind.",
+                "{} still holds MaxMind credentials in plaintext ({}). Run \
+                 `sudo xtgeoip conf --set-credentials` to encrypt them; it \
+                 removes the plaintext as it writes. Treat the old key as \
+                 exposed and consider rotating it at MaxMind.",
+                system_config_path().display(),
                 legacy.join(" and ")
             )
         }
@@ -327,14 +366,14 @@ pub fn load_config() -> Result<Config> {
     let path = system_config_path();
 
     if !path.exists() {
-        anyhow::bail!("{} missing", SYSTEM_CONFIG);
+        anyhow::bail!("{} missing", path.display());
     }
 
     let contents = fs::read_to_string(path)
         .context("Failed to read system configuration file")?;
 
     if contents.trim().is_empty() {
-        anyhow::bail!("{} is empty", SYSTEM_CONFIG);
+        anyhow::bail!("{} is empty", path.display());
     }
 
     parse_config(&contents)
@@ -563,6 +602,42 @@ mod tests {
                 "config content leaked into the error chain:\n{full}"
             );
         }
+    }
+
+    /// Without `--config`, the path is the documented default.
+    ///
+    /// Deliberately does **not** call `set_config_path`. The override is a
+    /// process-global `OnceLock` and `cargo test` runs these in one process,
+    /// so a test that set it would silently change the path for every other
+    /// test in the binary — and, being write-once, could not put it back.
+    /// The override's real behaviour is proved end to end by the integration
+    /// suite, which spawns the binary with the flag; that is the only place
+    /// where a per-process value can be observed honestly.
+    #[test]
+    fn config_path_defaults_to_the_documented_location() {
+        assert_eq!(
+            system_config_path(),
+            Path::new(SYSTEM_CONFIG),
+            "no test may call set_config_path — see this test's comment"
+        );
+    }
+
+    /// Messages must name the file actually read.
+    ///
+    /// An error saying `/etc/xtgeoip.conf` while the program read elsewhere
+    /// sends the reader to a file that may be perfectly valid, which is worse
+    /// than printing no path at all. This asserts the parse-failure path
+    /// routes through `system_config_path()` rather than the constant; under
+    /// the default it is the same string, so what is pinned is the call, not
+    /// the value.
+    #[test]
+    fn parse_errors_name_the_configured_path() {
+        let err = parse_config("this is not toml").expect_err("must not parse");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains(&system_config_path().display().to_string()),
+            "parse error does not name the configuration path: {msg}"
+        );
     }
 
     /// The shipped example must be accepted by the program's own

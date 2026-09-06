@@ -1,6 +1,0 @@
-Please do the following:
-
-1. Confirm that all items in TODO.md and TODO_tldr.md are now completed.
-2. Move TODO.md to DONE.md, and TODO_tldr.md to DONE_tldr.md
-3. Create a new file TODO.md (we will not be using a TODO_tldr.md going forward).
-4. Add L1, L2, I1 -> I4, and the crates updates note to the new TODO.md

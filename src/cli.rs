@@ -1,6 +1,8 @@
-use anyhow::{Result, anyhow};
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 /// xtgeoip CLI parsing and normalization
+use std::path::PathBuf;
+
+use anyhow::{Result, anyhow};
 use clap::{Args, Parser, Subcommand};
 
 use crate::{
@@ -79,6 +81,22 @@ pub struct Cli {
     /// stdout/stderr dispatches, and only the file sink is conditional (#1).
     #[arg(long, global = true)]
     pub no_log: bool,
+
+    /// Read configuration from PATH instead of /etc/xtgeoip.conf
+    ///
+    /// Applies to every command, `conf` included: `conf --show --config P`
+    /// shows `P`, and `conf --set-credentials --config P` encrypts into `P`.
+    /// A flag that redirected reads but not writes would be a trap.
+    ///
+    /// This is what makes the integration suite able to run against a
+    /// temporary tree instead of the live `/usr/share/xt_geoip` and
+    /// `/var/lib/xt_geoip` — `output_dir` and `archive_dir` are ordinary
+    /// `[paths]` keys, so redirecting the config redirects everything the
+    /// program touches. It is a general capability rather than a test hook,
+    /// which is why it is documented rather than hidden: an operator running
+    /// a non-default install has the same need.
+    #[arg(long, value_name = "PATH", global = true)]
+    pub config: Option<PathBuf>,
 
     #[command(subcommand)]
     pub command: Option<Commands>,

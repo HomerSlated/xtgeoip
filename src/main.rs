@@ -68,6 +68,19 @@ fn init_runtime(cfg: &config::Config) -> Result<()> {
 }
 
 fn run(cli: Cli) -> Result<()> {
+    // Before anything reads or writes configuration, including `conf`. The
+    // override is write-once, so establishing it here — ahead of the dispatch
+    // below and ahead of `load_config` — is what guarantees every operation in
+    // a run agrees on which file it acted upon.
+    if let Some(path) = cli.config.clone()
+        && config::set_config_path(path).is_err()
+    {
+        // Unreachable: `run` is called once. Reported rather than ignored
+        // because silently keeping the first path would mean operating on a
+        // file the operator did not name.
+        anyhow::bail!("internal error: configuration path set twice");
+    }
+
     let outcome = cli::normalize_cli_to_action(&cli).map_err(|e| {
         eprintln!("Error: {e}");
         e
