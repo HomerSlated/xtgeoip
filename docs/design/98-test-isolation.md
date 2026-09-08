@@ -272,17 +272,28 @@ into the temp tree and sets `SSL_CERT_FILE` for the spawned process only. It is
 configuration untouched** — and the no-exception https rule stays fully intact,
 because the stub really is serving https and really is being verified.
 
-The same `sudo`-strips-the-environment trap from §4(b) applies to
-`SSL_CERT_FILE`: under the temp-dir design `sudo` leaves the spawn path, so it
-does not bite — but if `sudo` is retained for any reason, this variable must be
-passed inline or it silently falls back to the real trust store, and the stub
-then fails to verify.
+**Verified 2026-09-08, and the conclusion of this section is now wrong.**
 
-**Not yet verified empirically.** The above is read off the dependency source,
-not observed. Before anyone builds on it, confirm end to end: generate a CA,
-serve https on loopback, point a release `xtgeoip` at it with `SSL_CERT_FILE`
-set, and check the fetch completes. That is a five-minute check and it is the
-difference between "the code path exists" and "it works here".
+The mechanism works. A probe built against the same reqwest version and
+features confirmed it: no `SSL_CERT_FILE` → 200; `SSL_CERT_FILE` at an empty
+PEM → the *client builder* fails with "No CA certificates were loaded from the
+system"; `SSL_CERT_FILE` at the real bundle → 200. Note where it fails —
+construction, not request — so a bad path is a clear error rather than a
+confusing handshake failure. `webpki-roots` is absent from the tree, so there
+are no bundled roots to fall back to.
+
+What this section got wrong is the delivery. It assumed the temp-dir design
+would remove `sudo` from the spawn path. It did not, and should not: the
+suite's contract is that cases are spawned via `sudo` (asserted in the module
+doc, in `precondition_failures`, and in `each_failure_names_its_remedy`).
+Spawning directly when root would edit the thing under test, and would make the
+suite exercise a different privilege path depending on how it was launched.
+
+`sudo` therefore stays, and with it `env_reset`. **`SSL_CERT_FILE` cannot reach
+the child.** The channels that survive `sudo` are arguments and the config
+file, and `xtgeoip` offers neither a `--ca-file` argument nor a config key for
+a trust bundle. The stub is blocked on choosing one of those surfaces — see the
+#98 entry in `TODO.md` for the four routes and their costs.
 
 The stub serves two endpoints, which is the entire protocol:
 
@@ -304,8 +315,8 @@ new part is the TLS front and the trust setup.
 | Cases hitting MaxMind | 10 | **1** (setup only) |
 | Archive downloads | 1 | 1 |
 | Header-only round-trips | 9 | 0 |
-| Production dirs written | yes | none |
-| Root required | yes | no |
+| Production dirs written | yes | none *(done 2026-09-08)* |
+| Root required | yes | yes — `requires_root()` is euid-only, and `sudo` is retained by design |
 
 The one remaining hit is the setup fetch in §3, which is also the thing that
 proves the download path genuinely works — the user's stated requirement. Once

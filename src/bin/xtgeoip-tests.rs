@@ -4,17 +4,22 @@
 //! the real filesystem as root, and it is stateful. Understand these
 //! properties before using or modifying it (#87):
 //!
-//! - **Requires root.** Every case is spawned via `sudo`; cases write to
-//!   `output_dir` (`/usr/share/xt_geoip`) and `archive_dir`
-//!   (`/var/lib/xt_geoip`).
+//! - **Requires root.** Every case is spawned via `sudo`.
+//! - **Cases write to a sandbox, not to production (#98).** Each run creates a
+//!   private temp tree, seeds it from the configured `output_dir` and
+//!   `archive_dir`, and spawns every case with `--config <sandbox>` so all
+//!   writes land there. Production data is read once to seed, never written.
+//!   The sandbox is removed on the way out unless `--keep-sandbox` is given.
 //! - **Requires a real release build.** Cases execute `target/release/xtgeoip`
 //!   by default — not a debug build, not a Cargo test harness. Run `cargo build
 //!   --release` first, or point `--bin` elsewhere.
 //! - **Order-dependent, and cases depend on prior execution.** Cases run in
-//!   file order and mutate shared system state that later cases observe.
-//!   `TL-007` (`xtgeoip -c`) empties `output_dir`, so every case after it runs
-//!   against a cleaned system. The corpus order is pinned by
-//!   `emission_order_is_stable`; do not reorder it (see #77).
+//!   file order and mutate sandbox state that later cases observe. `TL-007`
+//!   (`xtgeoip -c`) empties `output_dir`, so every case after it runs against a
+//!   cleaned tree. The corpus order is pinned by `emission_order_is_stable`; do
+//!   not reorder it (see #77). The first case needing a populated `output_dir`
+//!   is `TL-006`, and nothing before it builds one — which is why the sandbox
+//!   is seeded rather than started empty.
 //! - **`--rebuild` is effectively required for a full run.** Without it, cases
 //!   marked `rebuild: true` leave `output_dir` empty and later top-level `-b`
 //!   cases fail with "Nothing to back up" — *false* failures that look like
@@ -44,12 +49,14 @@
 use std::{
     env, fs,
     io::Read,
-    path::PathBuf,
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
     process::{self, Command, Stdio},
     thread,
     time::{Duration, Instant},
 };
 
+use anyhow::Context as _;
 use serde::Deserialize;
 
 const DEFAULT_TEST_TIMEOUT_SECS: u64 = 60;
@@ -80,6 +87,9 @@ OPTIONS:
     --failed         Only run cases expected to fail (key: f).
     --case <id>      Run a single case by case_id (e.g. TL-007).
     --bin <path>     Path to the xtgeoip binary under test.
+    --keep-sandbox   Do not remove the sandbox on exit. Use it to inspect what
+                     a failing case actually wrote; the path is printed at the
+                     start of every run.
     -h, --help       Show this help.
 
 Unrecognised arguments are rejected, not ignored: a typo'd --rebuil would
@@ -88,11 +98,18 @@ otherwise do nothing and surface later as a false \"Nothing to back up\".
 BINARY RESOLUTION:
     --bin <path>, then $XTGEOIP_BIN, then target/release/<program>.
 
+SANDBOX:
+    Cases do not write to production. Each run creates a private temp tree,
+    copies the configured output_dir and archive_dir into it, and appends
+    --config <sandbox>/xtgeoip.conf to every case. Production data is read
+    once to seed the tree and is never written.
+
 REQUIREMENTS (all but the last are checked before the first case runs):
     * root, or passwordless sudo (cases are spawned via sudo)
     * a release build (cargo build --release)
     * run from the repository root
-    * /etc/xtgeoip.conf present
+    * /etc/xtgeoip.conf present, naming directories that hold data to seed
+      the sandbox from — run `sudo xtgeoip run` once on a clean system
     * network access to MaxMind, which is fetch-capped — do not run in a loop.
       Not checked: the only honest probe is a request, and spending part of a
       capped budget to find out whether the budget exists is a poor trade.
@@ -102,7 +119,8 @@ docs/spec/cli.yaml. Case order is significant and is pinned by tests; do not
 reorder the corpus.";
 
 /// Flags that stand alone.
-const BOOL_FLAGS: &[&str] = &["--failed", "--rebuild", "-h", "--help"];
+const BOOL_FLAGS: &[&str] =
+    &["--failed", "--rebuild", "--keep-sandbox", "-h", "--help"];
 
 /// Flags that consume the following argument as their value.
 const VALUE_FLAGS: &[&str] = &["--case", "--bin"];
@@ -305,6 +323,247 @@ fn check_preconditions(binary: &str) -> anyhow::Result<()> {
     );
 }
 
+/// Prefix for the per-run sandbox directory. Also the teardown guard: nothing
+/// without this prefix is ever handed to a root `rm -rf`.
+const SANDBOX_PREFIX: &str = "xtgeoip-tests-";
+
+/// The private tree a run executes against, so no case touches production.
+///
+/// Every case is spawned with `--config <config>` *appended* to its argv.
+/// Placement matters: the top-level parser treats its own options as
+/// conflicting with a subcommand, so `xtgeoip --config X build` is rejected
+/// while `xtgeoip build --config X` is accepted. Appending is also the only
+/// channel that survives the `sudo` each case is spawned through — arguments
+/// pass through unchanged, the environment does not.
+struct Sandbox {
+    root: PathBuf,
+    config: PathBuf,
+    /// Set from `--keep-sandbox`. Read only by `Drop`.
+    keep: bool,
+}
+
+impl Drop for Sandbox {
+    /// Teardown that survives a mid-run failure — the half of #98 that the
+    /// documentation and the preconditions did not cover.
+    ///
+    /// A `?` anywhere in the case loop returns from `main` without reaching
+    /// any cleanup written at the end of it, and that is exactly when the
+    /// tree is largest. `Drop` runs on those paths. It does *not* run on
+    /// `process::exit`, so `main` drops the sandbox explicitly before the
+    /// non-zero exit; that is the one path this impl cannot see.
+    fn drop(&mut self) {
+        if self.keep {
+            println!("Sandbox kept at {}", self.root.display());
+            return;
+        }
+        if let Err(e) = remove_sandbox(&self.root) {
+            eprintln!("warning: sandbox left behind: {e}");
+        }
+    }
+}
+
+/// The production directories the sandbox is seeded from — read out of the
+/// system config before its paths are rewritten, so the suite follows the
+/// configuration rather than hard-coding `/usr/share/xt_geoip`.
+#[derive(Debug)]
+struct SeedSources {
+    archive_dir: PathBuf,
+    output_dir: PathBuf,
+}
+
+/// Read the system config, via `sudo` when this process is not root.
+///
+/// `/etc/xtgeoip.conf` is `0600 root:root`, so a runner started under
+/// passwordless sudo rather than as root cannot read it directly. The
+/// preconditions guarantee one of the two works.
+fn read_system_config() -> anyhow::Result<String> {
+    if let Ok(text) = fs::read_to_string(SYSTEM_CONFIG) {
+        return Ok(text);
+    }
+    // `-n`, not a bare sudo: the preconditions already established that root
+    // or passwordless sudo is available, so a password prompt here would mean
+    // the credential cache expired — and a prompt blocks where an error does
+    // not.
+    let out = Command::new("sudo")
+        .args(["-n", "cat", SYSTEM_CONFIG])
+        .output()?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "could not read {SYSTEM_CONFIG}, directly or via sudo: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8(out.stdout)?)
+}
+
+fn sandbox_path(root: &Path, leaf: &str) -> toml::Value {
+    toml::Value::String(root.join(leaf).display().to_string())
+}
+
+fn configured_dir(paths: &toml::Table, key: &str) -> anyhow::Result<PathBuf> {
+    paths
+        .get(key)
+        .and_then(toml::Value::as_str)
+        .map(PathBuf::from)
+        .with_context(|| format!("system config has no paths.{key}"))
+}
+
+/// Point a copy of the system config at `root`, returning the rewritten TOML
+/// and the production directories it named.
+///
+/// `[maxmind]` is carried across untouched, `[maxmind.credentials]` included:
+/// the remote cases need the same credentials they have always used, and
+/// there is no other place to get them. The copy is written `0600` inside a
+/// `0700` directory, matching the protection of the original. Only the three
+/// keys that decide where bytes land are rewritten.
+///
+/// Comments do not survive the round trip. That is acceptable for a file
+/// which exists for the duration of one run and is then removed.
+fn retarget_config(
+    src: &str,
+    root: &Path,
+) -> anyhow::Result<(String, SeedSources)> {
+    let mut doc: toml::Table =
+        src.parse().context("system config is not valid TOML")?;
+
+    let paths = doc
+        .get_mut("paths")
+        .and_then(toml::Value::as_table_mut)
+        .context("system config has no [paths] table")?;
+
+    let seed = SeedSources {
+        archive_dir: configured_dir(paths, "archive_dir")?,
+        output_dir: configured_dir(paths, "output_dir")?,
+    };
+
+    paths.insert("archive_dir".into(), sandbox_path(root, "archive"));
+    paths.insert("output_dir".into(), sandbox_path(root, "output"));
+
+    doc.entry("logging")
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+        .as_table_mut()
+        .context("[logging] is not a table")?
+        .insert("log_file".into(), sandbox_path(root, "xtgeoip.log"));
+
+    let rendered =
+        toml::to_string(&doc).context("could not render the sandbox config")?;
+    Ok((rendered, seed))
+}
+
+/// Copy one production directory into the sandbox.
+///
+/// The suite has always depended on a populated `output_dir`: `TL-006`
+/// (`xtgeoip -b`) is the sixth case and the first to need one, and no case
+/// before it builds. On a production tree that fixture was left behind by
+/// whatever ran last, which is why the dependency stayed invisible. A fresh
+/// sandbox has to be given it deliberately — turning a silent order
+/// dependency into a checked precondition.
+fn seed_dir(from: &Path, to: &Path, key: &str) -> anyhow::Result<usize> {
+    fs::create_dir_all(to)?;
+    let entries = fs::read_dir(from).with_context(|| {
+        format!("cannot read paths.{key} at {}", from.display())
+    })?;
+
+    let mut copied = 0usize;
+    for entry in entries {
+        let entry = entry?;
+        if entry.file_type()?.is_file() {
+            fs::copy(entry.path(), to.join(entry.file_name()))?;
+            copied += 1;
+        }
+    }
+
+    if copied == 0 {
+        anyhow::bail!(
+            "paths.{key} at {} holds no files — the sandbox is seeded from \
+             the live system, so there has to be something to seed it with. \
+             Run `sudo xtgeoip run` once first.",
+            from.display()
+        );
+    }
+    Ok(copied)
+}
+
+/// Build the sandbox: a `0700` temp tree holding a retargeted config and a
+/// copy of the production fixtures.
+fn create_sandbox(keep: bool) -> anyhow::Result<Sandbox> {
+    let root = tempfile::Builder::new()
+        .prefix(SANDBOX_PREFIX)
+        .tempdir()
+        .context("could not create the sandbox directory")?
+        .keep();
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700))?;
+
+    let (rendered, seed) = retarget_config(&read_system_config()?, &root)?;
+    let config = root.join("xtgeoip.conf");
+    fs::write(&config, rendered)?;
+    fs::set_permissions(&config, fs::Permissions::from_mode(0o600))?;
+
+    let outputs =
+        seed_dir(&seed.output_dir, &root.join("output"), "output_dir")?;
+    let archives =
+        seed_dir(&seed.archive_dir, &root.join("archive"), "archive_dir")?;
+
+    println!(
+        "Sandbox: {} ({outputs} output file(s), {archives} archive(s) seeded)",
+        root.display()
+    );
+    Ok(Sandbox { root, config, keep })
+}
+
+/// Resolve a path for comparison, falling back to the path itself when it
+/// cannot be canonicalised — a sandbox that has already gone is still a
+/// sandbox for the purposes of the name check.
+fn resolved(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Refuse to `rm -rf` anything that is not a sandbox this runner created.
+///
+/// Teardown has to run as root: cases spawned via `sudo` leave root-owned
+/// files behind that a non-root runner cannot unlink. A root `rm -rf` on a
+/// computed path earns a guard — the path must resolve to a direct child of
+/// the temp directory and carry the prefix this runner generates.
+fn sandbox_is_removable(root: &Path) -> anyhow::Result<()> {
+    let tmp = resolved(&env::temp_dir());
+    // `/` has no parent, so the comparison below cannot reject it on its own.
+    let parent = root.parent().map(resolved);
+    if parent.as_deref() != Some(tmp.as_path()) {
+        anyhow::bail!(
+            "refusing to remove {}: not a direct child of {}",
+            root.display(),
+            tmp.display()
+        );
+    }
+
+    let name = root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default();
+    if !name.starts_with(SANDBOX_PREFIX) || name == SANDBOX_PREFIX {
+        anyhow::bail!(
+            "refusing to remove {}: name is not {SANDBOX_PREFIX}*",
+            root.display()
+        );
+    }
+    Ok(())
+}
+
+fn remove_sandbox(root: &Path) -> anyhow::Result<()> {
+    sandbox_is_removable(root)?;
+    // `-n` matters more here than anywhere: this runs from `Drop`, including
+    // while unwinding, and a sudo password prompt there would hang the
+    // process instead of falling into the caller's warning.
+    let status = Command::new("sudo")
+        .args(["-n", "rm", "-rf", "--"])
+        .arg(root)
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("could not remove the sandbox at {}", root.display());
+    }
+    Ok(())
+}
+
 const TESTCASES_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Deserialize)]
@@ -409,6 +668,7 @@ fn main() -> anyhow::Result<()> {
         .position(|a| a == "--case")
         .and_then(|i| argv.get(i + 1))
         .map(String::as_str);
+    let keep_sandbox = argv.iter().any(|a| a == "--keep-sandbox");
     let bin_override = resolve_bin_override(&argv, env::var(BIN_ENV_VAR).ok());
 
     // Before anything is read or spawned: the REQUIREMENTS in HELP used to be
@@ -422,6 +682,13 @@ fn main() -> anyhow::Result<()> {
         println!("No testcases found.");
         return Ok(());
     }
+
+    // After the corpus parses, so a malformed YAML file does not leave a
+    // seeded tree behind, and before the first case, so nothing can reach
+    // production.
+    let sandbox = create_sandbox(keep_sandbox)?;
+    let config_args =
+        ["--config".to_string(), sandbox.config.display().to_string()];
 
     let mut passed = 0usize;
     let mut failed = 0usize;
@@ -476,6 +743,7 @@ fn main() -> anyhow::Result<()> {
         let child = Command::new("sudo")
             .arg(&bin)
             .args(cmd_args)
+            .args(&config_args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
@@ -537,6 +805,7 @@ fn main() -> anyhow::Result<()> {
                 let rebuild_child = Command::new("sudo")
                     .arg(&bin)
                     .arg("build")
+                    .args(&config_args)
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .spawn()?;
@@ -571,6 +840,10 @@ fn main() -> anyhow::Result<()> {
         "Results: {} passed, {} failed, {} timed out, {} skipped",
         passed, failed, timed_out, skipped
     );
+
+    // Explicit, because `process::exit` below does not unwind and so would
+    // skip `Drop` on exactly the runs that had failures to inspect.
+    drop(sandbox);
 
     if failed > 0 || timed_out > 0 {
         process::exit(1);
@@ -933,5 +1206,191 @@ mod tests {
         let unique: std::collections::BTreeSet<&str> =
             ids.iter().copied().collect();
         assert_eq!(unique.len(), ids.len(), "duplicate case_id");
+    }
+    // --- sandbox (#98) ---------------------------------------------------
+
+    /// A system config in the shape the retarget has to cope with: real
+    /// paths, and an encrypted credentials sub-table that must survive.
+    fn system_config() -> String {
+        "[maxmind]\n\
+         url = \"https://download.maxmind.com/geoip/x\"\n\n\
+         [maxmind.credentials]\n\
+         m_cost = 19456\n\
+         t_cost = 2\n\
+         p_cost = 1\n\
+         salt = \"c2FsdA==\"\n\
+         nonce = \"bm9uY2U=\"\n\
+         ciphertext = \"Y2lwaGVy\"\n\n\
+         [paths]\n\
+         archive_dir = \"/var/lib/xt_geoip\"\n\
+         archive_prune = 3\n\
+         output_dir = \"/usr/share/xt_geoip\"\n\n\
+         [logging]\n\
+         log_file = \"/var/log/xtgeoip.log\"\n"
+            .to_string()
+    }
+
+    fn retargeted() -> (toml::Table, SeedSources) {
+        let (text, seed) =
+            retarget_config(&system_config(), Path::new("/tmp/sbx"))
+                .expect("retarget should succeed");
+        (text.parse().expect("output should be valid TOML"), seed)
+    }
+
+    #[test]
+    fn retarget_points_every_writable_path_into_the_sandbox() {
+        let (doc, _) = retargeted();
+        let paths = doc["paths"].as_table().unwrap();
+        assert_eq!(paths["archive_dir"].as_str(), Some("/tmp/sbx/archive"));
+        assert_eq!(paths["output_dir"].as_str(), Some("/tmp/sbx/output"));
+        assert_eq!(
+            doc["logging"]["log_file"].as_str(),
+            Some("/tmp/sbx/xtgeoip.log"),
+            "the log is a write too — leaving it at /var/log would have cases \
+             appending to the production log"
+        );
+    }
+
+    #[test]
+    fn retarget_reports_the_directories_to_seed_from() {
+        let (_, seed) = retargeted();
+        assert_eq!(seed.archive_dir, Path::new("/var/lib/xt_geoip"));
+        assert_eq!(seed.output_dir, Path::new("/usr/share/xt_geoip"));
+    }
+
+    #[test]
+    fn retarget_carries_credentials_across_unchanged() {
+        let (doc, _) = retargeted();
+        let creds = doc["maxmind"]["credentials"].as_table().unwrap();
+        assert_eq!(creds["ciphertext"].as_str(), Some("Y2lwaGVy"));
+        assert_eq!(creds["salt"].as_str(), Some("c2FsdA=="));
+        assert_eq!(creds["m_cost"].as_integer(), Some(19456));
+    }
+
+    #[test]
+    fn retarget_leaves_unrelated_keys_alone() {
+        let (doc, _) = retargeted();
+        assert_eq!(
+            doc["paths"]["archive_prune"].as_integer(),
+            Some(3),
+            "only the three keys that decide where bytes land are rewritten"
+        );
+    }
+
+    #[test]
+    fn retarget_rejects_a_config_with_no_paths_table() {
+        let err = retarget_config(
+            "[maxmind]\nurl = \"https://x/y\"\n",
+            Path::new("/tmp/sbx"),
+        )
+        .expect_err("a config without [paths] cannot be retargeted");
+        assert!(
+            err.to_string().contains("[paths]"),
+            "error should name what is missing: {err}"
+        );
+    }
+
+    #[test]
+    fn retarget_adds_a_logging_table_when_the_config_has_none() {
+        let (text, _) = retarget_config(
+            "[maxmind]\nurl = \"https://x/y\"\n\n[paths]\narchive_dir = \
+             \"/a\"\noutput_dir = \"/o\"\n",
+            Path::new("/tmp/sbx"),
+        )
+        .expect("a config without [logging] is still retargetable");
+        let doc: toml::Table = text.parse().unwrap();
+        assert_eq!(
+            doc["logging"]["log_file"].as_str(),
+            Some("/tmp/sbx/xtgeoip.log")
+        );
+    }
+
+    #[test]
+    fn seeding_copies_every_file_and_reports_the_count() {
+        let from = tempfile::tempdir().unwrap();
+        let to = tempfile::tempdir().unwrap();
+        for name in ["AD.iv4", "AD.iv6", "GB.iv4"] {
+            fs::write(from.path().join(name), b"x").unwrap();
+        }
+        fs::create_dir(from.path().join("subdir")).unwrap();
+
+        let copied =
+            seed_dir(from.path(), &to.path().join("output"), "output_dir")
+                .expect("a populated directory seeds");
+
+        assert_eq!(copied, 3, "directories are not files and are not copied");
+        assert!(to.path().join("output/AD.iv4").exists());
+    }
+
+    /// The failure this converts from silent to loud: on a tree with nothing
+    /// in it, `TL-006` used to be the first sign, six cases in, reported as
+    /// "Nothing to back up".
+    #[test]
+    fn seeding_an_empty_directory_fails_with_the_remedy() {
+        let from = tempfile::tempdir().unwrap();
+        let to = tempfile::tempdir().unwrap();
+
+        let err =
+            seed_dir(from.path(), &to.path().join("output"), "output_dir")
+                .expect_err("an empty source cannot seed a sandbox");
+        let msg = err.to_string();
+        assert!(msg.contains("output_dir"), "name the key: {msg}");
+        assert!(msg.contains("xtgeoip run"), "name the remedy: {msg}");
+    }
+
+    #[test]
+    fn seeding_a_missing_directory_names_the_path() {
+        let to = tempfile::tempdir().unwrap();
+        let err = seed_dir(
+            Path::new("/nonexistent/xt_geoip"),
+            &to.path().join("output"),
+            "archive_dir",
+        )
+        .expect_err("a missing source cannot seed a sandbox");
+        assert!(err.to_string().contains("/nonexistent/xt_geoip"), "{err}");
+    }
+
+    #[test]
+    fn a_generated_sandbox_name_is_removable() {
+        let root = env::temp_dir().join(format!("{SANDBOX_PREFIX}abc123"));
+        assert!(sandbox_is_removable(&root).is_ok());
+    }
+
+    /// The guard exists because teardown runs `rm -rf` as root.
+    #[test]
+    fn removal_refuses_anything_outside_the_temp_directory() {
+        for path in ["/", "/etc", "/usr/share/xt_geoip", "/var/lib/xt_geoip"] {
+            let err = sandbox_is_removable(Path::new(path))
+                .expect_err("{path} must never be removable");
+            assert!(
+                err.to_string().contains("refusing to remove"),
+                "unexpected error for {path}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn removal_refuses_a_temp_path_without_the_prefix() {
+        let err = sandbox_is_removable(&env::temp_dir().join("something-else"))
+            .expect_err("an unrelated temp directory must not be removable");
+        assert!(err.to_string().contains(SANDBOX_PREFIX), "{err}");
+    }
+
+    #[test]
+    fn removal_refuses_the_bare_prefix() {
+        let err = sandbox_is_removable(&env::temp_dir().join(SANDBOX_PREFIX))
+            .expect_err("the prefix alone names no run");
+        assert!(err.to_string().contains("refusing to remove"), "{err}");
+    }
+
+    #[test]
+    fn removal_refuses_a_nested_path_under_a_real_sandbox() {
+        let nested = env::temp_dir()
+            .join(format!("{SANDBOX_PREFIX}abc123"))
+            .join("output");
+        assert!(
+            sandbox_is_removable(&nested).is_err(),
+            "only the sandbox root is removable, not paths inside it"
+        );
     }
 }

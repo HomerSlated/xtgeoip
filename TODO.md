@@ -40,41 +40,65 @@ constraints before implementation begins.
 
 ## OPEN
 
-### #98 residual — the test setup/teardown lifecycle
+### #98 residual — the WAN traffic, and how a stub would reach the child
 
-The last genuinely open ticket from the old file. A known-good initial state,
-and a teardown that survives a mid-run failure. Two of three halves are done
-(documentation 2026-09-01; fail-fast preconditions 2026-09-02) and the
-`restore`-based plan is **rejected** — see DECIDED.
+**The temp-tree redirect is done (2026-09-08).** Each run of `xtgeoip-tests`
+now builds a private sandbox (`create_sandbox`): a `0700` temp tree holding a
+retargeted copy of the system config (`0600`), seeded by copying the
+configured `output_dir` and `archive_dir` into it. `--config <sandbox>` is
+appended to every case *and* to the `--rebuild` spawn, and the tree is removed
+on the way out behind a guard (`sandbox_is_removable`) because teardown runs
+`rm -rf` as root. Production data is read once to seed and never written.
+`--keep-sandbox` retains the tree for inspection. Route (a) of §4.
 
-**Analysed but not implemented**:
-[`docs/design/98-test-isolation.md`](docs/design/98-test-isolation.md). Three
-findings from that analysis:
+Three things were settled by measurement rather than by reading:
 
-- The suite **cannot run on a clean system at all**. `TL-006` (`xtgeoip -b`) is
-  the sixth case and the first needing a populated `output_dir`; nothing before
-  it builds. `--rebuild` cannot repair that either, because `build` is
-  `fetch_mode: local` and needs a CSV archive that is equally absent. So it
-  depends on production state it cannot itself create.
-- Only **10 of 51** cases reach the WAN. 21 are rejected at argument validation,
-  the whole `build` context is `fetch_mode: local`, and `top_level` has no fetch
-  step. The network cost is a property of two contexts, not of the suite.
-- Redirecting `[paths]` to a temp tree removes the root requirement at the
-  *filesystem* level but not at the *program* level — see the root check below.
+- **`SSL_CERT_FILE` does steer the trust store.** reqwest resolves through
+  `rustls-platform-verifier` → `rustls-native-certs`, with no `webpki-roots`
+  anywhere in the tree. Pointed at an empty PEM it fails at *client
+  construction* — "No CA certificates were loaded from the system" — not at
+  request time. Previously read off the dependency's source; now observed.
+- **Appending `--config` perturbs nothing.** All 51 cases were run against the
+  release binary with and without it: every exit code identical. (`C-002`
+  differs only non-root, where bare `conf -s` cannot read `0600` root
+  `/etc/xtgeoip.conf`; under the runner's `sudo` both are 0.)
+- **The suite's implicit fixture is now a checked precondition.** Seeding
+  fails with a named remedy when the configured directories are empty, rather
+  than surfacing at `TL-006` as "Nothing to back up".
 
-**Blocked on one decision (§4 of the note).** Reaching `[paths]` needs the
-binary to read a different config, and `SYSTEM_CONFIG` is hardcoded. Routes:
+**Still open: the ten remote cases still reach MaxMind.** Simulating them
+needs an HTTPS stub, and the stub has an unsolved delivery problem:
 
-| | Route | Status |
+> The stub's CA has to reach the *child* process. The child is spawned through
+> `sudo`, so the environment is reset — `SSL_CERT_FILE` cannot get there, even
+> though it demonstrably works when it does. Arguments and the config file are
+> the only channels that survive, and `xtgeoip` has neither a `--ca-file`
+> argument nor a config key for a trust bundle.
+
+So a stub costs one of:
+
+| | Route | Cost |
 |---|---|---|
-| (a) | `--config PATH` as a `global_options:` entry | **recommended** — an argument passes through `sudo` unchanged; costs one spec entry, does not widen the guard bitmask or regenerate the corpus |
-| (b) | `XTGEOIP_CONFIG` environment variable | **dead unless (d) lands** — `sudo` runs with `env_reset`; inline `VAR=value` needs sudoers `setenv`, `sudo -E` needs the `SETENV` tag, neither default on Debian/Ubuntu |
-| (c) | bind mount over `/etc/xtgeoip.conf` | blocked — `kernel.apparmor_restrict_unprivileged_userns = 1`, so it needs root, which is what we are removing |
-| (d) | make the root check reflect what it guards | separate decision, below |
+| (i) | a `[maxmind] ca_bundle` config key | new production surface, but a real-world one — corporate MITM proxies need exactly this |
+| (ii) | a `--ca-file PATH` global option | new production surface that exists only for testing |
+| (iii) | sudoers `SETENV` for the test user | environment-dependent; the objection that killed route (b) applies again |
+| (iv) | install the test CA into the system trust store | modifies production, which is what #98 exists to stop |
 
-**Verification cost**: the first full run still costs one real `xtgeoip-tests`
-pass against live, rate-capped MaxMind to prove the temp tree behaves as the
-production tree did. Design on paper first.
+(i) is the only one that pays for itself outside the test suite. **Undecided —
+needs a call before any stub work starts.**
+
+**`--config` is rejected before a subcommand.** `xtgeoip --config X build`
+fails with *"the subcommand 'build' cannot be used with '--config <PATH>'"*,
+because the top level treats its own options as conflicting with a subcommand;
+`xtgeoip build --config X` is accepted. The man page calls it a global option,
+so a user will type the rejected form first. Cosmetic, unfixed, recorded here
+so it is not rediscovered.
+
+**Not verified end to end.** `create_sandbox` reads `/etc/xtgeoip.conf` (root
+only) and `remove_sandbox` shells out to `sudo rm -rf`; neither path can run
+without a root password, so both are covered by unit tests over their pure
+seams and by nothing else. The first real `sudo target/release/xtgeoip-tests`
+run is still the proof.
 
 ### `Action::requires_root()` asks the wrong question
 

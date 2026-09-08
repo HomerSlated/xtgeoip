@@ -68,8 +68,12 @@ end to end:
 sudo target/release/xtgeoip-tests   # requires root and a release build
 ```
 
-It needs root, hits the **live, rate-capped** MaxMind API, and writes to the
-real output directories. Do not re-run it casually. Its cases come from
+It needs root and hits the **live, rate-capped** MaxMind API, so do not re-run
+it casually. It no longer writes to the real output directories (#98): each run
+creates a private temp sandbox, seeds it by copying the configured `output_dir`
+and `archive_dir`, and appends `--config <sandbox>/xtgeoip.conf` to every case.
+Production data is read once to seed and never written; `--keep-sandbox` leaves
+the tree behind for inspection. Its cases come from
 `docs/generated/testcases.yaml`, generated from `docs/spec/cli.yaml`, and the
 runner (`src/bin/xtgeoip-tests.rs`) carries hand-maintained corpus-size
 assertions that must be updated when the spec gains or loses a case.
