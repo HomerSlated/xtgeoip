@@ -260,6 +260,25 @@ are ordinary
 keys, so redirecting the configuration redirects everything the program reads
 or writes.
 The path is resolved once, before any configuration is read.
+.TP
+.BI \-\-ca\-file " PATH"
+Verify the MaxMind server against the certificate authorities in
+.IR PATH ,
+a PEM bundle.
+These roots
+.B replace
+the system trust store for the run rather than adding to it: naming a
+certificate authority says which one to trust, and merging would leave the
+system roots live \(em so a wrong path or a stale bundle would not fail, it
+would succeed against a different anchor than the one named.
+Verification is otherwise unchanged: the certificate chain, the host name and
+the validity window are all still checked, against these roots instead of the
+system's.
+The option narrows what is trusted; it never disables a check.
+Intended for an installation behind a TLS\-intercepting proxy, or a private
+mirror presenting a self\-signed certificate.
+An unreadable, malformed or empty bundle is an error, not a silent fall back
+to the system roots.
 '''
 
 execution_order = '''

@@ -66,26 +66,39 @@ Three things were settled by measurement rather than by reading:
   fails with a named remedy when the configured directories are empty, rather
   than surfacing at `TL-006` as "Nothing to back up".
 
-**Still open: the ten remote cases still reach MaxMind.** Simulating them
-needs an HTTPS stub, and the stub has an unsolved delivery problem:
+**The stub is unblocked (2026-09-08).** Simulating the ten remote cases needs
+the stub's CA to reach the *child* process, and `sudo` resets the environment,
+so `SSL_CERT_FILE` cannot get there however well it works elsewhere. Route
+(ii) was chosen: **`--ca-file PATH`**, a documented global option, since
+arguments pass through `sudo` unchanged.
 
-> The stub's CA has to reach the *child* process. The child is spawned through
-> `sudo`, so the environment is reset — `SSL_CERT_FILE` cannot get there, even
-> though it demonstrably works when it does. Arguments and the config file are
-> the only channels that survive, and `xtgeoip` has neither a `--ca-file`
-> argument nor a config key for a trust bundle.
+It replaces the system trust roots for the run (`tls_certs_only`) rather than
+merging with them. Merging would let a wrong path or a stale bundle succeed
+against a different anchor than the one named — the silent-success failure
+mode #98 exists to remove. An unreadable, malformed or empty bundle is an
+error, never a fall back. Verified end to end with `openssl s_server`: a
+private CA verifies a local https server, and with only that CA trusted a real
+public site is refused — which is what proves replacement rather than merge.
 
-So a stub costs one of:
+**Remaining, and it needs a dependency decision.** The stub itself: a TLS
+listener the runner starts, serving the two endpoints `fetch` uses
+(`?suffix=zip` with `Content-Disposition` carrying the version, and
+`?suffix=zip.sha256`). The request/response shaping can be lifted from the
+existing mock server in `src/fetch/tests.rs`; the new part is the TLS front
+and the certificate.
 
 | | Route | Cost |
 |---|---|---|
-| (i) | a `[maxmind] ca_bundle` config key | new production surface, but a real-world one — corporate MITM proxies need exactly this |
-| (ii) | a `--ca-file PATH` global option | new production surface that exists only for testing |
-| (iii) | sudoers `SETENV` for the test user | environment-dependent; the objection that killed route (b) applies again |
-| (iv) | install the test CA into the system trust store | modifies production, which is what #98 exists to stop |
+| (A) | `rcgen` + `rustls` as direct dependencies | two new production dependencies for a test-only binary, in a crate whose deps are audited |
+| (B) | shell out to `openssl` at runtime to make the CA and leaf | no new crates; adds a runtime tool dependency, and `openssl(1)` is present on any machine that can already run this suite |
+| (C) | a committed CA and key fixture | **rejected** — a private key in a public repository, in a repo that has already had to scrub leaked material |
 
-(i) is the only one that pays for itself outside the test suite. **Undecided —
-needs a call before any stub work starts.**
+(B) is the recommendation: the certificate is generated fresh per run into the
+sandbox and dies with it, and the suite already shells out to `sudo`, so a
+subprocess is not a new kind of thing. The TLS listener still needs a server
+implementation, so confirm before starting whether (B) can avoid `rustls`
+entirely — `openssl s_server` can serve a fixed file, which may be enough for
+two static endpoints.
 
 **`--config` is rejected before a subcommand.** `xtgeoip --config X build`
 fails with *"the subcommand 'build' cannot be used with '--config <PATH>'"*,

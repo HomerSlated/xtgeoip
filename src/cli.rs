@@ -98,6 +98,24 @@ pub struct Cli {
     #[arg(long, value_name = "PATH", global = true)]
     pub config: Option<PathBuf>,
 
+    /// Verify the MaxMind server against the CA bundle in PATH
+    ///
+    /// Replaces the system trust roots for this run rather than adding to
+    /// them: naming a CA says which CA to trust, and merging would let a
+    /// wrong or stale bundle succeed against a different anchor than the one
+    /// named. Verification is otherwise unchanged — chain, hostname and
+    /// validity are still checked, against these roots instead of the
+    /// system's. It narrows what is trusted; it never disables a check.
+    ///
+    /// For an installation behind a TLS-intercepting proxy, or against a
+    /// private mirror with a self-signed certificate. It is also what lets
+    /// the integration suite verify a local https stub without touching the
+    /// host's trust configuration, which `SSL_CERT_FILE` cannot do: the
+    /// suite spawns cases via `sudo`, and `sudo` resets the environment
+    /// while passing arguments through unchanged.
+    #[arg(long, value_name = "PATH", global = true)]
+    pub ca_file: Option<PathBuf>,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }

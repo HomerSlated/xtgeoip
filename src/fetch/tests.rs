@@ -229,7 +229,7 @@ fn remote_fetch_sends_basic_auth() {
     let server = MockServer::start(|_| MockReply::new(401));
     let cfg = mock_config(&server.url(), dir.path());
 
-    let _ = fetch(&cfg, FetchMode::Remote, "123456", "test-license-key");
+    let _ = fetch(&cfg, FetchMode::Remote, "123456", "test-license-key", None);
 
     let reqs = server.requests();
     assert!(!reqs.is_empty(), "server saw no request");
@@ -254,8 +254,9 @@ fn non_success_status_is_reported() {
     let server = MockServer::start(|_| MockReply::new(401));
     let cfg = mock_config(&server.url(), dir.path());
 
-    let err = fetch(&cfg, FetchMode::Remote, "123456", "test-license-key")
-        .expect_err("must fail");
+    let err =
+        fetch(&cfg, FetchMode::Remote, "123456", "test-license-key", None)
+            .expect_err("must fail");
     assert!(
         err.to_string().contains("401"),
         "error should name the status: {err}"
@@ -271,7 +272,7 @@ fn rate_limit_is_not_retried() {
     let server = MockServer::start(|_| MockReply::new(429));
     let cfg = mock_config(&server.url(), dir.path());
 
-    let _ = fetch(&cfg, FetchMode::Remote, "123456", "test-license-key");
+    let _ = fetch(&cfg, FetchMode::Remote, "123456", "test-license-key", None);
     assert_eq!(
         server.requests().len(),
         1,
@@ -287,8 +288,9 @@ fn missing_content_disposition_is_rejected() {
     let server = MockServer::start(|_| MockReply::ok("body"));
     let cfg = mock_config(&server.url(), dir.path());
 
-    let err = fetch(&cfg, FetchMode::Remote, "123456", "test-license-key")
-        .expect_err("must fail");
+    let err =
+        fetch(&cfg, FetchMode::Remote, "123456", "test-license-key", None)
+            .expect_err("must fail");
     assert!(
         err.to_string().contains("Content-Disposition"),
         "unhelpful error: {err}"
@@ -314,7 +316,7 @@ fn hostile_content_disposition_is_rejected() {
         let cfg = mock_config(&server.url(), dir.path());
 
         assert!(
-            fetch(&cfg, FetchMode::Remote, "123456", "test-license-key")
+            fetch(&cfg, FetchMode::Remote, "123456", "test-license-key", None)
                 .is_err(),
             "accepted hostile Content-Disposition {hostile:?}"
         );
@@ -348,8 +350,9 @@ fn oversized_checksum_response_is_refused() {
     });
     let cfg = mock_config(&server.url(), dir.path());
 
-    let err = fetch(&cfg, FetchMode::Remote, "123456", "test-license-key")
-        .expect_err("must fail");
+    let err =
+        fetch(&cfg, FetchMode::Remote, "123456", "test-license-key", None)
+            .expect_err("must fail");
     assert!(
         err.to_string().contains("Checksum response exceeded"),
         "unexpected error: {err}"
@@ -380,8 +383,9 @@ fn malformed_checksum_response_is_named_as_such() {
     });
     let cfg = mock_config(&server.url(), dir.path());
 
-    let err = fetch(&cfg, FetchMode::Remote, "123456", "test-license-key")
-        .expect_err("must fail");
+    let err =
+        fetch(&cfg, FetchMode::Remote, "123456", "test-license-key", None)
+            .expect_err("must fail");
     assert!(
         err.to_string().contains("Invalid checksum format"),
         "unexpected error: {err}"
@@ -405,8 +409,9 @@ fn checksum_mismatch_leaves_no_partial_download() {
     });
     let cfg = mock_config(&server.url(), dir.path());
 
-    let err = fetch(&cfg, FetchMode::Remote, "123456", "test-license-key")
-        .expect_err("must fail");
+    let err =
+        fetch(&cfg, FetchMode::Remote, "123456", "test-license-key", None)
+            .expect_err("must fail");
     assert!(
         err.to_string().contains("Checksum verification failed"),
         "unexpected error: {err}"
@@ -438,7 +443,7 @@ fn credentials_are_not_forwarded_across_origin_redirect() {
     });
     let cfg = mock_config(&origin.url(), dir.path());
 
-    let _ = fetch(&cfg, FetchMode::Remote, "123456", "test-license-key");
+    let _ = fetch(&cfg, FetchMode::Remote, "123456", "test-license-key", None);
 
     let followed = target.requests();
     assert_eq!(followed.len(), 1, "redirect was not followed");
@@ -472,7 +477,8 @@ fn redirect_loop_is_bounded() {
 
     let cfg = mock_config(&server.url(), dir.path());
     assert!(
-        fetch(&cfg, FetchMode::Remote, "123456", "test-license-key").is_err(),
+        fetch(&cfg, FetchMode::Remote, "123456", "test-license-key", None)
+            .is_err(),
         "an unbounded redirect chain must fail rather than loop"
     );
     assert!(
@@ -890,4 +896,94 @@ fn blocks_csv_missing_column_bails() {
     )
     .unwrap();
     assert!(validate_blocks_csv(&path).is_err());
+}
+
+// ── --ca-file (#98)
+// ───────────────────────────────────────────────
+
+/// A throwaway self-signed certificate, generated for this test and used
+/// nowhere else. The private key was discarded at creation, so it signs
+/// nothing and is a public blob: what it exercises is that a well-formed PEM
+/// bundle parses and is accepted as a trust root, which needs no key.
+const TEST_CA_PEM: &str = r"-----BEGIN CERTIFICATE-----
+MIIDFzCCAf+gAwIBAgIUQgS55+q0cY0PIxnqd9unJFrn0B8wDQYJKoZIhvcNAQEL
+BQAwGjEYMBYGA1UEAwwPeHRnZW9pcCB0ZXN0IENBMCAXDTI2MDkwODE4NDE0OVoY
+DzIxMjYwODE1MTg0MTQ5WjAaMRgwFgYDVQQDDA94dGdlb2lwIHRlc3QgQ0EwggEi
+MA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDKTVq/dKE66ApvnwYCHzBQ43nK
+hiVhC3/31leW0O2wDGbEULVxry+EPJZRCps9tXB3yF8nyDcyBP1oolrePFkQ5H5K
+ezObinZQavACAqzqZrPk+44dgcJrUUSDw8+Whftuu1A0cU9T0FMsCyFqtcwJHw6p
+SV4dopOyPVCXGVfaCHmcrLsNWt3RbfR9Kl0wZ5WvbB25re2iBQpKoDrpIGBxtYj1
+AmY6MaIjb2ihYRo16EqOd0AFDjKlVVNQmrut/nCIuzZX2zn1QMPJVGQmU67eEJYJ
+arMlmvaCZSMivnW9qA/Z8HAT1qEeTh7W3lFEBdVN/B/ldz3DGEi7AoxBfc63AgMB
+AAGjUzBRMB0GA1UdDgQWBBSVcWH1Pf+V4PnKTs7G4ADoHEph+jAfBgNVHSMEGDAW
+gBSVcWH1Pf+V4PnKTs7G4ADoHEph+jAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3
+DQEBCwUAA4IBAQCWkyTYCWuCeGUwji7f1V9nVaMVSpuXtnaQkCmOZY8OAFXi0lLD
+MhwVabz2s/yuSshDTiGguVz20juia6PXvFNxPp/mx749OOTfL5duoxkdG+JZHTRt
+k7y+v31Qo0Q7NWUtUY3+N0/48drsqxpjXQSepuG/oVIrRe+qbeEQeqSVkU+5hDq9
+E6O3pIyOIwEqe1eRqP6ITdDuguh4lW9atT710zhenl4v5L45gt0MgekcvQxupdzn
+sZQ0iV2Zu3ihz2SwNBie/68rPLNEMj2Xq+sQq99mqd8W8jxhIFXtEAifrnvyqbC8
+MzEzaQqPE+KhWe89zpOyciBnWKDbrEyacYJy
+-----END CERTIFICATE-----
+";
+
+#[test]
+fn a_client_builds_with_no_ca_file_given() {
+    assert!(
+        build_client(None).is_ok(),
+        "the default path must keep working — --ca-file is opt-in"
+    );
+}
+
+#[test]
+fn a_valid_ca_bundle_is_accepted() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ca.pem");
+    fs::write(&path, TEST_CA_PEM).unwrap();
+
+    assert!(
+        build_client(Some(&path)).is_ok(),
+        "a well-formed PEM bundle must build a client"
+    );
+}
+
+#[test]
+fn a_missing_ca_bundle_names_the_path() {
+    let err = build_client(Some(Path::new("/nonexistent/ca.pem")))
+        .expect_err("a missing bundle cannot be trusted");
+    assert!(
+        format!("{err:#}").contains("/nonexistent/ca.pem"),
+        "the error must name the file the operator gave: {err:#}"
+    );
+}
+
+#[test]
+fn a_malformed_ca_bundle_is_rejected_not_ignored() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ca.pem");
+    fs::write(&path, b"this is not a certificate\n").unwrap();
+
+    let err = build_client(Some(&path))
+        .expect_err("junk must not fall back to the system roots");
+    assert!(
+        format!("{err:#}").contains("ca.pem"),
+        "the error must name the file: {err:#}"
+    );
+}
+
+/// The dangerous case: with `--ca-file` given, its contents are the *only*
+/// trust anchors. An empty bundle that silently fell back to the system roots
+/// would verify against anchors the operator did not name — which is the
+/// whole reason this option replaces rather than merges.
+#[test]
+fn an_empty_ca_bundle_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ca.pem");
+    fs::write(&path, b"").unwrap();
+
+    let err = build_client(Some(&path))
+        .expect_err("an empty bundle trusts nothing and must say so");
+    assert!(
+        format!("{err:#}").contains("no certificates"),
+        "the error must explain what is wrong: {err:#}"
+    );
 }

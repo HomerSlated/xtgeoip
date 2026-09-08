@@ -52,6 +52,10 @@ global_options:
     long: config
     kind: path
     summary: Read configuration from PATH instead of /etc/xtgeoip.conf.
+  ca_file:
+    long: ca-file
+    kind: path
+    summary: Verify the MaxMind server against the CA bundle in PATH.
 
 # Options belonging to one subcommand only. Neither part of the guard bitmask
 # (they constrain nothing across commands) nor global, so they are declared

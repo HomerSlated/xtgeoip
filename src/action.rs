@@ -120,7 +120,11 @@ use crate::generated::plan::plan_generated as plan;
 /// `account_id`/`license_key` inside `fetch()`, so this skips the prompt
 /// entirely rather than asking for a passphrase a local-only run has no use
 /// for.
-fn fetch_step(cfg: &Config, mode: FetchMode) -> Result<(TempDir, Version)> {
+fn fetch_step(
+    cfg: &Config,
+    mode: FetchMode,
+    ca_file: Option<&Path>,
+) -> Result<(TempDir, Version)> {
     match mode {
         FetchMode::Remote => {
             let creds = cfg.maxmind.credentials.as_ref().ok_or_else(|| {
@@ -130,9 +134,15 @@ fn fetch_step(cfg: &Config, mode: FetchMode) -> Result<(TempDir, Version)> {
                 )
             })?;
             let decrypted = secrets::decrypt(creds)?;
-            fetch(cfg, mode, decrypted.account_id(), decrypted.license_key())
+            fetch(
+                cfg,
+                mode,
+                decrypted.account_id(),
+                decrypted.license_key(),
+                ca_file,
+            )
         }
-        FetchMode::Local => fetch(cfg, mode, "", ""),
+        FetchMode::Local => fetch(cfg, mode, "", "", ca_file),
     }
 }
 
@@ -140,6 +150,7 @@ fn execute_step(
     cfg: &Config,
     paths: &ResolvedPaths<'_>,
     step: Step,
+    ca_file: Option<&Path>,
 ) -> Result<()> {
     match step {
         Step::Backup { mode } => {
@@ -155,7 +166,7 @@ fn execute_step(
         // Standalone fetch: nothing downstream consumes the result, so the
         // extracted temp dir is dropped here.
         Step::Fetch { mode } => {
-            fetch_step(cfg, mode)?;
+            fetch_step(cfg, mode, ca_file)?;
         }
 
         Step::PruneCsv => {
@@ -176,18 +187,23 @@ fn execute_steps(
     cfg: &Config,
     paths: &ResolvedPaths<'_>,
     steps: Vec<Step>,
+    ca_file: Option<&Path>,
 ) -> Result<()> {
     for step in steps {
-        execute_step(cfg, paths, step)?;
+        execute_step(cfg, paths, step, ca_file)?;
     }
     Ok(())
 }
 
-pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
+pub fn run_action(
+    cfg: &Config,
+    action: Action,
+    ca_file: Option<&Path>,
+) -> Result<()> {
     let paths = resolve_paths(cfg);
 
     match plan(&action) {
-        Plan::Simple(steps) => execute_steps(cfg, &paths, steps)?,
+        Plan::Simple(steps) => execute_steps(cfg, &paths, steps, ca_file)?,
 
         Plan::Pipeline {
             pre,
@@ -195,12 +211,12 @@ pub fn run_action(cfg: &Config, action: Action) -> Result<()> {
             mid,
             legacy,
         } => {
-            execute_steps(cfg, &paths, pre)?;
+            execute_steps(cfg, &paths, pre, ca_file)?;
             // Owned, not an Option: the plan could not have described a build
             // without this fetch, so there is nothing to unwrap.
             let (temp_dir, version): (TempDir, Version) =
-                fetch_step(cfg, mode)?;
-            execute_steps(cfg, &paths, mid)?;
+                fetch_step(cfg, mode, ca_file)?;
+            execute_steps(cfg, &paths, mid, ca_file)?;
             messages::info("Building binary database...");
             build(temp_dir.path(), paths.output, &version, legacy)?;
         }

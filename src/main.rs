@@ -134,7 +134,7 @@ fn run(cli: Cli) -> Result<()> {
             })?;
 
             init_runtime(&cfg)?;
-            run_action(&cfg, action)?;
+            run_action(&cfg, action, cli.ca_file.as_deref())?;
         }
 
         CliOutcome::ShowHelp => {

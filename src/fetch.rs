@@ -10,6 +10,7 @@ use std::{
 use anyhow::{Context, Result, bail};
 use csv::ReaderBuilder;
 use reqwest::{
+    Certificate,
     blocking::Client,
     header::{CONTENT_DISPOSITION, CONTENT_LENGTH},
 };
@@ -51,6 +52,51 @@ pub enum FetchMode {
     Local,
 }
 
+/// Build the HTTP client, optionally trusting a named CA *instead of* the
+/// system roots.
+///
+/// `tls_certs_only` replaces the trust anchors rather than adding to them,
+/// and that is the honest reading of `--ca-file`: an operator naming a CA is
+/// saying which CA to trust for this run. Merging would leave the system
+/// roots live, so a wrong path, a stale bundle or a CA that does not actually
+/// sign the server's certificate would not fail — the request would quietly
+/// succeed against a different anchor than the one named. That is precisely
+/// the failure this option exists to make visible.
+///
+/// Verification itself is untouched: the chain, the hostname and the validity
+/// window are checked exactly as before, against the roots given here. This
+/// narrows what is trusted; it never disables a check.
+fn build_client(ca_file: Option<&Path>) -> Result<Client> {
+    let builder = Client::builder()
+        .user_agent(concat!(
+            env!("CARGO_PKG_NAME"),
+            "/",
+            env!("CARGO_PKG_VERSION")
+        ))
+        .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
+        .redirect(redirect_policy());
+
+    let Some(path) = ca_file else {
+        return Ok(builder.build()?);
+    };
+
+    let pem = fs::read(path).with_context(|| {
+        format!("could not read the CA bundle at {}", path.display())
+    })?;
+    let certs = Certificate::from_pem_bundle(&pem).with_context(|| {
+        format!("{} is not a PEM certificate bundle", path.display())
+    })?;
+    if certs.is_empty() {
+        bail!(
+            "{} holds no certificates — with --ca-file given it is the only \
+             trust anchor, so an empty bundle would trust nothing at all",
+            path.display()
+        );
+    }
+
+    Ok(builder.tls_certs_only(certs).build()?)
+}
+
 /// `account_id`/`license_key` are already-decrypted plaintext, supplied by
 /// the caller — decryption (with its interactive passphrase prompt) is
 /// deliberately not this function's job. See `action.rs`, which calls
@@ -66,6 +112,7 @@ pub fn fetch(
     mode: FetchMode,
     account_id: &str,
     license_key: &str,
+    ca_file: Option<&Path>,
 ) -> Result<(TempDir, Version)> {
     let archive_dir = Path::new(&config.paths.archive_dir);
 
@@ -90,15 +137,7 @@ pub fn fetch(
 
     fs::create_dir_all(archive_dir)?;
 
-    let client = Client::builder()
-        .user_agent(concat!(
-            env!("CARGO_PKG_NAME"),
-            "/",
-            env!("CARGO_PKG_VERSION")
-        ))
-        .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
-        .redirect(redirect_policy())
-        .build()?;
+    let client = build_client(ca_file)?;
 
     messages::info("Checking remote archive version...");
 
