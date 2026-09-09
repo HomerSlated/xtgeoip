@@ -40,7 +40,7 @@ constraints before implementation begins.
 
 ## OPEN
 
-### #98 residual — the WAN traffic, and how a stub would reach the child
+### #98 residual — the WAN traffic, and how a stub would reach the child ✅ CLOSED — sandbox, `--ca-file` and stub all shipped and verified on a real root run (2026-09-09)
 
 **The temp-tree redirect is done (2026-09-08).** Each run of `xtgeoip-tests`
 now builds a private sandbox (`create_sandbox`): a `0700` temp tree holding a
@@ -166,14 +166,21 @@ because the top level treats its own options as conflicting with a subcommand;
 so a user will type the rejected form first. Cosmetic, unfixed, recorded here
 so it is not rediscovered.
 
-**The composition is still unproven.** The stub has now run for real
-(`stub_serves_what_fetch_expects`), but the sandbox has not: `create_sandbox`
-reads `/etc/xtgeoip.conf` (root only) and `remove_sandbox` shells out to
-`sudo rm -rf`, and neither path can run without a root password, so both are
-covered by unit tests over their pure seams and by nothing else. Nor has any
-*case* met the stub — that needs a real run, ten passphrase prompts included.
-The first `sudo target/release/xtgeoip-tests` run is still the proof, and the
-stub-reached check is what will make its result trustworthy.
+**Proven end to end (2026-09-09).** `sudo target/release/xtgeoip-tests
+--rebuild` ran clean: **49 passed, 0 failed, 0 timed out, 2 skipped** (the
+`conf -e`/`-c` prompts), seeding 509 output files and 17 archives, and
+reporting **11 stub requests to 10 remote cases**. Every path that had only
+unit coverage has now executed — `create_sandbox` reading root-only
+`/etc/xtgeoip.conf`, `create_stub`, and `remove_sandbox`'s `sudo -n rm -rf`.
+
+The request count is the load-bearing number, not the pass count. Eleven is
+2 + 9x1: the first remote case downloads and verifies, the nine after it take
+the cached-reuse path. A bypassed stub would have reported 0 and failed the
+run; a version token colliding with a seeded archive would have reported 10.
+
+Verified independently of the runner's own report: no `/tmp/xtgeoip-tests-*`
+survived, no `s_server` was left running, and `archive_dir`, `output_dir` and
+`/var/log/xtgeoip.log` all still carry their pre-run mtimes.
 
 ### `Action::requires_root()` asks the wrong question
 

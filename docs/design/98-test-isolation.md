@@ -365,10 +365,10 @@ reached without a `--offline` flag.
 - **Corpus order.** Nothing here proposes reordering; the pinned order
   (#77) is preserved, and the fixture is established *before* case 1 rather
   than by reordering cases.
-- **Verification.** *(Partly settled.)* The stub itself has run
-  (`stub_serves_what_fetch_expects`, `#[ignore]`d because it spawns a process
-  and binds a port). The sandbox has not: both its privileged paths need a root
-  password. No *case* has met either yet, so the first
-  `sudo target/release/xtgeoip-tests` run remains the proof — but it no longer
-  costs a MaxMind fetch, and the stub-reached check is what makes its result
-  trustworthy rather than merely green.
+- **Verification.** *(Settled 2026-09-09.)* `sudo target/release/xtgeoip-tests
+  --rebuild` ran clean — 49 passed, 0 failed, 2 skipped — seeding 509 output
+  files and 17 archives and serving 11 stub requests to 10 remote cases, with
+  zero WAN contact. The temp tree behaves as the production tree did, which is
+  what this section asked for, and it cost no MaxMind fetch to establish.
+  Production `archive_dir`, `output_dir` and `/var/log/xtgeoip.log` were
+  confirmed unmodified afterwards, and the sandbox was removed.
