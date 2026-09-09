@@ -24,8 +24,16 @@
 //!   marked `rebuild: true` leave `output_dir` empty and later top-level `-b`
 //!   cases fail with "Nothing to back up" — *false* failures that look like
 //!   regressions. Omitting it has already cost one debugging session.
-//! - **It hits the live MaxMind API** and is subject to their fetch cap. Do not
-//!   run it casually or in a loop.
+//! - **It no longer reaches MaxMind (#98).** A local HTTPS stub (`openssl
+//!   s_server`) serves the two endpoints `fetch` uses, replaying the newest
+//!   seeded archive under a synthetic version. Each case is given the stub's CA
+//!   via `--ca-file`, which *replaces* its trust roots, so a case that somehow
+//!   addressed the real API would fail to verify it rather than quietly
+//!   succeed. The run fails if the stub is never reached.
+//! - **It still prompts for the credentials passphrase**, once per remote case.
+//!   `secrets::decrypt` reads from the terminal by design (#103) and the runner
+//!   deliberately does not route around it. The stub removes the WAN traffic
+//!   and the rate cap, not the prompts.
 //! - **Run from the repository root**, which is where the default binary path
 //!   and `docs/generated/testcases.yaml` resolve from.
 //!
@@ -49,6 +57,7 @@
 use std::{
     env, fs,
     io::Read,
+    net::TcpListener,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{self, Command, Stdio},
@@ -58,6 +67,7 @@ use std::{
 
 use anyhow::Context as _;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 const DEFAULT_TEST_TIMEOUT_SECS: u64 = 60;
 
@@ -104,15 +114,26 @@ SANDBOX:
     --config <sandbox>/xtgeoip.conf to every case. Production data is read
     once to seed the tree and is never written.
 
-REQUIREMENTS (all but the last are checked before the first case runs):
+STUB:
+    Cases do not reach MaxMind either. Each run starts a local HTTPS stub
+    (openssl s_server) serving the two endpoints fetch uses, replaying the
+    newest seeded archive under a synthetic version, and appends
+    --ca-file <sandbox>/stub/ca.pem to every case. That CA replaces the
+    trust roots for the case, so one that somehow addressed the real API
+    would fail to verify it rather than quietly succeed. A run whose remote
+    cases never reach the stub is reported as a failure.
+
+    The stub does not remove the credentials passphrase prompt: the ten
+    remote cases each prompt once, because secrets::decrypt reads from the
+    terminal by design (#103) and this runner does not route around it.
+
+REQUIREMENTS (all checked before the first case runs):
     * root, or passwordless sudo (cases are spawned via sudo)
     * a release build (cargo build --release)
     * run from the repository root
+    * openssl(1) on PATH (the stub is `openssl s_server`)
     * /etc/xtgeoip.conf present, naming directories that hold data to seed
       the sandbox from — run `sudo xtgeoip run` once on a clean system
-    * network access to MaxMind, which is fetch-capped — do not run in a loop.
-      Not checked: the only honest probe is a request, and spending part of a
-      capped budget to find out whether the budget exists is a poor trade.
 
 Cases are generated into docs/generated/testcases.yaml by xtgeoip-docgen from
 docs/spec/cli.yaml. Case order is significant and is pinned by tests; do not
@@ -221,6 +242,9 @@ struct Preconditions {
     binary: PathBuf,
     system_config: PathBuf,
     privileged: bool,
+    /// `openssl(1)` on `PATH`. The stub is `openssl s_server`, so without it
+    /// every remote case fails at TLS with nothing pointing at the cause.
+    openssl: bool,
 }
 
 /// Everything wrong with the environment — not just the first thing.
@@ -231,9 +255,9 @@ struct Preconditions {
 /// about the runner, and the real cause sat in whichever line scrolled past
 /// first. Collecting all failures means one round of fixing rather than four.
 ///
-/// Network reachability to MaxMind is deliberately *not* checked: the only
-/// honest probe is a request, and the API is rate-capped — spending part of
-/// the budget to discover whether the budget exists is the wrong trade.
+/// Network reachability is deliberately *not* checked, and since #98 there is
+/// nothing to check: the remote cases are served by a local stub, and whether
+/// that stub came up is established by starting it, not by probing for it.
 fn precondition_failures(p: &Preconditions) -> Vec<String> {
     let mut problems = Vec::new();
 
@@ -260,6 +284,15 @@ fn precondition_failures(p: &Preconditions) -> Vec<String> {
             "not running as root and `sudo -n true` failed — every case is \
              spawned via sudo, so all of them would fail on the password \
              prompt"
+                .to_string(),
+        );
+    }
+
+    if !p.openssl {
+        problems.push(
+            "openssl(1) not found on PATH — the HTTPS stub that stands in for \
+             the MaxMind API is `openssl s_server`, so every remote case \
+             would fail at TLS"
                 .to_string(),
         );
     }
@@ -307,6 +340,7 @@ fn check_preconditions(binary: &str) -> anyhow::Result<()> {
         binary: PathBuf::from(binary),
         system_config: PathBuf::from(SYSTEM_CONFIG),
         privileged: is_root() || sudo_is_passwordless(),
+        openssl: openssl_is_available(),
     });
 
     if problems.is_empty() {
@@ -321,6 +355,17 @@ fn check_preconditions(binary: &str) -> anyhow::Result<()> {
             .collect::<Vec<_>>()
             .join("\n")
     );
+}
+
+/// Is `openssl(1)` on `PATH`? Asked with `-v`, which every version answers
+/// without touching the filesystem or the network.
+fn openssl_is_available() -> bool {
+    Command::new("openssl")
+        .arg("version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 /// Prefix for the per-run sandbox directory. Also the teardown guard: nothing
@@ -411,17 +456,22 @@ fn configured_dir(paths: &toml::Table, key: &str) -> anyhow::Result<PathBuf> {
 /// Point a copy of the system config at `root`, returning the rewritten TOML
 /// and the production directories it named.
 ///
-/// `[maxmind]` is carried across untouched, `[maxmind.credentials]` included:
-/// the remote cases need the same credentials they have always used, and
-/// there is no other place to get them. The copy is written `0600` inside a
-/// `0700` directory, matching the protection of the original. Only the three
-/// keys that decide where bytes land are rewritten.
+/// `[maxmind.credentials]` is carried across untouched: the remote cases need
+/// the same credentials they have always used, and there is no other place to
+/// get them. The runner deliberately does not mint its own — `secrets::encrypt`
+/// is a double-entry prompt, so that would turn ten passphrase prompts into
+/// twelve rather than none. `maxmind.url` *is* rewritten, to the local stub.
+///
+/// The copy is written `0600` inside a `0700` directory, matching the
+/// protection of the original. Only the four keys that decide where bytes come
+/// from and land are rewritten.
 ///
 /// Comments do not survive the round trip. That is acceptable for a file
 /// which exists for the duration of one run and is then removed.
 fn retarget_config(
     src: &str,
     root: &Path,
+    stub_url: &str,
 ) -> anyhow::Result<(String, SeedSources)> {
     let mut doc: toml::Table =
         src.parse().context("system config is not valid TOML")?;
@@ -438,6 +488,11 @@ fn retarget_config(
 
     paths.insert("archive_dir".into(), sandbox_path(root, "archive"));
     paths.insert("output_dir".into(), sandbox_path(root, "output"));
+
+    doc.get_mut("maxmind")
+        .and_then(toml::Value::as_table_mut)
+        .context("system config has no [maxmind] table")?
+        .insert("url".into(), toml::Value::String(stub_url.to_owned()));
 
     doc.entry("logging")
         .or_insert_with(|| toml::Value::Table(toml::Table::new()))
@@ -486,7 +541,7 @@ fn seed_dir(from: &Path, to: &Path, key: &str) -> anyhow::Result<usize> {
 
 /// Build the sandbox: a `0700` temp tree holding a retargeted config and a
 /// copy of the production fixtures.
-fn create_sandbox(keep: bool) -> anyhow::Result<Sandbox> {
+fn create_sandbox(keep: bool, stub_url: &str) -> anyhow::Result<Sandbox> {
     let root = tempfile::Builder::new()
         .prefix(SANDBOX_PREFIX)
         .tempdir()
@@ -494,7 +549,8 @@ fn create_sandbox(keep: bool) -> anyhow::Result<Sandbox> {
         .keep();
     fs::set_permissions(&root, fs::Permissions::from_mode(0o700))?;
 
-    let (rendered, seed) = retarget_config(&read_system_config()?, &root)?;
+    let (rendered, seed) =
+        retarget_config(&read_system_config()?, &root, stub_url)?;
     let config = root.join("xtgeoip.conf");
     fs::write(&config, rendered)?;
     fs::set_permissions(&config, fs::Permissions::from_mode(0o600))?;
@@ -562,6 +618,378 @@ fn remove_sandbox(root: &Path) -> anyhow::Result<()> {
         anyhow::bail!("could not remove the sandbox at {}", root.display());
     }
     Ok(())
+}
+
+/// The path component the stub serves both endpoints from.
+///
+/// One flat segment, so `s_server`'s document root needs no subdirectories.
+const STUB_ENDPOINT: &str = "download";
+
+/// The version the stub advertises in `Content-Disposition`.
+///
+/// `Version` is an opaque token — the segment after the last `_`, up to the
+/// first `.` — ordered lexicographically, so this sorts above every real
+/// `YYYYMMDD` release and cannot be mistaken for one. It is deliberately
+/// *absent* from the seeded `archive_dir`: `fetch` reuses a cached archive
+/// only when the `.zip` and its `.sha256` both already exist and verify, so an
+/// unknown version is what drives the first remote case down the full
+/// download-and-verify path instead of the cached-reuse short circuit.
+const STUB_VERSION: &str = "99999999-stub";
+
+/// How long to wait for the stub to start listening.
+const STUB_READY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The local HTTPS stub that stands in for the live MaxMind API (#98).
+///
+/// `openssl s_server -HTTP` is the whole server. The two endpoints `fetch`
+/// uses are static, so nothing has to be programmable, and no crate enters the
+/// dependency tree for a binary that never ships. Three measured properties
+/// make it work:
+///
+/// - `-HTTP` does no URL parsing. `GET /download?suffix=zip` is mapped onto the
+///   literal path `./download?suffix=zip`, and `?` is a legal byte in a POSIX
+///   filename — so the query string survives as part of the name.
+/// - In `-HTTP` mode, unlike `-WWW`, each file supplies its own status line and
+///   headers verbatim. That is what puts `Content-Disposition` — the only place
+///   `resolve_version` looks — under this runner's control.
+/// - Without `-quiet`, `s_server` logs one `FILE:` marker per request served.
+///   That log is the only evidence a run has that the stub was reached at all.
+///
+/// The CA reaches each case through `--ca-file`, not `SSL_CERT_FILE`: cases
+/// are spawned via `sudo`, which passes arguments through unchanged and resets
+/// the environment.
+#[derive(Debug)]
+struct Stub {
+    /// Passed to every case as `--ca-file`. It *replaces* the system trust
+    /// roots for that process rather than adding to them, so a case that
+    /// somehow addressed the real API would fail to verify it — the
+    /// silent-success failure mode #98 exists to remove.
+    ca_file: PathBuf,
+    /// `s_server`'s own output, one `FILE:` marker per request served.
+    log: PathBuf,
+    child: process::Child,
+}
+
+impl Drop for Stub {
+    /// Reap the server. `main` binds the stub *after* the sandbox, so it drops
+    /// first: the log and the certificates live inside the tree the sandbox is
+    /// about to remove.
+    ///
+    /// Like `Sandbox`, this does not run on `process::exit`, so `main` drops
+    /// the stub explicitly before the non-zero exit.
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// Reserve a port by binding it and immediately letting it go.
+///
+/// `s_server` cannot report the port it was given, and the number has to be
+/// known *before* it starts because the sandbox config is written with it.
+/// The gap between releasing this socket and `s_server` binding it is a race
+/// no single-process design can close; losing it surfaces as the readiness
+/// probe timing out against a named address, not as ten confusing TLS
+/// failures later.
+fn reserve_port() -> anyhow::Result<u16> {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .context("could not reserve a port for the stub")?;
+    Ok(listener.local_addr()?.port())
+}
+
+/// Run `openssl` once, naming what it was for when it fails.
+fn openssl(args: &[&str], what: &str) -> anyhow::Result<()> {
+    let out = Command::new("openssl")
+        .args(args)
+        .output()
+        .with_context(|| format!("could not run openssl to {what}"))?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "openssl could not {what}: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
+/// Generate a throwaway CA and a leaf certificate for `127.0.0.1` into `dir`,
+/// returning the path to the CA every case will be told to trust.
+///
+/// Both keys are created fresh per run inside the `0700` sandbox and die with
+/// it. Nothing is committed and nothing is reused: a certificate fixture in
+/// this repository would mean a private key in a public repository, which was
+/// rejected outright, and a key that outlives a run is a key that can be
+/// replayed against the next one.
+fn generate_stub_certs(dir: &Path) -> anyhow::Result<PathBuf> {
+    fs::create_dir_all(dir)?;
+    fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
+
+    let ca_key = dir.join("ca.key").display().to_string();
+    let ca_pem = dir.join("ca.pem").display().to_string();
+    let leaf_key = dir.join("leaf.key").display().to_string();
+    let leaf_csr = dir.join("leaf.csr").display().to_string();
+    let leaf_pem = dir.join("leaf.pem").display().to_string();
+    let leaf_ext = dir.join("leaf.ext");
+
+    openssl(
+        &[
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            &ca_key,
+            "-out",
+            &ca_pem,
+            "-days",
+            "1",
+            "-subj",
+            "/CN=xtgeoip-tests stub CA",
+            "-addext",
+            "basicConstraints=critical,CA:TRUE",
+        ],
+        "create the stub CA",
+    )?;
+
+    openssl(
+        &[
+            "req",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            &leaf_key,
+            "-out",
+            &leaf_csr,
+            "-subj",
+            "/CN=127.0.0.1",
+        ],
+        "create the stub server key",
+    )?;
+
+    // An IP SAN, not a DNS name: `maxmind.url` is rewritten to a literal
+    // 127.0.0.1, and rustls matches the address against `subjectAltName`.
+    fs::write(
+        &leaf_ext,
+        "subjectAltName=IP:127.0.0.1\nbasicConstraints=CA:FALSE\n",
+    )?;
+
+    openssl(
+        &[
+            "x509",
+            "-req",
+            "-in",
+            &leaf_csr,
+            "-CA",
+            &ca_pem,
+            "-CAkey",
+            &ca_key,
+            "-CAcreateserial",
+            "-out",
+            &leaf_pem,
+            "-days",
+            "1",
+            "-extfile",
+            &leaf_ext.display().to_string(),
+        ],
+        "sign the stub server certificate",
+    )?;
+
+    Ok(dir.join("ca.pem"))
+}
+
+/// The newest CSV archive in the seeded tree — the bytes the stub replays.
+///
+/// Matches what `find_latest_local_csv_archive` looks for, and orders the same
+/// way `Version` does: lexicographically on the token.
+fn newest_csv_archive(dir: &Path) -> anyhow::Result<PathBuf> {
+    let mut best: Option<(String, PathBuf)> = None;
+    for entry in fs::read_dir(dir)
+        .with_context(|| format!("cannot read {}", dir.display()))?
+    {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with("GeoLite2-Country-CSV_") || !name.ends_with(".zip")
+        {
+            continue;
+        }
+        if best.as_ref().is_none_or(|(b, _)| name > *b) {
+            best = Some((name, entry.path()));
+        }
+    }
+    best.map(|(_, p)| p).with_context(|| {
+        format!(
+            "no GeoLite2-Country-CSV_*.zip in {} for the stub to serve — it \
+             replays a real archive rather than fabricating one. Run `sudo \
+             xtgeoip run` once first.",
+            dir.display()
+        )
+    })
+}
+
+/// Write the two static responses `fetch` asks for.
+///
+/// Each file carries its own status line and headers, because that is what
+/// `-HTTP` mode serves verbatim. The archive body is a seeded archive copied
+/// byte for byte and the digest is computed over exactly those bytes, so the
+/// only synthetic thing in the pair is the version in `Content-Disposition`.
+/// `fetch` takes the digest from the first whitespace-separated field, so the
+/// trailing filename is decoration.
+fn write_stub_responses(www: &Path, archive: &Path) -> anyhow::Result<()> {
+    fs::create_dir_all(www)?;
+    let body = fs::read(archive)
+        .with_context(|| format!("could not read {}", archive.display()))?;
+    let name = format!("GeoLite2-Country-CSV_{STUB_VERSION}.zip");
+
+    let mut zip = format!(
+        "HTTP/1.0 200 OK\r\nContent-Type: \
+         application/zip\r\nContent-Disposition: attachment; \
+         filename={name}\r\nContent-Length: {}\r\n\r\n",
+        body.len()
+    )
+    .into_bytes();
+    zip.extend_from_slice(&body);
+    fs::write(www.join(format!("{STUB_ENDPOINT}?suffix=zip")), zip)?;
+
+    let digest = format!("{:x}", Sha256::digest(&body));
+    let sha_body = format!("{digest}  {name}\n");
+    fs::write(
+        www.join(format!("{STUB_ENDPOINT}?suffix=zip.sha256")),
+        format!(
+            "HTTP/1.0 200 OK\r\nContent-Type: text/plain\r\nContent-Length: \
+             {}\r\n\r\n{sha_body}",
+            sha_body.len()
+        ),
+    )?;
+    Ok(())
+}
+
+/// Wait for the stub to start listening, or say why it never did.
+///
+/// Waits on `s_server`'s own `ACCEPT` marker, which it prints once when the
+/// listening socket is up and never when the bind failed. A TCP connect was
+/// the obvious probe and is the wrong one: it proves *something* holds the
+/// port, not that this child does. Since the port is reserved and released
+/// before `s_server` is spawned, something else can hold it — and then a
+/// connect-based probe returns success against a stranger and every remote
+/// case fails later with a TLS error pointing nowhere. That regression is
+/// pinned by `a_stub_that_cannot_bind_fails_instead_of_hanging`.
+///
+/// The `try_wait` turns "openssl refused its own arguments" into an immediate
+/// named error rather than a wait for a deadline that cannot be met.
+fn wait_for_stub(
+    port: u16,
+    child: &mut process::Child,
+    log: &Path,
+) -> anyhow::Result<()> {
+    let deadline = Instant::now() + STUB_READY_TIMEOUT;
+    loop {
+        if fs::read_to_string(log).is_ok_and(|s| s.contains("ACCEPT")) {
+            return Ok(());
+        }
+        if let Some(status) = child.try_wait()? {
+            anyhow::bail!(
+                "the stub server exited immediately ({status}); {} says:\n{}",
+                log.display(),
+                fs::read_to_string(log).unwrap_or_default().trim()
+            );
+        }
+        if Instant::now() >= deadline {
+            anyhow::bail!(
+                "the stub server was not listening on 127.0.0.1:{port} within \
+                 {}s; {} says:\n{}",
+                STUB_READY_TIMEOUT.as_secs(),
+                log.display(),
+                fs::read_to_string(log).unwrap_or_default().trim()
+            );
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// How many requests the stub served, counted from `s_server`'s own output.
+///
+/// The corpus asserts only exit statuses, so a stub that is never reached
+/// still passes every case: a missed URL rewrite, an unthreaded `--ca-file`,
+/// or a cached-reuse short circuit would all look green. This count is the
+/// only counter-evidence a run has.
+///
+/// Counts the marker anywhere rather than at line start — `s_server` writes
+/// its exit statistics into the same stream, and they are not newline-aligned
+/// with the request log.
+fn stub_requests_served(log: &Path) -> usize {
+    fs::read_to_string(log)
+        .map(|s| s.matches("FILE:").count())
+        .unwrap_or(0)
+}
+
+/// Start the stub inside `root`, serving a replay of the newest seeded
+/// archive on `port`.
+///
+/// `url` is what the sandbox config was already written with — passed in
+/// rather than rebuilt here so the address the cases are pointed at and the
+/// address this reports cannot drift apart.
+fn create_stub(root: &Path, port: u16, url: &str) -> anyhow::Result<Stub> {
+    let dir = root.join("stub");
+    let www = dir.join("www");
+    let ca_file = generate_stub_certs(&dir)?;
+    write_stub_responses(&www, &newest_csv_archive(&root.join("archive"))?)?;
+
+    let log = dir.join("s_server.log");
+    let handle = fs::File::create(&log).with_context(|| {
+        format!("could not create the stub log at {}", log.display())
+    })?;
+
+    // No `-quiet`: the request log is the run's proof that the stub was hit.
+    // `current_dir` matters — `-HTTP` resolves the document root against the
+    // server's own working directory, not against anything on the command
+    // line. Null stdin so the child cannot compete with the cases for the
+    // terminal they read passphrases from.
+    let child = Command::new("openssl")
+        .args([
+            "s_server",
+            "-accept",
+            &format!("127.0.0.1:{port}"),
+            "-cert",
+            &dir.join("leaf.pem").display().to_string(),
+            "-key",
+            &dir.join("leaf.key").display().to_string(),
+            "-HTTP",
+        ])
+        .current_dir(&www)
+        .stdin(Stdio::null())
+        .stdout(handle.try_clone()?)
+        .stderr(handle)
+        .spawn()
+        .context(
+            "could not start `openssl s_server` — openssl(1) must be on PATH",
+        )?;
+
+    // Built *before* the readiness probe, not after: `process::Child` has no
+    // killing `Drop` of its own, so a probe that bails — the timeout, or a
+    // failed `try_wait` — would otherwise leave a live `s_server` holding the
+    // port with no handle left to reap it. Owning it here means every `?`
+    // below runs this type's `Drop` instead.
+    let mut stub = Stub {
+        ca_file,
+        log,
+        child,
+    };
+    wait_for_stub(port, &mut stub.child, &stub.log)?;
+
+    println!("Stub: {url} (version {STUB_VERSION})");
+    Ok(stub)
+}
+
+/// True for the cases that actually reach the network.
+///
+/// Derived from the corpus rather than listed by id, so it cannot drift when
+/// the spec gains a case. `fetch` and `run` are the only subcommands that plan
+/// a remote fetch — `build` plans `FetchMode::Local` — and the `key: f` ones
+/// among them fail argument validation before any I/O.
+fn is_remote_case(tc: &Testcase) -> bool {
+    tc.key == "p" && tc.cmd.get(1).is_some_and(|s| s == "fetch" || s == "run")
 }
 
 const TESTCASES_SCHEMA_VERSION: u32 = 1;
@@ -686,9 +1114,28 @@ fn main() -> anyhow::Result<()> {
     // After the corpus parses, so a malformed YAML file does not leave a
     // seeded tree behind, and before the first case, so nothing can reach
     // production.
-    let sandbox = create_sandbox(keep_sandbox)?;
-    let config_args =
-        ["--config".to_string(), sandbox.config.display().to_string()];
+    //
+    // The port is reserved before the sandbox because the config is written
+    // with the stub's URL in it, and the stub is bound after the sandbox so
+    // that it drops first — its certificates and log live inside that tree.
+    let port = reserve_port()?;
+    let stub_url = format!("https://127.0.0.1:{port}/{STUB_ENDPOINT}");
+    let sandbox = create_sandbox(keep_sandbox, &stub_url)?;
+    let stub = create_stub(&sandbox.root, port, &stub_url)?;
+
+    // Both are appended, never prepended: the top-level parser rejects its own
+    // options before a subcommand, and appending is the only channel that
+    // survives the `sudo` each case is spawned through.
+    let common_args = [
+        "--config".to_string(),
+        sandbox.config.display().to_string(),
+        "--ca-file".to_string(),
+        stub.ca_file.display().to_string(),
+    ];
+
+    // Counted so the stub check below can tell "never reached" from "never
+    // asked" — a `--case TL-001` run reaches the stub zero times correctly.
+    let mut remote_executed = 0usize;
 
     let mut passed = 0usize;
     let mut failed = 0usize;
@@ -740,10 +1187,14 @@ fn main() -> anyhow::Result<()> {
             tc.timeout_secs.unwrap_or(DEFAULT_TEST_TIMEOUT_SECS),
         );
 
+        if is_remote_case(tc) {
+            remote_executed += 1;
+        }
+
         let child = Command::new("sudo")
             .arg(&bin)
             .args(cmd_args)
-            .args(&config_args)
+            .args(&common_args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
@@ -805,7 +1256,7 @@ fn main() -> anyhow::Result<()> {
                 let rebuild_child = Command::new("sudo")
                     .arg(&bin)
                     .arg("build")
-                    .args(&config_args)
+                    .args(&common_args)
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .spawn()?;
@@ -835,17 +1286,39 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    let served = stub_requests_served(&stub.log);
+
     println!();
     println!(
         "Results: {} passed, {} failed, {} timed out, {} skipped",
         passed, failed, timed_out, skipped
     );
+    println!(
+        "Stub served {served} request(s) to {remote_executed} remote case(s)."
+    );
+
+    // The corpus asserts exit statuses only, so every remote case can pass
+    // without the stub ever being addressed — which would mean they reached
+    // the live API instead, and #98 would be silently undone. Reported as a
+    // failure rather than a bail so the results above are not lost.
+    let unreached = remote_executed > 0 && served == 0;
+    if unreached {
+        eprintln!(
+            "\nerror: {remote_executed} remote case(s) ran but the stub \
+             served nothing.\nThey did not reach it, so they were either \
+             failing before the fetch or talking to something else. Check \
+             maxmind.url in {} and the --ca-file argument.",
+            sandbox.config.display()
+        );
+    }
 
     // Explicit, because `process::exit` below does not unwind and so would
-    // skip `Drop` on exactly the runs that had failures to inspect.
+    // skip `Drop` on exactly the runs that had failures to inspect. The stub
+    // goes first: its files live inside the tree the sandbox removes.
+    drop(stub);
     drop(sandbox);
 
-    if failed > 0 || timed_out > 0 {
+    if failed > 0 || timed_out > 0 || unreached {
         process::exit(1);
     }
 
@@ -875,6 +1348,7 @@ mod tests {
             binary,
             system_config: config,
             privileged: true,
+            openssl: true,
         }
     }
 
@@ -894,8 +1368,9 @@ mod tests {
             binary: dir.path().join("absent-binary"),
             system_config: dir.path().join("absent.conf"),
             privileged: false,
+            openssl: false,
         };
-        assert_eq!(precondition_failures(&p).len(), 4);
+        assert_eq!(precondition_failures(&p).len(), 5);
     }
 
     /// Each failure must name its own remedy — the reason this exists at all
@@ -922,6 +1397,13 @@ mod tests {
         assert!(
             precondition_failures(&p)[0].contains("xtgeoip.conf.example"),
             "the config failure should point at the shipped example"
+        );
+
+        let mut p = all_met(dir.path());
+        p.openssl = false;
+        assert!(
+            precondition_failures(&p)[0].contains("openssl"),
+            "the stub is openssl s_server; the failure must say so"
         );
     }
 
@@ -1209,6 +1691,10 @@ mod tests {
     }
     // --- sandbox (#98) ---------------------------------------------------
 
+    /// Stands in for the address the stub is reached at. The port is
+    /// irrelevant to the rewrite; only that it replaces the production URL.
+    const STUB_URL: &str = "https://127.0.0.1:1/download";
+
     /// A system config in the shape the retarget has to cope with: real
     /// paths, and an encrypted credentials sub-table that must survive.
     fn system_config() -> String {
@@ -1232,7 +1718,7 @@ mod tests {
 
     fn retargeted() -> (toml::Table, SeedSources) {
         let (text, seed) =
-            retarget_config(&system_config(), Path::new("/tmp/sbx"))
+            retarget_config(&system_config(), Path::new("/tmp/sbx"), STUB_URL)
                 .expect("retarget should succeed");
         (text.parse().expect("output should be valid TOML"), seed)
     }
@@ -1273,7 +1759,8 @@ mod tests {
         assert_eq!(
             doc["paths"]["archive_prune"].as_integer(),
             Some(3),
-            "only the three keys that decide where bytes land are rewritten"
+            "only the four keys that decide where bytes come from and land \
+             are rewritten"
         );
     }
 
@@ -1282,6 +1769,7 @@ mod tests {
         let err = retarget_config(
             "[maxmind]\nurl = \"https://x/y\"\n",
             Path::new("/tmp/sbx"),
+            STUB_URL,
         )
         .expect_err("a config without [paths] cannot be retargeted");
         assert!(
@@ -1296,12 +1784,347 @@ mod tests {
             "[maxmind]\nurl = \"https://x/y\"\n\n[paths]\narchive_dir = \
              \"/a\"\noutput_dir = \"/o\"\n",
             Path::new("/tmp/sbx"),
+            STUB_URL,
         )
         .expect("a config without [logging] is still retargetable");
         let doc: toml::Table = text.parse().unwrap();
         assert_eq!(
             doc["logging"]["log_file"].as_str(),
             Some("/tmp/sbx/xtgeoip.log")
+        );
+    }
+
+    #[test]
+    fn retarget_points_the_maxmind_url_at_the_stub() {
+        let (doc, _) = retargeted();
+        assert_eq!(
+            doc["maxmind"]["url"].as_str(),
+            Some(STUB_URL),
+            "leaving the production URL in place is the whole failure this \
+             change exists to prevent — the cases would reach the live API"
+        );
+    }
+
+    #[test]
+    fn retarget_rejects_a_config_with_no_maxmind_table() {
+        let err = retarget_config(
+            "[paths]\narchive_dir = \"/a\"\noutput_dir = \"/o\"\n",
+            Path::new("/tmp/sbx"),
+            STUB_URL,
+        )
+        .expect_err("there is nowhere to put the stub URL");
+        assert!(
+            err.to_string().contains("[maxmind]"),
+            "error should name what is missing: {err}"
+        );
+    }
+
+    // ── the stub (#98) ───────────────────────────────────────────────────
+
+    fn csv_archive_dir(names: &[&str]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        for name in names {
+            fs::write(dir.path().join(name), b"body").unwrap();
+        }
+        dir
+    }
+
+    #[test]
+    fn the_newest_archive_is_the_one_served() {
+        let dir = csv_archive_dir(&[
+            "GeoLite2-Country-CSV_20260605.zip",
+            "GeoLite2-Country-CSV_20260901.zip",
+            "GeoLite2-Country-CSV_20260714.zip",
+        ]);
+        let picked = newest_csv_archive(dir.path()).expect("one must win");
+        assert_eq!(
+            picked.file_name().unwrap(),
+            "GeoLite2-Country-CSV_20260901.zip",
+            "ordering must match Version: lexicographic on the token"
+        );
+    }
+
+    #[test]
+    fn only_csv_archives_are_candidates_to_serve() {
+        let dir = csv_archive_dir(&[
+            "GeoLite2-Country-CSV_20260605.zip",
+            // Sorts above the archive on both counts, and is neither an
+            // archive nor servable as one.
+            "GeoLite2-Country-CSV_99999999.zip.sha256",
+            "GeoLite2-Country-bin_20261231.tar.gz",
+        ]);
+        let picked = newest_csv_archive(dir.path()).expect("one must win");
+        assert_eq!(
+            picked.file_name().unwrap(),
+            "GeoLite2-Country-CSV_20260605.zip"
+        );
+    }
+
+    #[test]
+    fn nothing_to_serve_names_the_remedy() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = newest_csv_archive(dir.path())
+            .expect_err("an empty archive dir cannot feed the stub");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("xtgeoip run"),
+            "error should say how to fix it: {msg}"
+        );
+        assert!(
+            msg.contains("rather than fabricating"),
+            "error should say why it will not invent one: {msg}"
+        );
+    }
+
+    /// Reads back what `s_server -HTTP` will hand to `fetch`, because every
+    /// header in it is one `fetch` parses and none of them are asserted by the
+    /// corpus.
+    #[test]
+    fn the_served_archive_carries_the_synthetic_version_and_real_bytes() {
+        let src = tempfile::tempdir().unwrap();
+        let archive = src.path().join("GeoLite2-Country-CSV_20260901.zip");
+        let body = b"PK\x05\x06 not really a zip, but really these bytes";
+        fs::write(&archive, body).unwrap();
+
+        let www = src.path().join("www");
+        write_stub_responses(&www, &archive).expect("responses should write");
+
+        let served =
+            fs::read(www.join("download?suffix=zip")).expect("zip response");
+        let split = served
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .expect("headers must end");
+        let headers = String::from_utf8(served[..split].to_vec()).unwrap();
+
+        assert!(
+            headers.contains(
+                "Content-Disposition: attachment; \
+                 filename=GeoLite2-Country-CSV_99999999-stub.zip"
+            ),
+            "resolve_version reads the version from here: {headers}"
+        );
+        assert!(
+            headers.contains(&format!("Content-Length: {}", body.len())),
+            "check_download_size reads this: {headers}"
+        );
+        assert_eq!(
+            &served[split + 4..],
+            body,
+            "the body must be the archive byte for byte"
+        );
+    }
+
+    #[test]
+    fn the_served_digest_matches_the_served_bytes() {
+        let src = tempfile::tempdir().unwrap();
+        let archive = src.path().join("GeoLite2-Country-CSV_20260901.zip");
+        let body = b"the exact bytes the digest must cover";
+        fs::write(&archive, body).unwrap();
+
+        let www = src.path().join("www");
+        write_stub_responses(&www, &archive).expect("responses should write");
+
+        let served = fs::read_to_string(www.join("download?suffix=zip.sha256"))
+            .expect("checksum response");
+        let (_, sha_body) =
+            served.split_once("\r\n\r\n").expect("headers must end");
+
+        // Exactly how fetch reads it: first whitespace-separated field.
+        let digest = sha_body.split_whitespace().next().unwrap();
+        assert_eq!(digest.len(), 64, "fetch rejects anything that is not 64");
+        assert_eq!(
+            digest,
+            format!("{:x}", Sha256::digest(body)),
+            "a mismatch here fails every remote case as a checksum error"
+        );
+    }
+
+    #[test]
+    fn requests_served_are_counted_from_the_server_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("s_server.log");
+
+        fs::write(&log, "Using default temp DH parameters\nACCEPT\n").unwrap();
+        assert_eq!(
+            stub_requests_served(&log),
+            0,
+            "starting up is not the same as being reached"
+        );
+
+        // The trailing line is how s_server interleaves its exit statistics
+        // with the request log — the marker is not newline-aligned.
+        fs::write(
+            &log,
+            "ACCEPT\nFILE:download?suffix=zip\nFILE:download?suffix=zip.\
+             sha256\n0 client connects that FILE:download?suffix=zip\n",
+        )
+        .unwrap();
+        assert_eq!(stub_requests_served(&log), 3);
+    }
+
+    #[test]
+    fn a_missing_log_counts_as_never_reached() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(stub_requests_served(&dir.path().join("absent")), 0);
+    }
+
+    /// The rule that decides whether a run demands evidence the stub was hit.
+    /// Derived from the corpus rather than a list of ids, so this is the only
+    /// place the derivation is pinned.
+    #[test]
+    fn remote_cases_are_the_passing_fetch_and_run_cases() {
+        let corpus = "schema_version: 1\ntestcases:\n- {case_id: F-001, key: \
+                      p, cmd: [xtgeoip, fetch]}\n- {case_id: F-003, key: f, \
+                      cmd: [xtgeoip, fetch, -l]}\n- {case_id: R-001, key: p, \
+                      cmd: [xtgeoip, run]}\n- {case_id: R-006, key: f, cmd: \
+                      [xtgeoip, run, -b, -p, -f]}\n- {case_id: B-001, key: p, \
+                      cmd: [xtgeoip, build]}\n- {case_id: TL-001, key: p, \
+                      cmd: [xtgeoip, -V]}\n";
+        let cases = load_testcases(corpus).expect("fixture should parse");
+        let remote: Vec<&str> = cases
+            .iter()
+            .filter(|tc| is_remote_case(tc))
+            .map(|tc| tc.case_id.as_deref().unwrap())
+            .collect();
+        assert_eq!(
+            remote,
+            ["F-001", "R-001"],
+            "build plans FetchMode::Local and the key: f cases fail argument \
+             validation before any I/O — neither reaches the stub"
+        );
+    }
+
+    /// The same rule against the corpus that actually runs. Pins the count
+    /// the stub check depends on: if the spec gains a passing `fetch`/`run`
+    /// case, this fails and the new case is a deliberate decision rather than
+    /// a silent extra demand on the stub.
+    #[test]
+    fn the_corpus_has_exactly_ten_remote_cases() {
+        let remote: Vec<String> = load()
+            .iter()
+            .filter(|tc| is_remote_case(tc))
+            .map(|tc| tc.case_id.clone().unwrap_or_default())
+            .collect();
+        assert_eq!(
+            remote,
+            [
+                "F-001", "F-002", "R-001", "R-002", "R-003", "R-004", "R-005",
+                "R-009", "R-010", "R-011"
+            ],
+            "these are the cases that reach the stub, and the only ones that \
+             prompt for the credentials passphrase"
+        );
+    }
+
+    /// The stub, actually running — the one test here that spawns a process
+    /// and binds a port, which is why it is ignored: `cargo test` is
+    /// otherwise hermetic. Run it after changing anything the stub serves:
+    ///
+    /// ```text
+    /// cargo test --bin xtgeoip-tests -- --ignored stub_serves
+    /// ```
+    ///
+    /// It exercises the composition the unit tests above cannot: that
+    /// `openssl s_server -HTTP` really does hand `reqwest` the headers
+    /// `fetch` parses, over TLS anchored on a CA generated moments earlier.
+    #[test]
+    #[ignore]
+    fn stub_serves_what_fetch_expects() {
+        let root = tempfile::tempdir().unwrap();
+        let archive_dir = root.path().join("archive");
+        fs::create_dir_all(&archive_dir).unwrap();
+        let body = b"PK\x05\x06 stand-in for a real GeoLite2 archive";
+        fs::write(archive_dir.join("GeoLite2-Country-CSV_20260901.zip"), body)
+            .unwrap();
+
+        let port = reserve_port().unwrap();
+        let url = format!("https://127.0.0.1:{port}/{STUB_ENDPOINT}");
+        let stub =
+            create_stub(root.path(), port, &url).expect("the stub must start");
+
+        // Exactly how a case reaches it: the stub CA *replaces* the trust
+        // roots, so this client cannot verify anything else.
+        let pem = fs::read(&stub.ca_file).unwrap();
+        let certs = reqwest::Certificate::from_pem_bundle(&pem)
+            .expect("the generated CA must be a valid PEM bundle");
+        let client = reqwest::blocking::Client::builder()
+            .tls_certs_only(certs)
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap();
+
+        let resp = client
+            .get(format!("{url}?suffix=zip"))
+            .send()
+            .expect("the archive endpoint must answer");
+        assert!(resp.status().is_success(), "got {}", resp.status());
+        assert_eq!(
+            resp.headers()
+                .get(reqwest::header::CONTENT_DISPOSITION)
+                .and_then(|v| v.to_str().ok()),
+            Some(
+                format!(
+                    "attachment; \
+                     filename=GeoLite2-Country-CSV_{STUB_VERSION}.zip"
+                )
+                .as_str()
+            ),
+            "resolve_version reads the version from this header"
+        );
+        assert_eq!(resp.bytes().unwrap().as_ref(), body);
+
+        let sha = client
+            .get(format!("{url}?suffix=zip.sha256"))
+            .send()
+            .expect("the checksum endpoint must answer")
+            .text()
+            .unwrap();
+        assert_eq!(
+            sha.split_whitespace().next().unwrap(),
+            format!("{:x}", Sha256::digest(body)),
+            "the digest must cover the bytes actually served"
+        );
+
+        assert_eq!(
+            stub_requests_served(&stub.log),
+            2,
+            "both requests must appear in the log the run audits"
+        );
+
+        // `process::Child` has no killing `Drop` of its own, so the server
+        // outliving the run is a real failure mode, not a theoretical one.
+        let pid = stub.child.id();
+        drop(stub);
+        assert!(
+            !Path::new(&format!("/proc/{pid}")).exists(),
+            "Drop must kill and reap the server; pid {pid} survived it"
+        );
+    }
+
+    /// The other half of the same property: a stub that cannot come up must
+    /// report why and leave nothing running. Ignored for the same reason as
+    /// the test above.
+    #[test]
+    #[ignore]
+    fn a_stub_that_cannot_bind_fails_instead_of_hanging() {
+        let root = tempfile::tempdir().unwrap();
+        let archive_dir = root.path().join("archive");
+        fs::create_dir_all(&archive_dir).unwrap();
+        fs::write(archive_dir.join("GeoLite2-Country-CSV_20260901.zip"), b"x")
+            .unwrap();
+
+        // Held for the duration, so `s_server` cannot have the port.
+        let squatter = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = squatter.local_addr().unwrap().port();
+
+        let err = create_stub(root.path(), port, "https://127.0.0.1/x")
+            .expect_err("the port is taken; the stub cannot serve");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("exited immediately") || msg.contains("not listening"),
+            "the failure must name what went wrong, not surface later as ten \
+             TLS errors: {msg}"
         );
     }
 

@@ -80,25 +80,84 @@ error, never a fall back. Verified end to end with `openssl s_server`: a
 private CA verifies a local https server, and with only that CA trusted a real
 public site is refused — which is what proves replacement rather than merge.
 
-**Remaining, and it needs a dependency decision.** The stub itself: a TLS
-listener the runner starts, serving the two endpoints `fetch` uses
-(`?suffix=zip` with `Content-Disposition` carrying the version, and
-`?suffix=zip.sha256`). The request/response shaping can be lifted from the
-existing mock server in `src/fetch/tests.rs`; the new part is the TLS front
-and the certificate.
+**The stub is done (2026-09-09), on route (B).** Each run starts
+`openssl s_server -HTTP` inside the sandbox, serving the two endpoints `fetch`
+uses; `--ca-file <sandbox>/stub/ca.pem` is appended to every case alongside
+`--config`. **No new crates.** The route was chosen after measuring both:
 
-| | Route | Cost |
+| | Route | Measured cost |
 |---|---|---|
-| (A) | `rcgen` + `rustls` as direct dependencies | two new production dependencies for a test-only binary, in a crate whose deps are audited |
-| (B) | shell out to `openssl` at runtime to make the CA and leaf | no new crates; adds a runtime tool dependency, and `openssl(1)` is present on any machine that can already run this suite |
+| (A) | `rcgen` + `rustls` as direct dependencies | `rustls` 0.23.43 is already in the lock via reqwest, so it is a declaration, not a crate. `rcgen` adds four compiled crates — `rcgen`, `pem`, `yasna`, and a second `base64` (0.23.x, semver-incompatible with the 0.22.1 already there). It still needs the TLS listener written. |
+| (B) | shell out to `openssl(1)` | zero crates, zero server code |
 | (C) | a committed CA and key fixture | **rejected** — a private key in a public repository, in a repo that has already had to scrub leaked material |
 
-(B) is the recommendation: the certificate is generated fresh per run into the
-sandbox and dies with it, and the suite already shells out to `sudo`, so a
-subprocess is not a new kind of thing. The TLS listener still needs a server
-implementation, so confirm before starting whether (B) can avoid `rustls`
-entirely — `openssl s_server` can serve a fixed file, which may be enough for
-two static endpoints.
+The deciding argument was not the crate count, which is smaller than it first
+looked. It is *who pays*: CI runs `cargo build --all-targets`, which compiles
+`xtgeoip-tests`, and never runs it — so (A)'s dependencies would be built on
+every CI run and every local build to support a binary that requires root, a
+release build and a deliberate invocation. (B) puts its cost where the suite's
+other preconditions already are, and nothing in the shared build.
+
+How it works, all measured rather than read:
+
+- `-HTTP` does no URL parsing. `GET /download?suffix=zip` maps onto the literal
+  path `./download?suffix=zip`, and `?` is a legal POSIX filename byte, so the
+  query string survives as part of the name. Two files serve two endpoints.
+- In `-HTTP` mode, unlike `-WWW`, each file supplies its own status line and
+  headers verbatim — which is what puts `Content-Disposition` under the
+  runner's control with no server code.
+- Verified with a `reqwest` 0.13.2 probe on our own feature set, not just
+  `curl`: `s_server` answers in HTTP/1.0 with no `Connection` header and
+  closes, reqwest opens a fresh connection per request, and `s_server` loops on
+  accept.
+- Nothing is fabricated. The stub replays the newest seeded
+  `GeoLite2-Country-CSV_*.zip` byte for byte and computes the digest over
+  exactly those bytes. Only the version in `Content-Disposition` is synthetic
+  (`99999999-stub`) — `Version` is an opaque token ordered lexicographically,
+  so no calendar arithmetic is involved, and a version absent from the seeded
+  tree is what drives the first remote case down the full download-and-verify
+  path rather than the cached-reuse short circuit.
+- Only the happy path is needed. The ten remote cases are exactly the `key: p`
+  `fetch`/`run` cases, pinned by `the_corpus_has_exactly_ten_remote_cases`;
+  `build` plans `FetchMode::Local`, and the `key: f` ones fail argument
+  validation before any I/O.
+
+**The trap it is designed against.** `testcases.yaml` asserts only exit
+statuses, so a stub that is never reached still passes every case — a missed
+URL rewrite, an unthreaded `--ca-file`, or a cached-reuse short circuit would
+all look green. `s_server` is run without `-quiet` so it logs one `FILE:`
+marker per request served, and a run whose remote cases produced no markers
+exits non-zero with a named remedy.
+
+**A second trap, found by its own test.** The obvious readiness probe — TCP
+connect to the port — is wrong, and `create_stub` returned `Ok` with a dead
+server the first time it was tried against a taken port. The port is reserved
+and released before `s_server` is spawned (it cannot report a port it chose),
+so a stranger can hold it, and a connect-based probe then succeeds against the
+stranger while the real server exits. Every remote case would fail later with
+a TLS error pointing nowhere. The probe now waits on `s_server`'s own `ACCEPT`
+marker, which it prints once when listening and never when the bind failed —
+a signal specific to *this* child. Pinned by
+`a_stub_that_cannot_bind_fails_instead_of_hanging`.
+
+Related, and fixed alongside: `process::Child` has no killing `Drop`, so the
+`Stub` is constructed *before* the readiness probe rather than after. Both `?`
+paths in the probe previously leaked a live `s_server` holding the port.
+
+**What the stub does not fix.** It removes the WAN traffic and the rate cap.
+It does *not* remove the passphrase prompts: `secrets::decrypt` prompts once
+per process, so the ten remote cases prompt ten times. That is #103's permanent
+design, not a defect. The runner must not mint its own credentials to route
+around it — `secrets::encrypt` is double-entry, which would make it twelve
+prompts rather than none. `retarget_config` carries `[maxmind.credentials]`
+across untouched and rewrites only `maxmind.url`.
+
+**Verified, unlike the sandbox.** `stub_serves_what_fetch_expects` is an
+`#[ignore]`d test that stands the real stub up, fetches both endpoints with
+`reqwest` over TLS anchored on the freshly generated CA, and checks the
+headers, the body bytes, the digest and the request log. It is ignored because
+it spawns a process and binds a port, which `cargo test` is otherwise free of:
+`cargo test --bin xtgeoip-tests -- --ignored stub_serves`.
 
 **`--config` is rejected before a subcommand.** `xtgeoip --config X build`
 fails with *"the subcommand 'build' cannot be used with '--config <PATH>'"*,
@@ -107,11 +166,14 @@ because the top level treats its own options as conflicting with a subcommand;
 so a user will type the rejected form first. Cosmetic, unfixed, recorded here
 so it is not rediscovered.
 
-**Not verified end to end.** `create_sandbox` reads `/etc/xtgeoip.conf` (root
-only) and `remove_sandbox` shells out to `sudo rm -rf`; neither path can run
-without a root password, so both are covered by unit tests over their pure
-seams and by nothing else. The first real `sudo target/release/xtgeoip-tests`
-run is still the proof.
+**The composition is still unproven.** The stub has now run for real
+(`stub_serves_what_fetch_expects`), but the sandbox has not: `create_sandbox`
+reads `/etc/xtgeoip.conf` (root only) and `remove_sandbox` shells out to
+`sudo rm -rf`, and neither path can run without a root password, so both are
+covered by unit tests over their pure seams and by nothing else. Nor has any
+*case* met the stub — that needs a real run, ten passphrase prompts included.
+The first `sudo target/release/xtgeoip-tests` run is still the proof, and the
+stub-reached check is what will make its result trustworthy.
 
 ### `Action::requires_root()` asks the wrong question
 

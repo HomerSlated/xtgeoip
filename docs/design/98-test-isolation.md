@@ -26,9 +26,11 @@ The motivating instruction: *testing should not modify production files*, and
    level but not at the program level.** `Action::requires_root()` is a blanket
    euid test on everything except `conf`, independent of where the paths point,
    so a temp tree alone is not enough. §4(d).
-5. **A local https stub needs no production change.** `reqwest` here resolves
-   to `rustls-platform-verifier` → `rustls-native-certs`, so the binary
-   verifies against the *system* trust store. §5.
+5. **A local https stub needed exactly one production change** — a `--ca-file`
+   argument. `reqwest` here resolves to `rustls-platform-verifier` →
+   `rustls-native-certs`, so the binary verifies against the *system* trust
+   store, and `sudo`'s `env_reset` means no environment variable can redirect
+   that for the child. Arguments survive `sudo`; the environment does not. §5.
 
 ---
 
@@ -291,9 +293,15 @@ suite exercise a different privilege path depending on how it was launched.
 
 `sudo` therefore stays, and with it `env_reset`. **`SSL_CERT_FILE` cannot reach
 the child.** The channels that survive `sudo` are arguments and the config
-file, and `xtgeoip` offers neither a `--ca-file` argument nor a config key for
-a trust bundle. The stub is blocked on choosing one of those surfaces — see the
-#98 entry in `TODO.md` for the four routes and their costs.
+file, and at the time of writing `xtgeoip` offered neither a `--ca-file`
+argument nor a config key for a trust bundle.
+
+**Resolved 2026-09-08 (`44e55cd`): `--ca-file PATH`**, a documented global
+option. It installs the bundle with `tls_certs_only`, which *replaces* the
+system trust roots for the run rather than merging with them — merging would
+let a wrong or stale path succeed against a different anchor than the one
+named, which is the silent-success failure mode this ticket exists to remove.
+An unreadable, malformed or empty bundle is an error, never a fall back.
 
 The stub serves two endpoints, which is the entire protocol:
 
@@ -302,27 +310,45 @@ The stub serves two endpoints, which is the entire protocol:
 - `GET {url}?suffix=zip.sha256` → its checksum
 
 A mock server of exactly this shape already exists in `src/fetch/tests.rs`
-(`TcpListener::bind("127.0.0.1:0")`, ~893 lines, used by the #88/#101/#102
-tests). It runs over plain http because `fetch()` is deliberately
-scheme-agnostic — the https rule lives in `Config::validate`, not in the client
-(`config.rs:87`). So the reusable part is the request/response shaping; the
-new part is the TLS front and the trust setup.
+(`TcpListener::bind("127.0.0.1:0")`, used by the #88/#101/#102 tests). It runs
+over plain http because `fetch()` is deliberately scheme-agnostic — the https
+rule lives in `Config::validate`, not in the client (`config.rs:87`).
+
+**Shipped 2026-09-09: none of it was reused.** Both endpoints are static, so
+`openssl s_server -HTTP` serves them with no server code and no new crate:
+`-HTTP` does no URL parsing, mapping `GET /download?suffix=zip` onto the
+literal path `./download?suffix=zip` (`?` is a legal POSIX filename byte), and
+in that mode each file supplies its own status line and headers verbatim —
+which is what puts `Content-Disposition` under the runner's control. The
+alternative, `rcgen` + `rustls` as direct dependencies, was measured and
+rejected: CI compiles `xtgeoip-tests` on every run via `cargo build
+--all-targets` and never runs it, so its cost would fall on every build to
+support a binary needing root and a deliberate invocation.
 
 ### The resulting exposure
 
-| | Today | Proposed |
-|---|---|---|
-| Cases hitting MaxMind | 10 | **1** (setup only) |
-| Archive downloads | 1 | 1 |
-| Header-only round-trips | 9 | 0 |
-| Production dirs written | yes | none *(done 2026-09-08)* |
-| Root required | yes | yes — `requires_root()` is euid-only, and `sudo` is retained by design |
+| | Before | Proposed | Shipped |
+|---|---|---|---|
+| Cases hitting MaxMind | 10 | 1 (setup only) | **0** |
+| Archive downloads | 1 | 1 | 0 |
+| Header-only round-trips | 9 | 0 | 0 |
+| Production dirs written | yes | none | none *(2026-09-08)* |
+| Root required | yes | yes | yes — `requires_root()` is euid-only, and `sudo` is retained by design |
 
-The one remaining hit is the setup fetch in §3, which is also the thing that
-proves the download path genuinely works — the user's stated requirement. Once
-the canned archive exists it can be cached between runs, at which point a
-`--offline` run is possible with **zero** WAN contact; the real fetch then
-becomes a deliberate, occasional check rather than a per-run cost.
+The shipped design beats the proposal by one fetch, because the setup phase in
+§3 turned out to be unnecessary: `archive_dir` already holds real
+`GeoLite2-Country-CSV_*.zip` files *and* their `.sha256` sidecars, and the
+sandbox is seeded by copying them. The stub replays the newest of those byte
+for byte and computes the digest over exactly those bytes, so no canned
+fixture has to be fetched, cached or invented. Only the advertised version is
+synthetic, and deliberately absent from the seeded tree — `fetch` reuses a
+cached archive only when the `.zip` and its `.sha256` both exist and verify, so
+an unknown version is what drives the first remote case down the full
+download-and-verify path.
+
+WAN contact is now zero per run, so the real fetch is a deliberate, occasional
+check rather than a per-run cost — the outcome this section anticipated,
+reached without a `--offline` flag.
 
 ---
 
@@ -339,6 +365,10 @@ becomes a deliberate, occasional check rather than a per-run cost.
 - **Corpus order.** Nothing here proposes reordering; the pinned order
   (#77) is preserved, and the fixture is established *before* case 1 rather
   than by reordering cases.
-- **Verification.** The first full run of any of this still costs one real
-  `xtgeoip-tests` pass against live MaxMind to prove the temp tree behaves as
-  the production tree did.
+- **Verification.** *(Partly settled.)* The stub itself has run
+  (`stub_serves_what_fetch_expects`, `#[ignore]`d because it spawns a process
+  and binds a port). The sandbox has not: both its privileged paths need a root
+  password. No *case* has met either yet, so the first
+  `sudo target/release/xtgeoip-tests` run remains the proof — but it no longer
+  costs a MaxMind fetch, and the stub-reached check is what makes its result
+  trustworthy rather than merely green.

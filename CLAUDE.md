@@ -54,11 +54,14 @@ cargo test                  # all of it
 cargo test --lib            # library only
 ```
 
-One is marked `#[ignore]` because it rewrites a golden file rather than
-asserting against it; run it explicitly after an intended change:
+Two are marked `#[ignore]`, for opposite reasons. The first rewrites a golden
+file rather than asserting against it; the second is the only test here that
+spawns a process and binds a port, and is kept out of the hermetic run. Run
+either explicitly after an intended change:
 
 ```bash
 cargo test --lib -- --ignored regenerate_snapshot   # src/cli_snapshot.golden
+cargo test --bin xtgeoip-tests -- --ignored stub_serves   # the HTTPS stub
 ```
 
 **Integration suite** (`xtgeoip-tests`) — drives the real release binary
@@ -68,15 +71,29 @@ end to end:
 sudo target/release/xtgeoip-tests   # requires root and a release build
 ```
 
-It needs root and hits the **live, rate-capped** MaxMind API, so do not re-run
-it casually. It no longer writes to the real output directories (#98): each run
-creates a private temp sandbox, seeds it by copying the configured `output_dir`
-and `archive_dir`, and appends `--config <sandbox>/xtgeoip.conf` to every case.
-Production data is read once to seed and never written; `--keep-sandbox` leaves
-the tree behind for inspection. Its cases come from
-`docs/generated/testcases.yaml`, generated from `docs/spec/cli.yaml`, and the
-runner (`src/bin/xtgeoip-tests.rs`) carries hand-maintained corpus-size
-assertions that must be updated when the spec gains or loses a case.
+It needs root and `openssl(1)`. Since #98 it touches neither production data
+nor the MaxMind API:
+
+- **Writes go to a sandbox.** Each run creates a private `0700` temp tree,
+  seeds it by copying the configured `output_dir` and `archive_dir`, and
+  appends `--config <sandbox>/xtgeoip.conf` to every case. Production data is
+  read once to seed and never written. `--keep-sandbox` leaves the tree behind.
+- **Reads go to a local stub.** Each run starts `openssl s_server -HTTP`
+  serving the two endpoints `fetch` uses, replaying the newest seeded archive
+  under a synthetic version, and appends `--ca-file <sandbox>/stub/ca.pem` to
+  every case. That CA *replaces* the trust roots, so a case that addressed the
+  real API would fail to verify it rather than quietly succeed. The run fails
+  if the remote cases never reach the stub — the corpus asserts exit statuses
+  only, so a stub that is never hit would otherwise look green.
+
+It still prompts for the credentials passphrase once per remote case (ten of
+them): `secrets::decrypt` reads from the terminal by design (#103), and the
+runner deliberately does not route around it.
+
+Its cases come from `docs/generated/testcases.yaml`, generated from
+`docs/spec/cli.yaml`, and the runner (`src/bin/xtgeoip-tests.rs`) carries
+hand-maintained corpus-size assertions that must be updated when the spec gains
+or loses a case.
 
 ## Architecture
 
