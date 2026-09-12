@@ -221,6 +221,84 @@ there is no `debian/` directory and no spec file. Verified 2026-09-06: neither
 
 ---
 
+## GUARDIAN FINDINGS — `fetch.rs`, `config.rs`, `conf.rs`, 2026-09-12
+
+From `private/guardian/guardian_report_20260912_190213.md`, the re-verification
+run that cleared the four queued rows. All three files **passed**: 0 CRITICAL,
+0 HIGH, 0 MEDIUM, and all three were re-signed. The pre-flight sweep raised BAD
+on all three under its own power — the queue's rows were never taken as
+evidence, which is what the deliberately-retained `.sig` files are for.
+
+`--ca-file` was the change that wanted the audit and it holds. Seventeen
+adversarial bundles — unreadable, directory, `/dev/null`, empty, whitespace,
+junk, key-only, truncated `BEGIN`, invalid base64, PEM-wrapped garbage DER,
+good-cert-then-corrupt — all error; none falls back to the system roots.
+Replacement rather than merge was shown live against a public site.
+
+### C-1 — the https error echoed the URL, and ran before the userinfo gate *(LOW, CVSS 3.3)* ✅ DONE (2026-09-12)
+
+`Config::validate` quoted `maxmind.url` with `{:?}` in the scheme `bail!`, and
+that bail runs *before* the userinfo rejection. So the one branch a credential-
+carrying `http://` URL takes was the branch that printed it — defeating the
+gate added specifically because a URL is "stored in plaintext *and* quoted back
+in error messages". Reaches stderr always; the log file only if `--log-file`
+was passed, since a failed `load_config` has no `[logging]` yet.
+
+**Fixed by not quoting.** The ordering swap is *not* sufficient, and this is
+the part worth remembering: `url::Url::parse("user:pass@host/x")` takes `user`
+as the **scheme** — RFC 3986 allows it — so `username()` is empty and that
+shape slips the userinfo gate whatever the order; and a URL that fails to parse
+at all takes I-6's fail-open branch to the same `bail!`. The error now reports
+`scheme "http"` or `no scheme`, via a small `url_scheme` helper: a scheme
+cannot contain `:` or `@`, so it cannot carry userinfo, which is what makes it
+safe to echo when the URL is not. Six-shape regression test, confirmed failing
+against the old message.
+
+### CF-1 — `create_default_config` wrote through a symlink *(LOW, CVSS 1.8)* ✅ DONE (2026-09-12)
+
+`fs::copy(DEFAULT_CONFIG, system_config_path())` follows a symlink at the
+destination. With `--config P` naming a path in a directory a less-privileged
+user can write, that user could pre-plant `P` as a link to a file the invoker
+can write. Needs the invoker to name that path *and* confirm the prompt, so it
+only bites a root operator who chose an untrusted path.
+
+**Fixed** with `OpenOptions::create_new` (`O_CREAT|O_EXCL`), which refuses the
+symlink rather than following it, and also collapses the caller's "does it
+exist?" test and the create into one atomic step. The credential write path
+never had this shape — `NamedTempFile` + `persist` replaces the link itself —
+so this is the same two-paths-drifted story as L-1. The write also now sets
+0644 explicitly: `fs::copy` carried the source's mode, and the installed
+example is **0755**, so every config created this way had a pointless execute
+bit. Three tests, asserting on the victim file rather than only on the error.
+
+### Informational, from the same run
+
+- **I-1** — `--ca-file` is silently ignored in `FetchMode::Local`: `fetch()`
+  early-returns before `build_client`, so a mistyped bundle is not diagnosed on
+  that path. No security impact (no TLS happens). *Worth a man-page sentence.*
+- **I-2** — `fs::read(ca_file)` is the one unbounded read left in `fetch.rs`.
+  Operator-supplied path, process already root, so not a trust-boundary read; a
+  1 MiB cap would make provenance irrelevant. *Optional, consistent with M-1.*
+- **I-3** — L-2 traded unbounded memory for unbounded *time*: a FIFO planted at
+  `archive_path` blocks `io::copy` where `fs::read` grew memory instead.
+  Requires a local write to root-owned `archive_dir`. Not a regression, and the
+  new behaviour is the better of the two. *No action.*
+- **I-4** — `a_malformed_ca_bundle_is_rejected_not_ignored` actually exercises
+  the *empty* path: its input has no PEM markers, so it is caught by the
+  `is_empty()` bail, not by `from_pem_bundle`. The decode paths are pinned only
+  by reqwest's internals in-repo (the audit verified them externally).
+  *Recommended — one corrupt-DER case, in unsigned `src/fetch/tests.rs`, so it
+  costs no signature.*
+- **I-5** — a valid certificate surrounded by junk text is accepted (standard
+  PEM skipping). A corrupt PEM *section* is still a hard error. *No action.*
+- **I-6** — the userinfo check fails open when `Url::parse` fails. Benign while
+  exactly one `url` crate is in the graph, since reqwest parses with the same
+  one. *Re-check if a second `url` version ever enters.*
+- **I-7** — `--config` lets whoever runs the binary choose every path it writes,
+  but only under the precondition already recorded for `$EDITOR` and
+  `--log-file`: a sudoers grant or unit file, neither of which we ship.
+  *Re-score immediately if one is ever shipped.*
+
 ## GUARDIAN FINDINGS — `src/fetch.rs`, 2026-09-05
 
 From `private/guardian/guardian_report_20260905_213041.md`. The file **passed**:

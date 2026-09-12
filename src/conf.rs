@@ -5,6 +5,7 @@
 use std::{
     fs,
     io::{self, IsTerminal, Write},
+    os::unix::fs::OpenOptionsExt,
     path::Path,
     process::Command,
 };
@@ -74,14 +75,45 @@ fn ensure_default_config_exists() -> Result<()> {
     Ok(())
 }
 
+/// Create `dest` and write `bytes` into it, failing if anything is already
+/// there — including a symlink.
+///
+/// `create_new` is `O_CREAT|O_EXCL`. That is what makes this refuse a symlink
+/// planted at `dest` rather than writing *through* it to the target, which is
+/// what `fs::copy` did (guardian CF-1): `--config` can name a path in a
+/// directory the invoker does not control, so a destination is not trusted
+/// merely because we chose it. The same flag collapses a caller's "does it
+/// exist?" test and this create into one atomic step, so nothing can appear in
+/// between.
+///
+/// `mode` is set here rather than inherited: `fs::copy` carries the source's,
+/// and the installed example is 0755, which gave the created config an execute
+/// bit it has no use for.
+fn create_new_file(dest: &Path, bytes: &[u8], mode: u32) -> Result<()> {
+    let mut out = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(mode)
+        .open(dest)
+        .with_context(|| format!("Failed to create {}", dest.display()))?;
+    out.write_all(bytes)
+        .with_context(|| format!("Failed to write {}", dest.display()))
+}
+
 fn create_default_config() -> Result<()> {
     ensure_default_config_exists()?;
-    fs::copy(DEFAULT_CONFIG, system_config_path()).with_context(|| {
-        format!(
-            "Failed to copy {DEFAULT_CONFIG} to {}",
-            system_config_path().display()
-        )
-    })?;
+
+    let example = fs::read(DEFAULT_CONFIG)
+        .with_context(|| format!("Failed to read {DEFAULT_CONFIG}"))?;
+
+    create_new_file(system_config_path(), &example, 0o644).with_context(
+        || {
+            format!(
+                "Failed to create {} from {DEFAULT_CONFIG}",
+                system_config_path().display()
+            )
+        },
+    )?;
     println!(
         "Created {} from default example.",
         system_config_path().display()
@@ -365,6 +397,60 @@ mod tests {
     use super::*;
 
     const SENTINEL: &str = "LIVE_PLAINTEXT_KEY_DO_NOT_LEAK";
+
+    /// Guardian CF-1. `fs::copy` followed a symlink at the destination and
+    /// wrote through it; `create_new` refuses. Asserted on the *target*, not
+    /// just on the error — an error with the victim already overwritten would
+    /// be the same bug wearing a different message.
+    #[test]
+    fn create_new_file_refuses_a_symlinked_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let victim = dir.path().join("victim");
+        fs::write(&victim, b"original").unwrap();
+
+        let dest = dir.path().join("xtgeoip.conf");
+        std::os::unix::fs::symlink(&victim, &dest).unwrap();
+
+        let err = create_new_file(&dest, b"example config", 0o644)
+            .expect_err("a symlinked destination must be refused");
+        assert!(
+            err.to_string().contains("Failed to create"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(
+            fs::read(&victim).unwrap(),
+            b"original",
+            "the symlink target was written through"
+        );
+    }
+
+    /// The mode is chosen by the writer, not inherited from a source file —
+    /// the installed example is 0755 and a config has no use for +x.
+    #[test]
+    fn create_new_file_sets_the_requested_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("xtgeoip.conf");
+        create_new_file(&dest, b"example config", 0o644).unwrap();
+
+        let mode = fs::metadata(&dest).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o644, "unexpected mode {:o}", mode & 0o777);
+        assert_eq!(fs::read(&dest).unwrap(), b"example config");
+    }
+
+    /// An existing regular file is refused too. The caller only reaches this
+    /// for a config it found absent, so anything there now appeared in the
+    /// window between — which is exactly what `O_EXCL` is for.
+    #[test]
+    fn create_new_file_refuses_an_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("xtgeoip.conf");
+        fs::write(&dest, b"already here").unwrap();
+
+        assert!(create_new_file(&dest, b"example config", 0o644).is_err());
+        assert_eq!(fs::read(&dest).unwrap(), b"already here");
+    }
 
     /// #104, second instance. `toml_edit::TomlError` quotes the offending
     /// line just as `toml::de::Error` does, and both `conf.rs` call sites

@@ -149,11 +149,22 @@ impl Config {
             .to_ascii_lowercase()
             .starts_with("https://")
         {
+            // Described by scheme rather than quoted (guardian C-1). This
+            // is the branch a non-https URL takes, and it runs *before* the
+            // userinfo check below — so quoting here printed precisely the
+            // secret that check exists to reject. Reordering the two does
+            // not fix it: `user:pass@host/x` parses with `user` as the
+            // scheme, so the userinfo gate never fires on it, and a URL that
+            // fails to parse at all reaches this bail either way. Not
+            // quoting fixes it for every shape.
+            let found = match url_scheme(self.maxmind.url.trim()) {
+                Some(scheme) => format!("scheme {scheme:?}"),
+                None => "no scheme".to_owned(),
+            };
             bail!(
                 "maxmind.url must use https — the MaxMind license key is sent \
                  as HTTP basic auth and would otherwise cross the network in \
-                 cleartext (got {:?})",
-                self.maxmind.url.trim()
+                 cleartext (got {found})"
             );
         }
 
@@ -161,10 +172,11 @@ impl Config {
         // second is why this is here rather than left alone.
         //
         // Credentials belong in the encrypted `[maxmind.credentials]` table
-        // (#103); a URL is the one place in this file that is *not* encrypted
-        // and is echoed verbatim by the error above. So a password smuggled
-        // into the URL would be both stored in plaintext and printable — the
-        // exact shape #104 closed everywhere else.
+        // (#103); a URL is the one place in this file that is *not*
+        // encrypted. So a password smuggled into the URL would be stored in
+        // plaintext — the exact shape #104 closed everywhere else. It used to
+        // be printable too, until guardian C-1 stopped the scheme error above
+        // quoting the URL; this gate is what keeps it out of the file.
         //
         // Parsed after `trim()` to match the scheme check's order, and kept
         // *alongside* it rather than replacing it: four tests pin the current
@@ -195,6 +207,22 @@ impl Config {
         }
         Ok(())
     }
+}
+
+/// The scheme of `url`, if it has a syntactically valid one.
+///
+/// RFC 3986 defines a scheme as `ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )`
+/// before the first `:`. That charset excludes both `:` and `@`, so a scheme
+/// cannot carry userinfo — which is what makes it safe to echo back when the
+/// URL as a whole is not (guardian C-1).
+fn url_scheme(url: &str) -> Option<&str> {
+    let (scheme, _) = url.split_once(':')?;
+    let mut rest = scheme.chars();
+    if !rest.next()?.is_ascii_alphabetic() {
+        return None;
+    }
+    rest.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+        .then_some(scheme)
 }
 
 /// The plaintext credential fields `#103` replaced with
@@ -475,6 +503,55 @@ mod tests {
                 "the error must not echo the smuggled secret: {msg}"
             );
         }
+    }
+
+    /// Guardian C-1: the scheme error used to quote the URL, and it runs
+    /// *before* the userinfo gate — so the one branch a credential-carrying
+    /// `http://` URL takes was the branch that printed it. Every shape that
+    /// reaches that bail is checked here, including the two that defeat a
+    /// pure reordering: `user:pass@host` (parsed with `user` as the scheme,
+    /// so the userinfo gate never fires) and a URL `Url::parse` rejects.
+    #[test]
+    fn the_scheme_error_never_echoes_the_url() {
+        for url in [
+            "http://user:SECRETKEY@download.maxmind.com/x",
+            "  http://user:SECRETKEY@download.maxmind.com/x  ",
+            "user:SECRETKEY@download.maxmind.com/x",
+            "ftp://user:SECRETKEY@download.maxmind.com/x",
+            "http://[SECRETKEY",
+            "download.maxmind.com/SECRETKEY",
+        ] {
+            let err = config_with_url(url)
+                .validate()
+                .expect_err("non-https must be rejected");
+            let msg = err.to_string();
+            assert!(
+                !msg.contains("SECRETKEY"),
+                "the error echoed the URL: {msg}"
+            );
+            assert!(
+                msg.contains("https"),
+                "the error must still say what is wanted: {msg}"
+            );
+        }
+    }
+
+    /// The replacement for quoting: a scheme cannot contain `:` or `@`, so
+    /// whatever this returns is safe to print. Anything that is not a
+    /// syntactically valid scheme must come back `None` rather than a
+    /// best-effort prefix of the URL.
+    #[test]
+    fn url_scheme_extracts_only_a_valid_scheme() {
+        assert_eq!(url_scheme("https://host/x"), Some("https"));
+        assert_eq!(url_scheme("HTTP://host/x"), Some("HTTP"));
+        assert_eq!(url_scheme("git+ssh://host/x"), Some("git+ssh"));
+        assert_eq!(url_scheme("user:pass@host/x"), Some("user"));
+
+        assert_eq!(url_scheme("host/x"), None); // no colon at all
+        assert_eq!(url_scheme("://host/x"), None); // empty scheme
+        assert_eq!(url_scheme("9http://host/x"), None); // must start ALPHA
+        assert_eq!(url_scheme("ht tp://host/x"), None); // space is not legal
+        assert_eq!(url_scheme("pass@host:1/x"), None); // `@` before the colon
     }
 
     /// The userinfo check must not block a real MaxMind download.
