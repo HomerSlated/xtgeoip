@@ -262,16 +262,45 @@ The two sites can still drift in one respect: the bound is duplicated in spirit,
 not in code. That is deliberate — sharing it would mean a helper taking
 `impl Read`, which buys nothing and hides which limit applies where.
 
-### L-2 — `verify_cached_archive` loads the whole archive into memory *(LOW, CVSS 3.3)*
+### L-2 — `verify_cached_archive` loads the whole archive into memory *(LOW, CVSS 3.3)* ✅ DONE (2026-09-12)
 
 The same function `fs::read`s the entire archive rather than streaming it into
-the digest. **Untouched by the L-1 fix (2026-09-12)**, which bounded the
-*sidecar* read only; this one is unchanged and still a decision, not an
-oversight. The archive is ~10 MB, so this is a resource note, not a
-vulnerability. Fixing it trades an obvious correctness proof for memory that is
-not scarce here.
+the digest. The archive is ~10 MB, so this is a resource note, not a
+vulnerability.
 
-*Not recommended, but recorded so it is a decision rather than an oversight.*
+The original verdict was *not recommended*, on the grounds that fixing it
+**"trades an obvious correctness proof for memory that is not scarce here."**
+That premise was wrong, and it is worth recording why rather than just
+reversing it. The implied alternative was a hand-rolled read loop, which would
+indeed be less obvious than `Sha256::digest(&data)`. It is not the alternative:
+`sha2`'s hasher implements `std::io::Write` (digest-0.10.7
+`core_api/wrapper.rs:245`, under the `std` feature, on by default), so the
+streaming form is `io::copy(&mut file, &mut hasher)` — four lines for two, no
+loop and no buffer arithmetic. The same file already streams-and-hashes on the
+download path via `HashingWriter`. There was no trade to make.
+
+The benefit is small but real, and it is **not** about the 4.5 MB measured on
+this box. It is that the read has no bound while every other read in this file
+does (`MAX_DOWNLOAD_BYTES`, `MAX_EXTRACT_BYTES`, `MAX_CHECKSUM_BYTES`), and two
+facts stop 4.5 MB being a ceiling: `maxmind.url` is operator-configurable —
+Country is a default in `src/config.rs`, not a constraint — and this function
+runs *before* anything validates the file, so whatever sits under the expected
+name is read whole whether or not the program could use it.
+
+**Fixed 2026-09-12.** Streaming was preferred to a new `MAX_ARCHIVE_BYTES`
+deliberately: a cap needs a number guessed between "breaks a legitimate City
+archive" and "is not really a bound", whereas `io::copy` makes the size
+irrelevant rather than checked. Peak memory is the copy buffer. No behaviour
+changes — the digest and the returned bool are identical — so no test can
+discriminate between the two forms, and the added one does not pretend to. A
+256 KiB non-repeating archive, many copy chunks long, must hash to what a
+one-shot digest gives; it passes against the old `fs::read` form too, confirmed
+by stashing the change and re-running. It is a forward guard on the streaming
+path, not evidence for it.
+
+Exposure was and remains nil: only root writes `archive_dir` (`drwxr-xr-x root
+root`), so anyone who can plant an oversized file there already owns the host.
+This was robustness, not security, and the LOW ranking was right.
 
 ### I-1 — uppercase hex digests are rejected *(INFORMATIONAL)*
 

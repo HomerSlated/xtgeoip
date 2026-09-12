@@ -843,10 +843,20 @@ fn verify_cached_archive(
     let expected_hash = expected_digest(&checksum_text).with_context(|| {
         format!("Bad checksum file {}", checksum_path.display())
     })?;
-    let data = fs::read(archive_path).with_context(|| {
+    // Streamed rather than read whole (guardian L-2). Everything else in
+    // this file bounds what it reads; this read cannot be bounded usefully,
+    // because the legitimate size is whatever edition `maxmind.url` names.
+    // Hashing through `io::copy` makes the size irrelevant instead of
+    // checked — peak memory is the copy buffer, not the archive.
+    let mut archive = File::open(archive_path).with_context(|| {
         format!("Failed to read archive {}", archive_path.display())
     })?;
-    let actual_hash = format!("{:x}", Sha256::digest(&data));
+    let mut hasher = Sha256::new();
+    io::copy(&mut archive, &mut hasher).with_context(|| {
+        format!("Failed to read archive {}", archive_path.display())
+    })?;
+
+    let actual_hash = format!("{:x}", hasher.finalize());
     Ok(actual_hash == expected_hash)
 }
 

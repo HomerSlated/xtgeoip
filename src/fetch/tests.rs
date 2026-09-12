@@ -831,6 +831,36 @@ fn cached_archive_matching_checksum_is_true() {
     assert!(verify_cached_archive(&archive, &checksum).unwrap());
 }
 
+/// The digest is streamed through `io::copy` (guardian L-2) rather than taken
+/// over one contiguous buffer, so an archive spanning many reads must still
+/// hash to what a one-shot digest gives.
+///
+/// This passes against the old `fs::read` form too — it is a guard on the
+/// streaming path going forward, not evidence for the change that introduced
+/// it. What it would catch is a future rewrite that mishandles a chunk
+/// boundary or a short read.
+#[test]
+fn cached_archive_spanning_many_read_chunks_still_verifies() {
+    let dir = TempDir::new().unwrap();
+    let archive = dir.path().join("a.zip");
+    let checksum = dir.path().join("a.zip.sha256");
+
+    // An LCG rather than `i % k`: its period exceeds the body length, so the
+    // bytes never repeat and a duplicated or dropped run cannot hash equal.
+    let mut state = 0x9e37_79b9u32;
+    let body: Vec<u8> = (0..256 * 1024)
+        .map(|_| {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (state >> 24) as u8
+        })
+        .collect();
+    fs::write(&archive, &body).unwrap();
+    let hash = format!("{:x}", Sha256::digest(&body));
+    fs::write(&checksum, format!("{hash}  a.zip\n")).unwrap();
+
+    assert!(verify_cached_archive(&archive, &checksum).unwrap());
+}
+
 #[test]
 fn cached_archive_mismatch_is_false() {
     let dir = TempDir::new().unwrap();
