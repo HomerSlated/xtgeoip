@@ -94,13 +94,14 @@ fn build_client(ca_file: Option<&Path>) -> Result<Client> {
         );
     }
 
-    // Contexted because `from_pem_bundle` does not finish the job. It refuses
-    // a section that is not plausibly a certificate, but a *truncated* one
-    // survives it and is rejected here instead, at `build()`. Without this
-    // the operator is told only "builder error: invalid peer certificate:
-    // BadEncoding" — no file named, no mention of --ca-file, for the one
-    // option whose whole purpose is to be explicit about trust. Found by the
-    // decode-path tests added for guardian I-4.
+    // Contexted because `from_pem_bundle` validates only the PEM framing and
+    // its base64 — under rustls it stores the decoded bytes without parsing
+    // them, so *every* DER-level rejection lands here instead, at `build()`.
+    // Without this the operator is told only "builder error: invalid peer
+    // certificate: BadEncoding" — no file named, no mention of --ca-file, for
+    // the one option whose whole purpose is to be explicit about trust. Found
+    // by the decode-path tests added for guardian I-4, which fail on three of
+    // seven cases if this context is removed.
     builder.tls_certs_only(certs).build().with_context(|| {
         format!(
             "the certificates in {} were rejected — with --ca-file given they \

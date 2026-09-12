@@ -296,13 +296,26 @@ bit. Three tests, asserting on the victim file rather than only on the error.
   would install a trust set the operator's file does not describe).
 
   **The truncation test found a defect, which is why it was worth doing.**
-  `Certificate::from_pem_bundle` refuses a section that is not plausibly a
-  certificate, but a *truncated* one survives it and is rejected later, by
-  `build()` — and that call carried no context. The operator got `builder
-  error: invalid peer certificate: BadEncoding`: no file named, no mention of
-  `--ca-file`, for the one option whose entire purpose is to be explicit about
-  which anchors are trusted. `build_client` now contexts that call. Confirmed
-  load-bearing by removing the context and watching exactly one test fail.
+  A truncated certificate is rejected by `build()`, and that call carried no
+  context. The operator got `builder error: invalid peer certificate:
+  BadEncoding`: no file named, no mention of `--ca-file`, for the one option
+  whose entire purpose is to be explicit about which anchors are trusted.
+  `build_client` now contexts that call.
+
+  **Corrected 2026-09-12T20:43 by the guardian run.** The commit that fixed
+  I-4 asserted that `from_pem_bundle` "refuses a section that is not plausibly
+  a certificate" and that truncation was the one case reaching `build()`. Both
+  were wrong, and the reason is worth keeping: `CORRUPT_DER_PEM` had been
+  written with `\n` escapes and a mistyped line continuation, which rustfmt
+  then reflowed into broken PEM *framing*. The test passed anyway — it asserts
+  only that the error names the file — so it did not cover the path it was
+  named for. **The same mismatch I-4 exists to fix, inside the commit that
+  fixed it.** Chasing it down established that under rustls,
+  `Certificate::from_pem_bundle` performs no DER validation at all: it checks
+  PEM framing and base64, stores the bytes, and defers everything else. So the
+  context on `build()` is load-bearing for a wider class of input than the
+  commit claimed — three of the seven `--ca-file` tests fail without it, not
+  one. The constant is now a raw string, and the comments say what is true.
 
   Note what this says about the audit: its 17-case harness proved every bad
   bundle *errors*, which was the security question, and it does. Whether the

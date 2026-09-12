@@ -1038,10 +1038,18 @@ fn a_missing_ca_bundle_names_the_path() {
 /// for. The name is now honest (see the no-sections test) and the decode
 /// paths are covered here and in the two tests that follow, so they are
 /// pinned by this suite rather than only by reqwest's internals.
-const CORRUPT_DER_PEM: &str = "-----BEGIN CERTIFICATE-----\\
-     nbm90IGEgY2VydGlmaWNhdGUsIGp1c3QgYnl0ZXNub3QgYSBjZXJ0aWZpY2F0ZSwg\\
-     nanVzdCBieXRlc25vdCBhIGNlcnRpZmljYXRlLCBqdXN0IGJ5dGVz\n-----END \
-                               CERTIFICATE-----\n";
+///
+/// A raw string, deliberately: the first version of this constant used `\n`
+/// escapes with a mistyped line continuation, and rustfmt then reflowed the
+/// `n`s onto the following lines. The result was broken PEM *framing*, which
+/// this test could not distinguish from the corrupt DER it is named for,
+/// because it only asserts that the error names the file. Caught by the
+/// guardian run of 2026-09-12T20:43.
+const CORRUPT_DER_PEM: &str = r"-----BEGIN CERTIFICATE-----
+bm90IGEgY2VydGlmaWNhdGUsIGp1c3QgYnl0ZXNub3QgYSBjZXJ0aWZpY2F0ZSwg
+anVzdCBieXRlc25vdCBhIGNlcnRpZmljYXRlLCBqdXN0IGJ5dGVz
+-----END CERTIFICATE-----
+";
 
 #[test]
 fn a_ca_bundle_with_corrupt_der_is_rejected() {
@@ -1061,10 +1069,12 @@ fn a_ca_bundle_with_corrupt_der_is_rejected() {
 /// every line of a PEM body is a multiple of four characters — so the DER
 /// parse is the only thing left that can reject it.
 ///
-/// This is the one case that gets past `Certificate::from_pem_bundle` and is
-/// caught later, by `build()`. It is therefore the test that pins the context
-/// on that call: without it the error names neither the file nor `--ca-file`.
-/// Verified by removing the context and watching only this test fail.
+/// Like the two other DER-level cases here, it gets past
+/// `Certificate::from_pem_bundle` — which under rustls checks PEM framing and
+/// base64 only, storing the bytes unparsed — and is caught by `build()`. All
+/// three therefore pin the context on that call; removing it fails exactly
+/// these three of the seven `--ca-file` tests, and the error then names
+/// neither the file nor the flag.
 #[test]
 fn a_truncated_certificate_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
