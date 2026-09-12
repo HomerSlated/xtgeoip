@@ -14,7 +14,8 @@
 //! * `xtgeoip-docgen` cannot call `plan()` or `normalize_cli_to_action`, so
 //!   #92's generation-side validator is impossible for anything semantic.
 //! * `tests/` is an empty directory, because nothing could import a binary.
-//! * `is_root()` is duplicated between `main.rs` and `xtgeoip-tests.rs`.
+//! * `is_root()` was duplicated between `main.rs` and `xtgeoip-tests.rs` (one
+//!   copy, in `action`, since 2026-09-12).
 //! * Unit tests live *inside* guardian-signed files, so editing a test
 //!   invalidates a security signature (see #100, and TODO.md on #99).
 //!

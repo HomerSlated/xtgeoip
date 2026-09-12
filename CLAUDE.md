@@ -119,4 +119,7 @@ or loses a case.
 - `[paths]` — `archive_dir` (`/var/lib/xt_geoip`), `output_dir` (`/usr/share/xt_geoip`)
 - `[logging]` — log file path
 
-The binary must run as root to write to `output_dir`.
+The binary needs write access to the directories its plan changes
+(`output_dir` to build or clean, `archive_dir` to fetch, back up or prune);
+`action.rs::check_plan_writable` probes them before the first step. There is
+no root gate — on a default install root is simply who owns those paths.

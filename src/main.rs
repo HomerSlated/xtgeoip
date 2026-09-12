@@ -11,7 +11,7 @@ use std::process;
 use anyhow::Result;
 use clap::{CommandFactory, Parser, error::ErrorKind};
 use xtgeoip::{
-    action::{Action, run_action},
+    action::{Action, is_root, run_action},
     cli::{self, Cli, CliOutcome},
     conf, config,
     config::load_config,
@@ -21,17 +21,11 @@ use xtgeoip::{
 const EXIT_CLI_ERROR: i32 = 2;
 const EXIT_RUNTIME_ERROR: i32 = 1;
 
-fn is_root() -> bool {
-    std::fs::read_to_string("/proc/self/status")
-        .ok()
-        .and_then(|s| {
-            s.lines()
-                .find(|l| l.starts_with("Uid:"))
-                .and_then(|l| l.split_whitespace().nth(1))
-                .and_then(|uid| uid.parse::<u32>().ok())
-        })
-        .map(|uid| uid == 0)
-        .unwrap_or(false)
+fn is_permission_denied(e: &anyhow::Error) -> bool {
+    e.chain().any(|c| {
+        c.downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::PermissionDenied)
+    })
 }
 
 /// Install the logger, or report the failure *without* it.
@@ -100,10 +94,6 @@ fn run(cli: Cli) -> Result<()> {
         }
 
         CliOutcome::Action(action) => {
-            if action.requires_root() && !is_root() {
-                eprintln!("Error: You must be root to run xtgeoip");
-                std::process::exit(EXIT_RUNTIME_ERROR);
-            }
             // The logger must be installed *before* `load_config` is
             // attempted, not after — otherwise a config-load failure (bad
             // TOML, missing file, unknown field, ...) propagates through
@@ -129,6 +119,19 @@ fn run(cli: Cli) -> Result<()> {
             );
             install_logger(log_file.as_deref());
             let cfg = cfg_result.map_err(|e| {
+                // There is no root gate ahead of this any more — writability is
+                // checked per plan, once the paths are known — so on a default
+                // install this is where an unprivileged run now stops, on a
+                // `0600` config. Say what to do about it.
+                let e = if !is_root() && is_permission_denied(&e) {
+                    e.context(
+                        "Cannot read the configuration file as this user \
+                         (re-run as root, e.g. with sudo, or name a readable \
+                         one with --config)",
+                    )
+                } else {
+                    e
+                };
                 log_early_error(&format!("Failed to load config: {}", e));
                 e
             })?;

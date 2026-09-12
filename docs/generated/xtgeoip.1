@@ -46,7 +46,11 @@ and one for IPv6
 .IR US.iv6 ,
 .IR CN.iv4 ).
 .PP
-\fBxtgeoip\fR must be run as root to write to the output directory.
+\fBxtgeoip\fR needs write access to each directory a command changes \(em
+\fIoutput_dir\fR to build or clean, \fIarchive_dir\fR to fetch, back up
+or prune \(em and checks for it before taking any step.
+On a default install those directories and the configuration file are
+owned by root, so run it as root there.
 .SH COMMANDS
 .TP
 .BI "build " "[\fB\-b\fR] [\fB\-c\fR] [\fB\-p\fR] [\fB\-f\fR] [\fB\-l\fR]"

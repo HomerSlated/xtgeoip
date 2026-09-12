@@ -182,7 +182,7 @@ Verified independently of the runner's own report: no `/tmp/xtgeoip-tests-*`
 survived, no `s_server` was left running, and `archive_dir`, `output_dir` and
 `/var/log/xtgeoip.log` all still carry their pre-run mtimes.
 
-### `Action::requires_root()` asks the wrong question
+### `Action::requires_root()` asks the wrong question ✅ DONE (2026-09-12)
 
 Split out of the above as §4(d), because it stands on its own merits and should
 not be smuggled in as test infrastructure.
@@ -201,6 +201,45 @@ gate.
 `requires_root` has **no test coverage** — one call site, no tests — so it is
 also the least-pinned thing in this file. It is a behaviour change to a
 security-relevant check, so it wants its own decision.
+
+**Resolved.** The gate is gone. `run_action` now calls `check_plan_writable`
+before the first step, which derives the directories from the *plan* rather
+than the action — `Backup`, remote `Fetch`, `PruneCsv` and `PruneBin` write
+`archive_dir`; `Clean` and the build write `output_dir`; a local fetch writes
+nothing — through a `match` with no wildcard arm, so a new `Step` cannot be
+added without deciding what it writes. Each directory is probed with
+`NamedTempFile::new_in`, as `conf.rs` does, or its nearest existing ancestor
+when the steps would `create_dir_all` it.
+
+Decisions worth keeping:
+
+- **Root is probed too.** Root also fails to write — a read-only mount, NFS
+  `root_squash` — and before this it found out after the passphrase prompt and
+  a download against the daily cap. `is_root()` survives only to choose whether
+  the error suggests `sudo`; it gates nothing, and now reads the *effective*
+  uid where the old copy read the real one.
+- **The ancestor walk goes up on `NotFound` alone.** A dangling symlink or an
+  over-long name stops it, because a walk that went past either would pass a
+  path `create_dir_all` cannot make. Both tests were confirmed failing against
+  the corresponding mutant (`metadata` for `symlink_metadata`; `Err(_)` for the
+  `NotFound` guard). The file-component test is kept as a pin and says it does
+  not discriminate — the walk stops at the file and fails there either way.
+- **The default-install experience moved, and was kept.** Without the gate a
+  non-root run now stops at `load_config` on the `0600` config, so `main.rs`
+  adds "re-run as root … or name a readable one with `--config`" when the
+  cause chain carries `PermissionDenied`.
+
+Verified end to end as uid 1001 against the debug binary: the default config
+gives the new advice; `build` with only `output_dir` redirected reads root's
+`0755` archive and builds 253 countries — work the gate refused; the same
+build into `/usr/share/xt_geoip` is refused before any step with the key, the
+path and the advice; `fetch` with that config passes the probe and stops at
+credentials, since it writes only `archive_dir`. The man page and CLAUDE.md
+no longer say "must be run as root".
+
+The root-free CLI enumeration (memory `cli-enumeration`) classified VALID by
+the "must be root" message. That signal is gone: valid combinations now stop
+at the unreadable config instead, still before any step.
 
 ### Guardian re-signing
 

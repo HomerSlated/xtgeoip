@@ -1,9 +1,12 @@
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 /// xtgeoip action runner
-use std::path::Path;
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 
-use anyhow::Result;
-use tempfile::TempDir;
+use anyhow::{Context, Result};
+use tempfile::{NamedTempFile, TempDir};
 
 use crate::{
     backup::{BackupMode, PruneMode, backup, delete, prune_archives},
@@ -45,12 +48,6 @@ pub enum Action {
     Conf(ConfAction),
 }
 
-impl Action {
-    pub fn requires_root(&self) -> bool {
-        !matches!(self, Action::Conf(_))
-    }
-}
-
 struct ResolvedPaths<'a> {
     output: &'a Path,
     archive: &'a Path,
@@ -60,6 +57,172 @@ fn resolve_paths(cfg: &Config) -> ResolvedPaths<'_> {
     ResolvedPaths {
         output: Path::new(&cfg.paths.output_dir),
         archive: Path::new(&cfg.paths.archive_dir),
+    }
+}
+
+/// Whether this process's effective uid is 0.
+///
+/// Advisory only. It chooses the wording of an error and gates nothing: the
+/// question every command actually has to answer is whether it can write to
+/// the directories its plan touches, and [`check_plan_writable`] asks the
+/// kernel that directly. A blanket root test answered a proxy for it, and
+/// refused work on any configuration where the two disagree.
+///
+/// Reads the *effective* uid (the second `Uid:` field), not the real one:
+/// permission checks are made against the effective uid, so that is the one
+/// whose answer this advice is standing in for.
+pub fn is_root() -> bool {
+    fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("Uid:"))
+                .and_then(|l| l.split_whitespace().nth(2))
+                .and_then(|uid| uid.parse::<u32>().ok())
+        })
+        .is_some_and(|uid| uid == 0)
+}
+
+/// A configured directory that some step writes into.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Dir {
+    Archive,
+    Output,
+}
+
+impl Dir {
+    fn key(self) -> &'static str {
+        match self {
+            Dir::Archive => "paths.archive_dir",
+            Dir::Output => "paths.output_dir",
+        }
+    }
+
+    fn path<'a>(self, paths: &ResolvedPaths<'a>) -> &'a Path {
+        match self {
+            Dir::Archive => paths.archive,
+            Dir::Output => paths.output,
+        }
+    }
+}
+
+/// The directory `step` creates, replaces or deletes files in, if any.
+///
+/// Writes only — `Backup` *reads* `output_dir`, which is not a requirement
+/// this check can usefully enforce. A local fetch writes nothing: it calls
+/// `create_dir_all` on `archive_dir`, which needs no write access to a
+/// directory that already exists, and has no archive to extract from one that
+/// does not.
+///
+/// Deliberately no wildcard arm, so a new `Step` cannot be added without
+/// deciding what it writes.
+fn step_writes(step: Step) -> Option<Dir> {
+    match step {
+        Step::Backup { .. }
+        | Step::Fetch {
+            mode: FetchMode::Remote,
+        }
+        | Step::PruneCsv
+        | Step::PruneBin => Some(Dir::Archive),
+        Step::Fetch {
+            mode: FetchMode::Local,
+        } => None,
+        Step::Clean { .. } => Some(Dir::Output),
+    }
+}
+
+/// Every directory `plan` writes into, archive before output.
+fn dirs_written(plan: &Plan) -> Vec<Dir> {
+    let written: Vec<Dir> = match plan {
+        Plan::Simple(steps) => {
+            steps.iter().filter_map(|&s| step_writes(s)).collect()
+        }
+        Plan::Pipeline {
+            pre, fetch, mid, ..
+        } => pre
+            .iter()
+            .copied()
+            .chain([Step::Fetch { mode: *fetch }])
+            .chain(mid.iter().copied())
+            .filter_map(step_writes)
+            // The build itself, which is not a `Step`.
+            .chain([Dir::Output])
+            .collect(),
+    };
+    [Dir::Archive, Dir::Output]
+        .into_iter()
+        .filter(|d| written.contains(d))
+        .collect()
+}
+
+/// Refuse the whole plan, before its first step, if any directory it writes
+/// into is not writable.
+fn check_plan_writable(plan: &Plan, paths: &ResolvedPaths<'_>) -> Result<()> {
+    for dir in dirs_written(plan) {
+        check_writable(dir.path(paths)).with_context(|| {
+            let advice = if is_root() {
+                ""
+            } else {
+                " (re-run as root, e.g. with sudo, or point it at a directory \
+                 you can write)"
+            };
+            format!(
+                "{} is not writable, so nothing was done{advice}",
+                dir.key()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+/// Fail unless a file can be created in `dir` — or, if `dir` does not exist
+/// yet, in its nearest existing ancestor, since the steps `create_dir_all` it.
+///
+/// Probes by doing, as `conf.rs::check_system_config_writable` does, so the
+/// answer is the kernel's verdict on the operation the steps will attempt
+/// rather than a model of it. The probe file is unlinked when it drops, and
+/// its `.tmp` name is not one `build`'s orphan detection claims.
+fn check_writable(dir: &Path) -> Result<()> {
+    let probed = nearest_existing(dir);
+    NamedTempFile::new_in(&probed).map(drop).with_context(|| {
+        if probed == dir {
+            format!("Cannot write to {}", dir.display())
+        } else {
+            format!(
+                "Cannot create {}: {} is not writable",
+                dir.display(),
+                probed.display()
+            )
+        }
+    })
+}
+
+/// `dir` itself if anything is there, else its nearest ancestor that is.
+///
+/// Walks up on `NotFound` alone. Any other failure to stat stops the walk and
+/// the probe fails on that path. Usually the ancestor it would otherwise reach
+/// fails the probe as well — a file component, an unsearchable parent — but
+/// not always: a name over `NAME_MAX` has a perfectly writable parent, and a
+/// walk that went past it would pass a path `create_dir_all` cannot make.
+///
+/// `symlink_metadata`, not `metadata`, for the same reason: a dangling
+/// symlink does not follow to anything, so a following stat would walk past
+/// it to its writable parent, while `create_dir_all` fails on it.
+fn nearest_existing(dir: &Path) -> PathBuf {
+    let mut candidate = dir;
+    loop {
+        match fs::symlink_metadata(candidate) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                match candidate.parent() {
+                    Some(p) if p.as_os_str().is_empty() => {
+                        return PathBuf::from(".");
+                    }
+                    Some(p) => candidate = p,
+                    None => return candidate.to_path_buf(),
+                }
+            }
+            _ => return candidate.to_path_buf(),
+        }
     }
 }
 
@@ -201,8 +364,14 @@ pub fn run_action(
     ca_file: Option<&Path>,
 ) -> Result<()> {
     let paths = resolve_paths(cfg);
+    let plan = plan(&action);
 
-    match plan(&action) {
+    // Before any step, because the steps are not all cheap to repeat: a
+    // remote fetch prompts for the passphrase and spends a download against
+    // MaxMind's daily cap before `build` would discover it cannot write.
+    check_plan_writable(&plan, &paths)?;
+
+    match plan {
         Plan::Simple(steps) => execute_steps(cfg, &paths, steps, ca_file)?,
 
         Plan::Pipeline {
@@ -823,5 +992,201 @@ mod tests {
              update this count; if not, the roff shape the scan relies on has \
              changed."
         );
+    }
+
+    // ── writability pre-flight ───────────────────────────────────────────
+
+    fn dirs(action: &Action) -> Vec<Dir> {
+        dirs_written(&plan(action))
+    }
+
+    #[test]
+    fn fetch_writes_only_the_archive() {
+        for prune in [false, true] {
+            assert_eq!(dirs(&Action::Fetch { prune }), [Dir::Archive]);
+        }
+    }
+
+    #[test]
+    fn plain_build_writes_only_the_output() {
+        // The local fetch feeding it reads `archive_dir` and writes nothing,
+        // so an operator who can read root's archives can build into a
+        // directory of their own.
+        let build = Action::Build {
+            legacy: false,
+            backup: false,
+            clean: false,
+            force: false,
+            prune: false,
+        };
+        assert_eq!(dirs(&build), [Dir::Output]);
+    }
+
+    #[test]
+    fn top_level_clean_writes_only_the_output() {
+        for force in [false, true] {
+            assert_eq!(dirs(&Action::TopLevelClean { force }), [Dir::Output]);
+        }
+    }
+
+    #[test]
+    fn backup_writes_the_archive_and_reads_the_output() {
+        let backup = Action::TopLevelBackup {
+            clean: false,
+            force: false,
+            prune: false,
+        };
+        assert_eq!(dirs(&backup), [Dir::Archive]);
+        let backup_and_clean = Action::TopLevelBackup {
+            clean: true,
+            force: false,
+            prune: false,
+        };
+        assert_eq!(dirs(&backup_and_clean), [Dir::Archive, Dir::Output]);
+    }
+
+    /// Over every `Action`: the directories required are exactly those the
+    /// flattened plan's steps write, plus `output_dir` for any build. Derived
+    /// from `steps()`'s rendering rather than from `step_writes`, so the two
+    /// halves of this comparison do not share the code under test.
+    #[test]
+    fn required_dirs_match_every_plans_steps() {
+        for action in all_actions() {
+            let rendered = steps(&action);
+            let archive =
+                ["Backup", "Fetch { mode: Remote }", "PruneCsv", "PruneBin"]
+                    .iter()
+                    .any(|s| rendered.contains(s));
+            let output =
+                ["Clean", "Build"].iter().any(|s| rendered.contains(s));
+            let expected: Vec<Dir> =
+                [(archive, Dir::Archive), (output, Dir::Output)]
+                    .into_iter()
+                    .filter_map(|(needed, d)| needed.then_some(d))
+                    .collect();
+            assert_eq!(dirs(&action), expected, "{action:?} plans {rendered}");
+        }
+    }
+
+    /// Root bypasses the mode bits these tests rely on, so under root they
+    /// would fail for the wrong reason. The unprivileged case is the one that
+    /// matters and the one CI runs.
+    fn unprivileged() -> bool {
+        if is_root() {
+            eprintln!("skipped: running as root, which ignores 0o555");
+            return false;
+        }
+        true
+    }
+
+    fn read_only_dir() -> tempfile::TempDir {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::TempDir::new().unwrap();
+        fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o555))
+            .unwrap();
+        dir
+    }
+
+    fn entries(dir: &Path) -> usize {
+        fs::read_dir(dir).unwrap().count()
+    }
+
+    #[test]
+    fn a_writable_dir_passes_and_is_left_empty() {
+        let dir = tempfile::TempDir::new().unwrap();
+        check_writable(dir.path()).unwrap();
+        assert_eq!(entries(dir.path()), 0, "the probe file was left behind");
+    }
+
+    #[test]
+    fn a_missing_dir_under_a_writable_parent_passes_and_is_not_created() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let target = dir.path().join("not/yet/created");
+        check_writable(&target).unwrap();
+        assert_eq!(entries(dir.path()), 0);
+    }
+
+    #[test]
+    fn a_read_only_dir_is_refused_by_name() {
+        if !unprivileged() {
+            return;
+        }
+        let dir = read_only_dir();
+        let err = check_writable(dir.path()).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains(&format!("Cannot write to {}", dir.path().display())),
+            "{err:#}"
+        );
+    }
+
+    #[test]
+    fn a_missing_dir_under_a_read_only_parent_is_refused_naming_both() {
+        if !unprivileged() {
+            return;
+        }
+        let dir = read_only_dir();
+        let target = dir.path().join("sub/dir");
+        let err = check_writable(&target).unwrap_err().to_string();
+        assert!(
+            err.contains(&target.display().to_string())
+                && err.contains(&format!(
+                    "{} is not writable",
+                    dir.path().display()
+                )),
+            "{err}"
+        );
+    }
+
+    /// A pin, not a discriminator: a walk that went up on *every* stat error
+    /// would still stop at `file`, which exists, and fail probing it. The
+    /// test that separates the two walks is the over-long name below.
+    #[test]
+    fn a_path_through_a_file_is_refused() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("file");
+        fs::write(&file, b"").unwrap();
+        assert!(check_writable(&file.join("sub")).is_err());
+    }
+
+    /// `ENAMETOOLONG`, not `ENOENT`, and its parent is writable — so this is
+    /// the case where walking up on any error would pass a path that
+    /// `create_dir_all` cannot make. Confirmed failing against that mutant.
+    #[test]
+    fn an_over_long_name_is_refused_not_walked_past() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let target = dir.path().join("x".repeat(300));
+        assert!(check_writable(&target).is_err());
+    }
+
+    #[test]
+    fn a_dangling_symlink_is_refused_not_walked_past() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(dir.path().join("absent"), &link).unwrap();
+        assert!(check_writable(&link).is_err());
+    }
+
+    #[test]
+    fn the_plan_is_refused_before_any_step_with_advice_for_non_root() {
+        if !unprivileged() {
+            return;
+        }
+        let archive = tempfile::TempDir::new().unwrap();
+        let output = read_only_dir();
+        let paths = ResolvedPaths {
+            output: output.path(),
+            archive: archive.path(),
+        };
+        let clean = plan(&Action::TopLevelClean { force: false });
+        let err = check_plan_writable(&clean, &paths).unwrap_err().to_string();
+        assert!(
+            err.starts_with("paths.output_dir is not writable")
+                && err.contains("re-run as root"),
+            "{err}"
+        );
+        // Fetch writes only the archive, which is writable here.
+        let fetch = plan(&Action::Fetch { prune: false });
+        check_plan_writable(&fetch, &paths).unwrap();
     }
 }

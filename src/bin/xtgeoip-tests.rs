@@ -68,6 +68,7 @@ use std::{
 use anyhow::Context as _;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use xtgeoip::action::is_root;
 
 const DEFAULT_TEST_TIMEOUT_SECS: u64 = 60;
 
@@ -309,21 +310,6 @@ fn precondition_failures(p: &Preconditions) -> Vec<String> {
 }
 
 /// True when the runner can spawn `sudo` without a password prompt.
-///
-/// Duplicated from `main.rs` rather than shared: this is a separate binary and
-/// the crate has no `lib` target, so there is nowhere for one copy to live.
-fn is_root() -> bool {
-    fs::read_to_string("/proc/self/status")
-        .ok()
-        .and_then(|s| {
-            s.lines()
-                .find(|l| l.starts_with("Uid:"))
-                .and_then(|l| l.split_whitespace().nth(1))
-                .and_then(|uid| uid.parse::<u32>().ok())
-        })
-        .is_some_and(|uid| uid == 0)
-}
-
 fn sudo_is_passwordless() -> bool {
     Command::new("sudo")
         .args(["-n", "true"])
