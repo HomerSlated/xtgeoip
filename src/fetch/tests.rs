@@ -1029,8 +1029,90 @@ fn a_missing_ca_bundle_names_the_path() {
     );
 }
 
+/// A PEM section whose body is valid base64 but is not a certificate.
+///
+/// Guardian I-4: the test that used to stand here was named for malformed
+/// bundles but wrote `this is not a certificate\n` — input with no PEM
+/// section markers at all, which yields *zero* certificates and is caught by
+/// the empty-bundle bail below. It never reached the decoder it was named
+/// for. The name is now honest (see the no-sections test) and the decode
+/// paths are covered here and in the two tests that follow, so they are
+/// pinned by this suite rather than only by reqwest's internals.
+const CORRUPT_DER_PEM: &str = "-----BEGIN CERTIFICATE-----\\
+     nbm90IGEgY2VydGlmaWNhdGUsIGp1c3QgYnl0ZXNub3QgYSBjZXJ0aWZpY2F0ZSwg\\
+     nanVzdCBieXRlc25vdCBhIGNlcnRpZmljYXRlLCBqdXN0IGJ5dGVz\n-----END \
+                               CERTIFICATE-----\n";
+
 #[test]
-fn a_malformed_ca_bundle_is_rejected_not_ignored() {
+fn a_ca_bundle_with_corrupt_der_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ca.pem");
+    fs::write(&path, CORRUPT_DER_PEM).unwrap();
+
+    let err = build_client(Some(&path))
+        .expect_err("a PEM section that is not a certificate must be refused");
+    assert!(
+        format!("{err:#}").contains("ca.pem"),
+        "the error must name the file: {err:#}"
+    );
+}
+
+/// A real certificate cut short. The frame and the base64 both stay valid —
+/// every line of a PEM body is a multiple of four characters — so the DER
+/// parse is the only thing left that can reject it.
+///
+/// This is the one case that gets past `Certificate::from_pem_bundle` and is
+/// caught later, by `build()`. It is therefore the test that pins the context
+/// on that call: without it the error names neither the file nor `--ca-file`.
+/// Verified by removing the context and watching only this test fail.
+#[test]
+fn a_truncated_certificate_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ca.pem");
+
+    let body: Vec<&str> = TEST_CA_PEM
+        .lines()
+        .filter(|l| !l.starts_with("-----"))
+        .collect();
+    assert!(body.len() > 4, "fixture too short to truncate meaningfully");
+    let truncated = format!(
+        "-----BEGIN CERTIFICATE-----\n{}\n-----END CERTIFICATE-----\n",
+        body[..body.len() / 2].join("\n")
+    );
+    fs::write(&path, truncated).unwrap();
+
+    let err = build_client(Some(&path))
+        .expect_err("half a certificate is not a certificate");
+    assert!(
+        format!("{err:#}").contains("ca.pem"),
+        "the error must name the file: {err:#}"
+    );
+}
+
+/// A good certificate followed by a corrupt one must fail outright.
+///
+/// The failure mode being excluded is silent truncation to the good half:
+/// that would install a trust set the operator's file does not describe,
+/// which is the same class of problem as falling back to the system roots.
+#[test]
+fn a_bundle_with_one_corrupt_certificate_is_rejected_whole() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ca.pem");
+    fs::write(&path, format!("{TEST_CA_PEM}{CORRUPT_DER_PEM}")).unwrap();
+
+    let err = build_client(Some(&path))
+        .expect_err("one bad certificate must reject the whole bundle");
+    assert!(
+        format!("{err:#}").contains("ca.pem"),
+        "the error must name the file: {err:#}"
+    );
+}
+
+/// Text with no PEM section markers yields zero certificates, so it is caught
+/// by the same bail as an empty file rather than by the decoder. Named for
+/// what it does (guardian I-4).
+#[test]
+fn a_ca_bundle_with_no_pem_sections_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ca.pem");
     fs::write(&path, b"this is not a certificate\n").unwrap();

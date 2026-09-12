@@ -202,16 +202,18 @@ gate.
 also the least-pinned thing in this file. It is a behaviour change to a
 security-relevant check, so it wants its own decision.
 
-### `src/config.rs` re-signing
+### Guardian re-signing
 
-One outstanding row in `private/guardian/needs_reverification.md`, dated
-2026-09-05T22:30:00Z. The file was modified for the `deny_unknown_fields`
-extension and the userinfo rejection; its `.sig` is **deliberately left in
-place** so the next guardian run raises the BAD signature under its own power
-rather than inheriting anyone's word for it.
+Three outstanding rows in `private/guardian/needs_reverification.md`, all dated
+2026-09-12 and all created by remediating that day's own audit: `src/config.rs`
+(C-1), `src/conf.rs` (CF-1) and `src/fetch.rs` (the I-4 follow-on). Their `.sig`
+files are **deliberately left in place** so the next guardian run raises the BAD
+signatures under its own power rather than inheriting anyone's word for it.
 
-Note `src/fetch.rs.sig` was BAD by design for the same reason until 2026-09-05
-and is now GOOD. Do not confuse the two.
+`src/secrets.rs` is signed and current. Of the three, only `src/fetch.rs`
+changes behaviour — an error message on the `--ca-file` path; the other two are
+the fixes the audit asked for. The 2026-09-05 row this section used to describe
+was cleared by the 2026-09-12T19:02 run, along with eight others.
 
 ### Packaging and deployment
 
@@ -287,8 +289,25 @@ bit. Three tests, asserting on the victim file rather than only on the error.
   the *empty* path: its input has no PEM markers, so it is caught by the
   `is_empty()` bail, not by `from_pem_bundle`. The decode paths are pinned only
   by reqwest's internals in-repo (the audit verified them externally).
-  *Recommended — one corrupt-DER case, in unsigned `src/fetch/tests.rs`, so it
-  costs no signature.*
+  **✅ DONE (2026-09-12).** Renamed to `a_ca_bundle_with_no_pem_sections_is_
+  rejected`, and three decode-path tests added: valid base64 that is not a
+  certificate, a truncated real certificate, and a good certificate followed by
+  a corrupt one (which must fail whole — silent truncation to the good half
+  would install a trust set the operator's file does not describe).
+
+  **The truncation test found a defect, which is why it was worth doing.**
+  `Certificate::from_pem_bundle` refuses a section that is not plausibly a
+  certificate, but a *truncated* one survives it and is rejected later, by
+  `build()` — and that call carried no context. The operator got `builder
+  error: invalid peer certificate: BadEncoding`: no file named, no mention of
+  `--ca-file`, for the one option whose entire purpose is to be explicit about
+  which anchors are trusted. `build_client` now contexts that call. Confirmed
+  load-bearing by removing the context and watching exactly one test fail.
+
+  Note what this says about the audit: its 17-case harness proved every bad
+  bundle *errors*, which was the security question, and it does. Whether the
+  error is usable is a different question, and it took a test in the tree to
+  ask it.
 - **I-5** — a valid certificate surrounded by junk text is accepted (standard
   PEM skipping). A corrupt PEM *section* is still a hard error. *No action.*
 - **I-6** — the userinfo check fails open when `Url::parse` fails. Benign while
