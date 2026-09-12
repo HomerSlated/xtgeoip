@@ -9,7 +9,9 @@ cargo build            # debug build
 cargo build --release  # release build
 cargo clippy --all-targets -- -D warnings   # lint (as CI runs it)
 cargo "+$(cat rustfmt-toolchain)" fmt -- --check   # format check (80-col, rustfmt.toml)
-rustup check           # is either toolchain pin stale?
+# is either toolchain pin stale? newest stable, then newest nightly date:
+curl -s https://static.rust-lang.org/dist/channel-rust-stable.toml | grep -m1 -A1 '^\[pkg\.rust\]$' | tail -1
+curl -s https://static.rust-lang.org/dist/channel-rust-nightly.toml | grep -m1 '^date'
 ```
 
 Both toolchains are pinned. The stable one is in `rust-toolchain.toml`, so a
@@ -20,10 +22,13 @@ both read. Do not add `rustfmt` to the stable toolchain — a stable rustfmt
 silently discards those five options, `ignore` among them, and then rewrites
 `src/generated/`.
 
-`rustup check` reports the newest stable, nightly and rustup without
-installing anything; compare it against `rust-toolchain.toml` and
-`rustfmt-toolchain`. Bumping is deliberate — read the new lints when you do,
-since `-D warnings` turns a fresh style lint into a hard CI error.
+Those two lines read the release manifests, and install nothing; compare them
+against `rust-toolchain.toml` and `rustfmt-toolchain`. `scripts/sync.py` makes
+the same comparison weekly. Not `rustup check`: it reports only the floating
+channels that happen to be installed, so on a machine with no `stable`
+toolchain it says nothing about stable at all. Bumping is deliberate — read the
+new lints when you do, since `-D warnings` turns a fresh style lint into a hard
+CI error.
 
 Before a release build, run the pre-build workflow:
 

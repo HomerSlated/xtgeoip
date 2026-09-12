@@ -29,12 +29,16 @@
 
 # ── Is this pin stale? ───────────────────────────────────────────────────
 #
-#   rustup check
+#   curl -s https://static.rust-lang.org/dist/channel-rust-stable.toml \
+#     | grep -m1 -A1 '^\[pkg\.rust\]$' | tail -1
+#   curl -s https://static.rust-lang.org/dist/channel-rust-nightly.toml \
+#     | grep -m1 '^date'
 #
-# reports the newest stable, the newest nightly and the newest rustup,
-# without installing anything. Compare its `stable` line against the channel
-# below and the `nightly` date against `rustfmt-toolchain`. That is the whole
-# check — local, half a second, and it never updates anything on its own.
+# report the newest stable version and the newest nightly date from the
+# release manifests, installing nothing. Compare the first against the channel
+# below and the second against `rustfmt-toolchain`. Not `rustup check`: it
+# reports only floating channels that are installed, so it goes silent about
+# stable on a machine that keeps nothing but this pin.
 #
 # It exists because pinning solved one problem and created another. Before
 # the pin, CI floated and local did not, and the two silently drifted four
