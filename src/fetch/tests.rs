@@ -851,6 +851,49 @@ fn cached_archive_bad_checksum_format_errors() {
     assert!(verify_cached_archive(&archive, &checksum).is_err());
 }
 
+/// The cached path reads a file rather than a response, but it is the same
+/// unbounded read guardian M-1 closed on the remote side, and it had been
+/// left open here.
+#[test]
+fn cached_archive_oversized_checksum_file_errors() {
+    let dir = TempDir::new().unwrap();
+    let archive = dir.path().join("a.zip");
+    let checksum = dir.path().join("a.zip.sha256");
+    fs::write(&archive, b"payload").unwrap();
+
+    // A valid digest prefix, so that nothing but the size can reject it.
+    let mut body = format!("{:x}", Sha256::digest(b"payload"));
+    body.push_str("  a.zip ");
+    body.push_str(&"A".repeat(16 * 1024));
+    fs::write(&checksum, body).unwrap();
+
+    let err =
+        verify_cached_archive(&archive, &checksum).expect_err("must fail");
+    assert!(
+        err.to_string().contains("exceeded"),
+        "unexpected error: {err}"
+    );
+}
+
+/// A sidecar holding something that is not a digest is reported as a format
+/// problem, not as a checksum mismatch — the mismatch wording would send the
+/// reader after the archive, which is not the broken file.
+#[test]
+fn cached_archive_non_digest_is_named_as_such() {
+    let dir = TempDir::new().unwrap();
+    let archive = dir.path().join("a.zip");
+    let checksum = dir.path().join("a.zip.sha256");
+    fs::write(&archive, b"payload").unwrap();
+    fs::write(&checksum, b"<html>503 Service Unavailable</html>\n").unwrap();
+
+    let err =
+        verify_cached_archive(&archive, &checksum).expect_err("must fail");
+    assert!(
+        format!("{err:#}").contains("expected 64 hex characters"),
+        "unexpected error: {err:#}"
+    );
+}
+
 // ── CSV validation ───────────────────────────────────────────────────────
 
 #[test]

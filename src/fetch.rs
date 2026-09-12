@@ -425,24 +425,7 @@ fn acquire_remote_archive(
         );
     }
 
-    let expected_hash = checksum_text
-        .split_whitespace()
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("Invalid checksum format"))?;
-
-    // A digest that is not 64 hex characters can never equal `actual_hash`,
-    // so this changes no accept/reject decision. It changes the *message*:
-    // a truncated or HTML error body now says so, instead of being reported
-    // as a checksum mismatch and sending the reader after the archive.
-    if expected_hash.len() != 64
-        || !expected_hash.bytes().all(|b| b.is_ascii_hexdigit())
-    {
-        bail!(
-            "Invalid checksum format: expected 64 hex characters, got {} \
-             characters",
-            expected_hash.len()
-        );
-    }
+    let expected_hash = expected_digest(&checksum_text)?;
 
     // Verify checksum
     if actual_hash != expected_hash {
@@ -801,22 +784,65 @@ where
     }
 }
 
+/// Take the digest from a checksum body: its first whitespace-separated
+/// token, validated as 64 ASCII hex characters.
+///
+/// A digest that is not 64 hex characters can never equal a real one, so this
+/// changes no accept/reject decision. It changes the *message*: a truncated
+/// body, or an HTML error page, now says so instead of being reported as a
+/// checksum mismatch and sending the reader after the archive.
+///
+/// Shared by the two call sites deliberately. They are the same check on the
+/// same kind of text, and they had already drifted apart once — the remote
+/// one was hardened by guardian M-1 and the cached one was not.
+fn expected_digest(checksum_text: &str) -> Result<&str> {
+    let digest = checksum_text
+        .split_whitespace()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Invalid checksum format: no digest"))?;
+
+    if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
+        bail!(
+            "Invalid checksum format: expected 64 hex characters, got {} \
+             characters",
+            digest.len()
+        );
+    }
+
+    Ok(digest)
+}
+
 /// Re-verify a cached archive against its stored SHA-256 checksum.
 fn verify_cached_archive(
     archive_path: &Path,
     checksum_path: &Path,
 ) -> Result<bool> {
-    let checksum_text =
-        fs::read_to_string(checksum_path).with_context(|| {
-            format!("Failed to read checksum file {}", checksum_path.display())
-        })?;
-    let expected_hash =
-        checksum_text.split_whitespace().next().ok_or_else(|| {
-            anyhow::anyhow!(
-                "Invalid checksum format in {}",
-                checksum_path.display()
-            )
-        })?;
+    let context =
+        || format!("Failed to read checksum file {}", checksum_path.display());
+
+    // Bounded for the same reason as the remote read above: this text is
+    // whatever is on disk, and only the first token of it is ever used.
+    // +1 so a file exactly at the limit is distinguishable from a breach.
+    let mut checksum_text = String::new();
+    File::open(checksum_path)
+        .with_context(context)?
+        .take(MAX_CHECKSUM_BYTES + 1)
+        .read_to_string(&mut checksum_text)
+        .with_context(context)?;
+
+    if checksum_text.len() as u64 > MAX_CHECKSUM_BYTES {
+        bail!(
+            "Checksum file {} exceeded {MAX_CHECKSUM_BYTES} bytes — refusing \
+             to use it",
+            checksum_path.display()
+        );
+    }
+
+    // Named so that the one-line form still says which file is wrong: the
+    // caller logs `{e:#}`, but `to_string()` shows only this outermost layer.
+    let expected_hash = expected_digest(&checksum_text).with_context(|| {
+        format!("Bad checksum file {}", checksum_path.display())
+    })?;
     let data = fs::read(archive_path).with_context(|| {
         format!("Failed to read archive {}", archive_path.display())
     })?;

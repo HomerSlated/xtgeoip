@@ -233,7 +233,7 @@ queued for re-verification, so a guardian run is coming regardless; bundling any
 `fetch.rs` change into that same run is close to free. Doing them piecemeal
 costs one re-audit each.
 
-### L-1 — the M-1 hardening was not applied to its sibling *(LOW, CVSS 3.1)*
+### L-1 — the M-1 hardening was not applied to its sibling *(LOW, CVSS 3.1)* ✅ DONE (2026-09-12)
 
 `verify_cached_archive` reads the checksum sidecar with an unbounded
 `fs::read_to_string` and no 64-hex-character gate. The *download* path now does
@@ -248,12 +248,26 @@ The argument for fixing it is not exposure, it is that **two paths now validate
 the same value by different rules and will drift further apart**. Factoring the
 bound-and-gate into one helper is roughly 20 lines.
 
-*Recommended.*
+**Fixed 2026-09-12.** The gate is now `expected_digest(&str) -> Result<&str>`,
+called by both sites; the bound stayed site-local, since one reads a response
+stream and the other a file. `verify_cached_archive` opens the sidecar and
+`.take(MAX_CHECKSUM_BYTES + 1)`s it, with the same exactly-at-limit distinction
+the remote read uses. Two regression tests, both confirmed failing against the
+unfixed function: an oversized sidecar carrying a *valid* digest prefix (so only
+the size can reject it), and a non-digest body. The digest bytes the suite
+actually reads are unchanged, so no root run was needed — `cargo test --lib` is
+the whole proof. 186 lib tests, clippy and fmt clean.
+
+The two sites can still drift in one respect: the bound is duplicated in spirit,
+not in code. That is deliberate — sharing it would mean a helper taking
+`impl Read`, which buys nothing and hides which limit applies where.
 
 ### L-2 — `verify_cached_archive` loads the whole archive into memory *(LOW, CVSS 3.3)*
 
 The same function `fs::read`s the entire archive rather than streaming it into
-the digest. The archive is ~10 MB, so this is a resource note, not a
+the digest. **Untouched by the L-1 fix (2026-09-12)**, which bounded the
+*sidecar* read only; this one is unchanged and still a decision, not an
+oversight. The archive is ~10 MB, so this is a resource note, not a
 vulnerability. Fixing it trades an obvious correctness proof for memory that is
 not scarce here.
 
