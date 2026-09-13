@@ -1,9 +1,12 @@
 /// xtgeoip © Haze N Sparkle 2026 (MIT)
 /// xtgeoip CLI parsing and normalization
-use std::path::PathBuf;
+use std::{ffi::OsString, path::PathBuf};
 
 use anyhow::{Result, anyhow};
-use clap::{Args, Parser, Subcommand};
+use clap::{
+    Args, CommandFactory, FromArgMatches, Parser, Subcommand, error::ErrorKind,
+    parser::ValueSource,
+};
 
 use crate::{
     action::Action,
@@ -56,7 +59,10 @@ pub struct CommonFlags {
     about = "Build and manage xt_geoip data from MaxMind GeoLite2 CSVs",
     propagate_version = false,
     disable_help_subcommand = true,
-    args_conflicts_with_subcommands = true
+    // What `args_conflicts_with_subcommands` used to render. Without the
+    // setting clap derives `xtgeoip [OPTIONS] [COMMAND]`, which reads as though
+    // `xtgeoip -b build` were valid; `try_parse_argv` still rejects it.
+    override_usage = "xtgeoip [OPTIONS]\n       xtgeoip <COMMAND>"
 )]
 pub struct Cli {
     #[command(flatten)]
@@ -118,6 +124,64 @@ pub struct Cli {
 
     #[command(subcommand)]
     pub command: Option<Commands>,
+}
+
+impl Cli {
+    /// Parse `argv` the way the program must: clap's parse, then the one rule
+    /// clap cannot express here — a top-level *action* flag and a subcommand
+    /// are mutually exclusive.
+    ///
+    /// Always call this rather than `Parser::try_parse_from`, which skips the
+    /// rule and would accept `xtgeoip -b build`.
+    ///
+    /// Why the rule is not clap's `args_conflicts_with_subcommands`, which
+    /// enforced it until 2026-09-13: that setting counts *every* matched
+    /// argument, `global = true` ones included (`clap_builder` 4.6.6 sets
+    /// `valid_arg_found` with no test for globals), so it also rejected
+    /// `xtgeoip --config X build` — a global option in the position a user
+    /// types first. The globals select no mode, so they cannot create the
+    /// ambiguity the rule exists to prevent (`-b build`: a top-level backup, or
+    /// a build with one?). Checking here keeps the rule and exempts exactly
+    /// them. It is derived from clap's own argument list rather than a list of
+    /// flags, so a new top-level flag is covered the day it is added, and it
+    /// still fails as a clap `ArgumentConflict`, so `main` still exits 2.
+    pub fn try_parse_argv<I, T>(argv: I) -> Result<Self, clap::Error>
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<OsString> + Clone,
+    {
+        let mut cmd = Self::command();
+        let matches = cmd.try_get_matches_from_mut(argv)?;
+
+        if let Some(subcommand) = matches.subcommand_name() {
+            let conflicting: Vec<String> = cmd
+                .get_arguments()
+                .filter(|a| !a.is_global_set())
+                .filter(|a| {
+                    matches.value_source(a.get_id().as_str())
+                        == Some(ValueSource::CommandLine)
+                })
+                .map(|a| a.to_string())
+                .collect();
+            // Worded as clap worded it, so the message is unchanged too.
+            let with = match conflicting.as_slice() {
+                [] => None,
+                [one] => Some(format!(" '{one}'")),
+                many => Some(format!(":\n  {}", many.join("\n  "))),
+            };
+            if let Some(with) = with {
+                return Err(cmd.error(
+                    ErrorKind::ArgumentConflict,
+                    format!(
+                        "the subcommand '{subcommand}' cannot be used \
+                         with{with}"
+                    ),
+                ));
+            }
+        }
+
+        Self::from_arg_matches(&matches).map_err(|e| e.format(&mut cmd))
+    }
 }
 
 #[derive(Subcommand)]
@@ -358,7 +422,7 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
 /// Exhaustive behavior snapshot of the CLI semantics layer.
 ///
 /// Enumerates every flag combination per context, parses it the way `main` does
-/// (`Cli::try_parse_from`), runs `normalize_cli_to_action` (pure — no root, no
+/// (`Cli::try_parse_argv`), runs `normalize_cli_to_action` (pure — no root, no
 /// filesystem, no execution), and locks the outcome against a golden file. This
 /// is the regression net for the spec-driven validator rewrite: the new
 /// evaluator must reproduce this snapshot byte-for-byte. The spec examples
@@ -369,7 +433,6 @@ pub fn normalize_cli_to_action(cli: &Cli) -> Result<CliOutcome> {
 ///   cargo test regenerate_snapshot -- --ignored
 #[cfg(test)]
 mod snapshot {
-    use clap::Parser;
 
     use super::*;
 
@@ -400,7 +463,7 @@ mod snapshot {
 
     /// Canonical outcome string for one invocation.
     fn outcome(argv: &[&str]) -> String {
-        match Cli::try_parse_from(argv) {
+        match Cli::try_parse_argv(argv) {
             Err(_) => "PARSE_ERR".to_string(),
             Ok(cli) => match normalize_cli_to_action(&cli) {
                 Ok(CliOutcome::ShowHelp) => "ShowHelp".to_string(),
@@ -472,7 +535,7 @@ mod snapshot {
 ///    the spec and docs as if it were live.
 #[cfg(test)]
 mod contradiction {
-    use clap::{CommandFactory, Parser, error::ErrorKind};
+    use clap::{CommandFactory, error::ErrorKind};
 
     use super::*;
     use crate::generated::{
@@ -529,7 +592,7 @@ mod contradiction {
     #[test]
     fn log_file_and_no_log_conflict() {
         assert!(
-            Cli::try_parse_from([
+            Cli::try_parse_argv([
                 "xtgeoip",
                 "-b",
                 "--log-file",
@@ -539,30 +602,100 @@ mod contradiction {
             .is_err()
         );
         assert!(
-            Cli::try_parse_from(["xtgeoip", "-b", "--log-file", "/tmp/x"])
+            Cli::try_parse_argv(["xtgeoip", "-b", "--log-file", "/tmp/x"])
                 .is_ok()
         );
-        assert!(Cli::try_parse_from(["xtgeoip", "-b", "--no-log"]).is_ok());
+        assert!(Cli::try_parse_argv(["xtgeoip", "-b", "--no-log"]).is_ok());
     }
 
-    /// Where the flags may appear. `args_conflicts_with_subcommands` makes
-    /// any top-level argument conflict with a subcommand, and a `global` arg
-    /// is not exempt — so the override must follow the subcommand. Pinned
-    /// because it is a real wart: the rejected form is the one a user is most
-    /// likely to type, and the man page documents the working position.
+    /// A value for `arg` on the command line: a flag takes none.
+    fn argv_for(arg: &clap::Arg) -> Vec<String> {
+        let long =
+            format!("--{}", arg.get_long().expect("every option is long"));
+        if arg.get_action().takes_values() {
+            vec![long, "/tmp/x".to_owned()]
+        } else {
+            vec![long]
+        }
+    }
+
+    /// Every global option works on either side of every subcommand, and
+    /// reaches the same field either way.
+    ///
+    /// The position before the subcommand was rejected until 2026-09-13, by
+    /// `args_conflicts_with_subcommands`, which clap applies to globals too —
+    /// and it is the form a user types first. Derived from clap, so a new
+    /// global is covered without editing this.
     #[test]
-    fn global_options_follow_the_subcommand() {
+    fn global_options_go_either_side_of_the_subcommand() {
+        let cmd = Cli::command();
+        let globals: Vec<&clap::Arg> =
+            cmd.get_arguments().filter(|a| a.is_global_set()).collect();
+        assert!(globals.len() >= 4, "expected at least the four globals");
+
+        for sub in ["build", "fetch", "run", "conf"] {
+            for arg in &globals {
+                let opt = argv_for(arg);
+                let before: Vec<String> = ["xtgeoip".to_owned()]
+                    .into_iter()
+                    .chain(opt.iter().cloned())
+                    .chain([sub.to_owned()])
+                    .collect();
+                let after: Vec<String> = ["xtgeoip".to_owned(), sub.to_owned()]
+                    .into_iter()
+                    .chain(opt.iter().cloned())
+                    .collect();
+                let render = |argv: &[String]| match Cli::try_parse_argv(argv) {
+                    Ok(c) => format!(
+                        "{:?} {:?} {:?} {}",
+                        c.config, c.ca_file, c.log_file, c.no_log
+                    ),
+                    Err(e) => panic!("{argv:?} rejected: {e}"),
+                };
+                assert_eq!(
+                    render(&before),
+                    render(&after),
+                    "{opt:?} with {sub}"
+                );
+            }
+        }
+    }
+
+    /// Every non-global top-level argument still conflicts with a subcommand,
+    /// as a clap `ArgumentConflict` — which `main` exits 2 on, as before.
+    ///
+    /// This is the rule `args_conflicts_with_subcommands` used to enforce and
+    /// `Cli::try_parse_argv` now does. `xtgeoip -b build` must not quietly
+    /// become either a top-level backup or a build with one. Derived from
+    /// clap rather than listing `-b -c -p -f -l`, so a flag added later is
+    /// held to it too. Confirmed failing with the check removed.
+    #[test]
+    fn top_level_flags_still_conflict_with_a_subcommand() {
+        let cmd = Cli::command();
+        let top_level: Vec<&clap::Arg> =
+            cmd.get_arguments().filter(|a| !a.is_global_set()).collect();
         assert!(
-            Cli::try_parse_from(["xtgeoip", "build", "--log-file", "/tmp/x"])
-                .is_ok(),
-            "after the subcommand must work"
+            top_level.len() >= 5,
+            "expected at least -b -c -p -f -l at the top level"
         );
-        assert!(
-            Cli::try_parse_from(["xtgeoip", "--log-file", "/tmp/x", "build"])
-                .is_err(),
-            "before the subcommand is rejected by \
-             args_conflicts_with_subcommands"
-        );
+
+        for sub in ["build", "fetch", "run", "conf"] {
+            for arg in &top_level {
+                let argv: Vec<String> = ["xtgeoip".to_owned()]
+                    .into_iter()
+                    .chain(argv_for(arg))
+                    .chain([sub.to_owned()])
+                    .collect();
+                match Cli::try_parse_argv(&argv) {
+                    Err(e) => assert_eq!(
+                        e.kind(),
+                        ErrorKind::ArgumentConflict,
+                        "{argv:?}: {e}"
+                    ),
+                    Ok(_) => panic!("{argv:?} was accepted"),
+                }
+            }
+        }
     }
 
     /// Every guard table, with the context name used in failure messages.
@@ -590,7 +723,7 @@ mod contradiction {
     ///   as valid is what made this test fail on its first run against
     ///   `xtgeoip` with no arguments.
     fn accepted(argv: &[&str]) -> bool {
-        match Cli::try_parse_from(argv) {
+        match Cli::try_parse_argv(argv) {
             Err(e) => {
                 matches!(
                     e.kind(),

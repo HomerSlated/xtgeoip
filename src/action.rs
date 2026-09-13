@@ -651,8 +651,6 @@ mod tests {
     /// legacy) are the goldens' job; this one owns membership and order.
     #[test]
     fn spec_steps_agree_with_plan() {
-        use clap::Parser;
-
         use crate::{
             cli::{Cli, CliOutcome, normalize_cli_to_action},
             generated::cli_matrix::CLI_MATRIX,
@@ -662,7 +660,7 @@ mod tests {
 
         for ex in CLI_MATRIX {
             let argv: Vec<&str> = ex.cmd.split_whitespace().collect();
-            let action = match Cli::try_parse_from(&argv) {
+            let action = match Cli::try_parse_argv(&argv) {
                 Ok(cli) => match normalize_cli_to_action(&cli) {
                     Ok(CliOutcome::Action(a)) => Some(a),
                     _ => None,
@@ -880,8 +878,6 @@ mod tests {
     /// and be silently reverted by the next docgen run.
     #[test]
     fn manpage_execution_order_agrees_with_the_planner() {
-        use clap::Parser;
-
         use crate::cli::{Cli, CliOutcome, normalize_cli_to_action};
 
         /// Prose phrase → the step name `cli.yaml` and `step_names` use.
@@ -956,7 +952,7 @@ mod tests {
             }
 
             let argv: Vec<&str> = argv_str.split_whitespace().collect();
-            let action = Cli::try_parse_from(&argv)
+            let action = Cli::try_parse_argv(&argv)
                 .ok()
                 .and_then(|cli| match normalize_cli_to_action(&cli) {
                     Ok(CliOutcome::Action(a)) => Some(a),

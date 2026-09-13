@@ -9,7 +9,7 @@
 use std::process;
 
 use anyhow::Result;
-use clap::{CommandFactory, Parser, error::ErrorKind};
+use clap::{CommandFactory, error::ErrorKind};
 use xtgeoip::{
     action::{Action, is_root, run_action},
     cli::{self, Cli, CliOutcome},
@@ -153,7 +153,7 @@ fn run(cli: Cli) -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    let cli = match Cli::try_parse() {
+    let cli = match Cli::try_parse_argv(std::env::args_os()) {
         Ok(cli) => cli,
         Err(e) => match e.kind() {
             ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => {

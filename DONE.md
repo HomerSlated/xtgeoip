@@ -2542,3 +2542,42 @@ no longer say "must be run as root".
 The root-free CLI enumeration (memory `cli-enumeration`) classified VALID by
 the "must be root" message. That signal is gone: valid combinations now stop
 at the unreadable config instead, still before any step.
+
+## CLI
+
+### `--config` is rejected before a subcommand *(cosmetic)* ✅ DONE (2026-09-13)
+
+Found during #98 (closed; see `DONE.md`). `xtgeoip --config X build` fails with
+*"the subcommand 'build' cannot be used with '--config <PATH>'"*, because the
+top level treats its own options as conflicting with a subcommand; `xtgeoip
+build --config X` is accepted. The man page calls it a global option, so a user
+will type the rejected form first. Cosmetic, unfixed, recorded here so it is
+not rediscovered.
+
+**Wider than recorded, and not one line.** All four global options were
+rejected before a subcommand, not only `--config`. clap's
+`args_conflicts_with_subcommands` counts every matched argument, globals
+included — `clap_builder` 4.6.6 sets `valid_arg_found` with no test for
+`is_global_set()` — and offers no per-argument exemption. The same setting is
+what correctly rejects `xtgeoip -b build`, which is genuinely ambiguous (a
+top-level backup, or a build with one?), so it could not simply be dropped.
+
+**Fixed by moving the rule, not removing it.** The setting is gone;
+`Cli::try_parse_argv` parses with clap and then rejects any *non-global*
+top-level argument given with a subcommand, as a clap `ArgumentConflict`, so
+`main` still exits 2. The check reads clap's own argument list, so a new
+top-level flag is held to it with no edit. Every parse site — `main` and every
+test — goes through it; the `use clap::Parser` imports are gone, so a
+direct `try_parse_from` needs one re-added on purpose. `override_usage`
+restores the two-line `Usage:` that the setting used to render, since the
+derived `xtgeoip [OPTIONS] [COMMAND]` reads as though `-b build` were valid.
+
+Compared against the previous binary: `--help` and the multi-flag rejection
+are byte-identical, and the 144-line CLI snapshot and the spec-vs-parser
+checks pass unchanged. The pinning test `global_options_follow_the_subcommand`
+is replaced by two derived from clap, each confirmed failing against its own
+mutant and passing against the other's: every global on either side of every
+subcommand reaches the same field, and every non-global top-level argument
+before every subcommand is an `ArgumentConflict`. The man page's OPTIONS
+section now says which options go where.
+

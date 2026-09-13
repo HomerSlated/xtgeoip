@@ -6,7 +6,7 @@ Open work only. Everything closed up to 2026-09-05 is archived in
 close here move to the end of `DONE.md`, under *Closed after the archive*;
 there is no `TODO_tldr.md` any more.
 
-Opened 2026-09-06. What is here now: three open items, the informational
+Opened 2026-09-06. What is here now: two open items, the informational
 findings from two guardian audits, one policy question, and the three lists
 that are normative rather than historical.
 
@@ -39,15 +39,6 @@ constraints before implementation begins.
 ---
 
 ## OPEN
-
-### `--config` is rejected before a subcommand *(cosmetic)*
-
-Found during #98 (closed; see `DONE.md`). `xtgeoip --config X build` fails with
-*"the subcommand 'build' cannot be used with '--config <PATH>'"*, because the
-top level treats its own options as conflicting with a subcommand; `xtgeoip
-build --config X` is accepted. The man page calls it a global option, so a user
-will type the rejected form first. Cosmetic, unfixed, recorded here so it is
-not rediscovered.
 
 ### Guardian re-signing
 

@@ -1109,8 +1109,10 @@ fn main() -> anyhow::Result<()> {
     let sandbox = create_sandbox(keep_sandbox, &stub_url)?;
     let stub = create_stub(&sandbox.root, port, &stub_url)?;
 
-    // Both are appended, never prepended: the top-level parser rejects its own
-    // options before a subcommand, and appending is the only channel that
+    // Both are appended. Since 2026-09-13 a global option parses on either side
+    // of a subcommand, so the position is no longer forced; appending stays
+    // because it leaves each case's own argv intact at the front, where a
+    // failure report shows it, and arguments are the only channel that
     // survives the `sudo` each case is spawned through.
     let common_args = [
         "--config".to_string(),

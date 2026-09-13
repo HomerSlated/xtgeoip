@@ -108,6 +108,19 @@ Any plaintext credentials already in the file are removed as it is written.
 '''
 
 options = '''
+The four global options \(em
+.BR \-\-log\-file ,
+.BR \-\-no\-log ,
+.B \-\-config
+and
+.B \-\-ca\-file
+\(em may be given before or after the subcommand.
+The other top-level options select an action of their own, so they cannot be
+combined with a subcommand:
+.B "xtgeoip \-b build"
+is rejected, where
+.B "xtgeoip build \-b"
+builds with a backup.
 .TP
 .BR \-b ", " \-\-backup
 Back up the current binary database to a compressed tarball in the archive
@@ -229,10 +242,6 @@ Because the override is known before the configuration is read, it also
 captures a failure to load that configuration \(em which the configured path
 cannot, since it is not known until the load has succeeded.
 Applies to every command.
-Give it after the subcommand
-.RB ( "xtgeoip build \-\-log\-file /tmp/x.log" ):
-top-level options and subcommands are mutually exclusive, so placing it before
-one is rejected.
 .TP
 .B \-\-no\-log
 Disable file logging, overriding the
