@@ -69,6 +69,13 @@ cargo test --lib -- --ignored regenerate_snapshot   # src/cli_snapshot.golden
 cargo test --bin xtgeoip-tests -- --ignored stub_serves   # the HTTPS stub
 ```
 
+**Never put `\n` inside a long string literal in a test fixture.** `rustfmt.toml`
+enables `format_strings`, which reflows long literals and will wrap *inside* an
+escape — turning `\n` into a line continuation and deleting the line break. It
+has silently corrupted two fixtures (a PEM bundle, a CSV header); the first
+made a test pass for the wrong reason. Use a raw string, or keep the pieces
+short and join them with `format!`, as `fetch::tests::geolite_zip` does.
+
 **Integration suite** (`xtgeoip-tests`) — drives the real release binary
 end to end:
 

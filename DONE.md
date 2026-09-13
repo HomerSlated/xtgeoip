@@ -2581,3 +2581,88 @@ subcommand reaches the same field, and every non-global top-level argument
 before every subcommand is an `ArgumentConflict`. The man page's OPTIONS
 section now says which options go where.
 
+## CONFIG AND CONF SUBCOMMAND (cont.)
+
+### The config file's mode is now stated, not inherited ✅ DONE (2026-09-13)
+
+Never a ticket — it came out of the 2026-09-12 guardian run as an aside, and is
+recorded because the *reasoning* is worth keeping, not the change.
+`write_system_config_atomically` built its temp file with
+`NamedTempFile::new_in`, then `persist`ed it, and `persist` renames — so
+tempfile's default mode became the mode of `/etc/xtgeoip.conf` after
+`conf --set-credentials`. The value was right (0600) and nothing in this tree
+said so, or would have noticed a tempfile release changing its mind.
+
+Now `credentials_temp_file()` states `.permissions(0o600)`. Split out as a
+function because `write_system_config_atomically` writes to
+`system_config_path()`, a process-global `OnceLock` a unit test must not set —
+so the mode was only testable if the file's *creation* was. Two tests: the mode
+before and after `persist` (the rename is the part that matters, since it is
+what the operator is left holding), and the deliberate asymmetry with
+`create_default_config`'s 0644, pinned so a later reader does not "fix" it. A
+credential-free example may be world-readable; a file that has held ciphertext
+should not be.
+
+Honest about what the tests prove: tempfile 3.27's default is already 0600, so
+removing the explicit call leaves both passing. They hold the *value*, not the
+explicitness. That was the point — the value was correct by a dependency's
+default, and a default is not a decision.
+
+## GUARDIAN FINDINGS — `src/fetch.rs`, 2026-09-05 (cont.)
+
+### I-2 — the raw remote checksum body is persisted verbatim *(INFORMATIONAL, CVSS 0.0)* ✅ DONE (2026-09-13)
+
+After verification succeeds, the *entire* response body is written to the
+sidecar, not the validated 64-character token — so up to 4 KiB of
+attacker-chosen UTF-8 lands in a root-owned file under `archive_dir`.
+
+Inert: post-M-1 the body is capped at 4 KiB, its first token is proven to be 64
+hex characters, and nothing ever reads past that first token
+(`verify_cached_archive` takes `split_whitespace().next()`). Recorded only
+because storing unvalidated remote text is not obvious from the call site.
+
+**✅ DONE (2026-09-13).** The sidecar is now
+`format!("{expected_hash}  {name}\n")`, built from values already verified, so
+no unvalidated remote text reaches a root-owned file. The regression test is
+the first in the unit suite to drive a remote fetch to `Ok` — which is what
+lets it see what the successful path leaves on disk — and it also re-reads the
+file through `verify_cached_archive`, since canonicalising the sidecar would
+be a poor trade if it broke the cached-reuse path that consumes it.
+
+## GUARDIAN FINDINGS — `fetch.rs`, `config.rs`, `conf.rs`, 2026-09-12 (cont.)
+
+Two informational findings from that run, closed 2026-09-13.
+
+- **I-1** — `--ca-file` is silently ignored in `FetchMode::Local`. **✅ DONE
+  (2026-09-13)** — the man page's `--ca-file` entry now says the option has no
+  effect on `build` and that a bad path given there is therefore not reported.
+  Documented rather than diagnosed: `fetch()` early-returns before
+  `build_client`, and moving the read earlier would make a local build fail on
+  a bundle it has no use for.
+- **I-2** — `fs::read(ca_file)` was the one unbounded read left in `fetch.rs`.
+  **✅ DONE (2026-09-13)** — bounded by `MAX_CA_BUNDLE_BYTES` (1 MiB) through
+  `File::open().take(n + 1)` with an explicit breach bail, the same shape as
+  the checksum read. Two tests; the oversized one is confirmed failing against
+  a missing `+ 1`, and both say plainly that they cannot discriminate the
+  `take` itself — that bounds memory, which no unit test should demonstrate.
+
+## WORKFLOW HAZARD
+
+### `format_strings` has now mangled two test fixtures
+
+Not a defect in the code, a hazard in the workflow, recorded after the second
+occurrence. `rustfmt.toml` enables `format_strings`, which reflows long string
+literals — and it will wrap *inside* an escape, turning `\n` into a line
+continuation and deleting the line break. On 2026-09-12 that silently broke
+`CORRUPT_DER_PEM`'s PEM framing, so an I-4 test passed for the wrong reason.
+On 2026-09-13 it broke a CSV fixture's header row the same way; that one failed
+loudly, because the code under test validates CSV headers.
+
+The difference between the two outcomes is luck, not diligence. **The rule:
+never put `\n` inside a long string literal in a fixture.** Use a raw string,
+or keep the pieces short and join them with `format!`, as `geolite_zip()` now
+does. A fixture whose meaning depends on an escape surviving the formatter is
+a fixture that can lie.
+
+The operative rule is in `CLAUDE.md`; the two occurrences are recorded here.
+

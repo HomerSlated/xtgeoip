@@ -5,7 +5,7 @@
 use std::{
     fs,
     io::{self, IsTerminal, Write},
-    os::unix::fs::OpenOptionsExt,
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::Path,
     process::Command,
 };
@@ -245,6 +245,31 @@ fn check_system_config_writable() -> Result<()> {
     Ok(())
 }
 
+/// A temp file in `dir` for the config rewrite, at mode 0600.
+///
+/// Stated, not inherited. `persist` renames, so the temp file's mode becomes
+/// the *config's* mode — which meant tempfile's default was silently deciding
+/// the permissions of the one file that holds the credentials. The value is
+/// the one that was already in force; what changes is that this module now
+/// decides it, and a test holds it.
+///
+/// Deliberately tighter than `create_default_config`'s 0644: that writes a
+/// credential-free example, while the only caller of this path is
+/// `set_credentials`. A file that has held ciphertext should not stay
+/// world-readable because the file that never did is.
+///
+/// Split out because `write_system_config_atomically` writes to
+/// `system_config_path()`, a process-global `OnceLock` that a unit test must
+/// not set — so the mode is only testable if the file's creation is.
+fn credentials_temp_file(dir: &Path) -> Result<tempfile::NamedTempFile> {
+    tempfile::Builder::new()
+        .permissions(fs::Permissions::from_mode(0o600))
+        .tempfile_in(dir)
+        .with_context(|| {
+            format!("Failed to create a temp file in {}", dir.display())
+        })
+}
+
 /// Write `contents` to `SYSTEM_CONFIG` atomically: a temp file in the same
 /// directory, then an atomic rename, so a process killed mid-write cannot
 /// leave the one file this whole scheme depends on half-written.
@@ -255,9 +280,7 @@ fn write_system_config_atomically(contents: &str) -> Result<()> {
             system_config_path().display()
         )
     })?;
-    let mut tmp = tempfile::NamedTempFile::new_in(dir).with_context(|| {
-        format!("Failed to create a temp file in {}", dir.display())
-    })?;
+    let mut tmp = credentials_temp_file(dir)?;
     tmp.write_all(contents.as_bytes())
         .context("Failed to write new config contents")?;
     tmp.persist(system_config_path()).with_context(|| {
@@ -347,11 +370,13 @@ fn set_credentials() -> Result<()> {
              stdin is not a terminal."
         );
     }
-    // SYSTEM_CONFIG itself is world-readable, so the read below succeeds
-    // even unprivileged — but writing the result back requires root. Check
-    // that now, before prompting for anything, so an unprivileged operator
-    // doesn't type their real license_key and wait on the KDF only to hit
-    // EACCES at the last step.
+    // The read below may well succeed unprivileged — the config is 0644 until
+    // this function first succeeds, after which `credentials_temp_file`'s 0600
+    // carries onto it through the rename and only root can read it at all.
+    // Either way, writing the result back requires root. Check that now,
+    // before prompting for anything, so an unprivileged operator doesn't type
+    // their real license_key and wait on the KDF only to hit EACCES at the
+    // last step.
     check_system_config_writable()?;
 
     let raw = fs::read_to_string(system_config_path()).with_context(|| {
@@ -442,6 +467,47 @@ mod tests {
     /// An existing regular file is refused too. The caller only reaches this
     /// for a config it found absent, so anything there now appeared in the
     /// window between — which is exactly what `O_EXCL` is for.
+    /// The mode the credentials file ends up with, and that it survives the
+    /// rename. Both halves matter: `persist` is what carries the temp file's
+    /// mode onto the config, so asserting only on the temp file would not say
+    /// what the operator is left holding.
+    ///
+    /// It does not discriminate the explicit `.permissions()` call — tempfile
+    /// 3.27's default is already 0600, so removing the call leaves this
+    /// passing, as mutating it confirmed. That is the point: the value was
+    /// correct by a dependency's default and nothing said so. This holds the
+    /// value against a tempfile release that changes its mind, and against an
+    /// edit here; the call itself is documentation.
+    #[test]
+    fn the_credentials_temp_file_is_0600_before_and_after_persist() {
+        let dir = tempfile::tempdir().unwrap();
+        let tmp = credentials_temp_file(dir.path()).unwrap();
+        let mode =
+            |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(tmp.path()), 0o600, "temp file");
+
+        let dest = dir.path().join("xtgeoip.conf");
+        tmp.persist(&dest).unwrap();
+        assert_eq!(mode(&dest), 0o600, "after persist");
+    }
+
+    /// The two config-writing paths disagree on purpose, so the disagreement
+    /// is pinned rather than left to be "fixed" by a later reader: the
+    /// credential-free example is 0644, the file that has held ciphertext is
+    /// 0600.
+    #[test]
+    fn the_default_config_is_more_permissive_than_the_credential_rewrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let example = dir.path().join("example.conf");
+        create_new_file(&example, b"", 0o644).unwrap();
+        let rewrite = credentials_temp_file(dir.path()).unwrap();
+
+        let mode =
+            |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&example), 0o644);
+        assert_eq!(mode(rewrite.path()), 0o600);
+    }
+
     #[test]
     fn create_new_file_refuses_an_existing_file() {
         let dir = tempfile::tempdir().unwrap();

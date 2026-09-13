@@ -42,22 +42,41 @@ constraints before implementation begins.
 
 ### Guardian re-signing
 
-One outstanding row in `private/guardian/needs_reverification.md`:
-`src/fetch.rs`, for a **comment-only** correction made after the
-2026-09-12T20:43 run signed it (the note on what `from_pem_bundle` does and
-does not validate). Its `.sig` is **deliberately left in place** so the next
-guardian run raises the BAD signature under its own power rather than
-inheriting anyone's word for it. Batch the re-sign with the next change that
-touches `fetch.rs`.
+**The queue is empty as of 2026-09-13T13:42Z.** All four signed files —
+`src/fetch.rs`, `src/conf.rs`, `src/config.rs`, `src/secrets.rs` — verify GOOD.
+Two audits that day (`guardian_report_20260913_132722.md` and its addendum
+`…_134248.md`) cleared five rows, including the 2026-09-12 comment-only row
+that had never been annotated.
 
-`src/config.rs`, `src/conf.rs` and `src/secrets.rs` verify GOOD as of
-2026-09-12. The `requires_root()` change touched no signed file.
+One wording correction is owed to `src/conf.rs`, deliberately **not** made:
+`set_credentials`'s comment says that once the config is 0600 "only root can
+read it at all". At 0600 it is the *owner* who keeps read access — root only
+because the shipped config is root-owned; under `--config PATH` created by a
+non-root user, that user is the one who can still read it. Nothing weakens, and
+the auditor recorded it as no-action (CVSS 0.0). Correcting it means a third
+re-sign round for a wording nit, so it waits for the next change that touches
+`conf.rs` — but a future rewording must not build on "root" where "the owner"
+is meant.
 
 ### Packaging and deployment
 
-Early. Staging exists (`conf/etc`, `conf/usr`, `extra/dkms`, `extra/ufw`);
-there is no `debian/` directory and no spec file. Verified 2026-09-06: neither
-`debian/`, `rpm/`, nor any `*.spec` is present.
+Early, but no longer unexamined: `docs/design/packaging.md` (2026-09-13)
+measures the install set and settles the shape. Six files and two directories,
+8.85 MiB; eight recipes cover the top 20 distributions and are the same package
+eight times over; deb and `PKGBUILD` first.
+
+**The decision in it worth knowing without reading it**: `/etc/xtgeoip.conf`
+must *not* be a packaged file. `conf --set-credentials` rewrites it in place
+and leaves it 0600 with ciphertext in it, so as a dpkg conffile or an rpm
+`%config` every upgrade would diff it against the shipped original and either
+prompt or relocate live credentials. The example ships under
+`/usr/share/xt_geoip/` and `conf --default` creates the real one.
+
+Blocking everything: **there is no git tag**. `publish = false`, so every
+recipe builds from a tag or a release asset, and neither exists. Tag `v0.3.0`
+first.
+
+Still true as of 2026-09-13: no `debian/`, no `rpm/`, no `*.spec`.
 
 ---
 
@@ -75,16 +94,11 @@ junk, key-only, truncated `BEGIN`, invalid base64, PEM-wrapped garbage DER,
 good-cert-then-corrupt — all error; none falls back to the system roots.
 Replacement rather than merge was shown live against a public site.
 
-C-1, CF-1 and I-4 are closed and in `DONE.md`. What remains is informational.
+C-1, CF-1, I-1, I-2 and I-4 are closed and in `DONE.md`. What remains is
+informational, and stays here so a later audit does not re-file it.
 
 ### Informational, from the same run
 
-- **I-1** — `--ca-file` is silently ignored in `FetchMode::Local`: `fetch()`
-  early-returns before `build_client`, so a mistyped bundle is not diagnosed on
-  that path. No security impact (no TLS happens). *Worth a man-page sentence.*
-- **I-2** — `fs::read(ca_file)` is the one unbounded read left in `fetch.rs`.
-  Operator-supplied path, process already root, so not a trust-boundary read; a
-  1 MiB cap would make provenance irrelevant. *Optional, consistent with M-1.*
 - **I-3** — L-2 traded unbounded memory for unbounded *time*: a FIFO planted at
   `archive_path` blocks `io::copy` where `fs::read` grew memory instead.
   Requires a local write to root-owned `archive_dir`. Not a regression, and the
@@ -106,8 +120,8 @@ From `private/guardian/guardian_report_20260905_213041.md`. The file **passed**:
 advisory, and every item fails closed. Locations are given as function names
 rather than line numbers, which drift.
 
-L-1 and L-2 closed on 2026-09-12 and are in `DONE.md`. The four
-informational findings stay here, because two of them exist to stop a future
+L-1, L-2 and I-2 are closed and in `DONE.md`. The other three informational
+findings stay here, because two of them exist to stop a future
 reader "fixing" something deliberate.
 
 ### I-1 — uppercase hex digests are rejected *(INFORMATIONAL)*
@@ -121,20 +135,6 @@ all-digit digest, for which upper and lower case are identical — a **false
 PASS**. It was retracted as void and re-run with a digest containing real `a-f`
 letters. The same shape as asking "does this SHA resolve?" when the question is
 "is it reachable?".
-
-### I-2 — the raw remote checksum body is persisted verbatim *(INFORMATIONAL, CVSS 0.0)*
-
-After verification succeeds, the *entire* response body is written to the
-sidecar, not the validated 64-character token — so up to 4 KiB of
-attacker-chosen UTF-8 lands in a root-owned file under `archive_dir`.
-
-Inert: post-M-1 the body is capped at 4 KiB, its first token is proven to be 64
-hex characters, and nothing ever reads past that first token
-(`verify_cached_archive` takes `split_whitespace().next()`). Recorded only
-because storing unvalidated remote text is not obvious from the call site.
-
-*Optional hardening*: persist a canonical `format!("{expected_hash}  {name}\n")`.
-Cheap, and it would compose well with `expected_digest`, the L-1 helper.
 
 ### I-3 — `MAX_REDIRECTS` permits one fewer hop than its name suggests *(INFORMATIONAL, CVSS 0.0)*
 

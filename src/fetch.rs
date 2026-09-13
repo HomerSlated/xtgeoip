@@ -31,9 +31,19 @@ const DEFAULT_TIMEOUT_SECS: u64 = 300;
 /// The checksum body is the one remote read that used to have no bound
 /// (guardian M-1). A SHA-256 digest plus a filename is under 100 bytes;
 /// 4 KiB leaves room for a trailing comment or CRLF without leaving the
-/// response free to be gigabytes long. Capping the read also caps what is
-/// persisted, since the same text is written to `checksum_path`.
+/// response free to be gigabytes long. It bounds the read alone: since
+/// 2026-09-13 the sidecar written to `checksum_path` is a canonical line
+/// rebuilt from the verified digest, so no remote text is persisted at any
+/// size (guardian I-2, 2026-09-05).
 const MAX_CHECKSUM_BYTES: u64 = 4 * 1024;
+
+/// The CA bundle is operator-supplied and read by a process that is already
+/// root, so this is not a trust-boundary read — it is the last unbounded one
+/// left in this file, and a bound makes that provenance irrelevant. A PEM
+/// certificate is roughly 1–2 KiB, so 1 MiB is hundreds of anchors: far past
+/// any real bundle (`/etc/ssl/certs/ca-certificates.crt` is ~200 KiB) and far
+/// short of a file that could exhaust memory.
+const MAX_CA_BUNDLE_BYTES: u64 = 1024 * 1024;
 
 const MAX_RETRIES: u32 = 3;
 const BASE_DELAY_SECS: u64 = 2;
@@ -80,9 +90,24 @@ fn build_client(ca_file: Option<&Path>) -> Result<Client> {
         return Ok(builder.build()?);
     };
 
-    let pem = fs::read(path).with_context(|| {
-        format!("could not read the CA bundle at {}", path.display())
-    })?;
+    let context =
+        || format!("could not read the CA bundle at {}", path.display());
+    let mut pem = Vec::new();
+    File::open(path)
+        .with_context(context)?
+        .take(MAX_CA_BUNDLE_BYTES + 1)
+        .read_to_end(&mut pem)
+        .with_context(context)?;
+    // `+ 1` above, so a bundle of exactly the limit stays distinguishable
+    // from one that breached it — the same distinction the checksum read
+    // makes.
+    if pem.len() as u64 > MAX_CA_BUNDLE_BYTES {
+        bail!(
+            "the CA bundle at {} exceeded {MAX_CA_BUNDLE_BYTES} bytes — \
+             refusing to use it",
+            path.display()
+        );
+    }
     let certs = Certificate::from_pem_bundle(&pem).with_context(|| {
         format!("{} is not a PEM certificate bundle", path.display())
     })?;
@@ -464,8 +489,19 @@ fn acquire_remote_archive(
     // pursued on drop.
     partial.disarm();
 
-    // Save checksum
-    fs::write(checksum_path, checksum_text)
+    // Save the checksum in canonical `sha256sum` form rather than the response
+    // body it was proved against. The body is remote text: bounded at
+    // `MAX_CHECKSUM_BYTES` and proved to *start* with 64 hex characters, but
+    // everything after that first token is unvalidated and nothing ever reads
+    // it, so persisting it put up to 4 KiB of attacker-chosen UTF-8 into a
+    // root-owned file for no reader's benefit (guardian I-2, 2026-09-05).
+    // What is written now is derived entirely from values this function has
+    // already verified.
+    let name = archive_path
+        .file_name()
+        .unwrap_or(archive_path.as_os_str())
+        .to_string_lossy();
+    fs::write(checksum_path, format!("{expected_hash}  {name}\n"))
         .context("Failed to save checksum")?;
 
     messages::info(&format!("Saved archive as {}", archive_path.display()));

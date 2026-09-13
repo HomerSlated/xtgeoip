@@ -1,0 +1,261 @@
+# Design: Packaging and release
+
+Status: **analysis, not a plan**. Written 2026-09-13. Nothing here is
+implemented; there is no `debian/`, no spec file, and no git tag. One decision
+in §2 is load-bearing and should be settled before any recipe is written.
+
+Related: TODO.md (*Packaging and deployment*), `98-state-ownership-recovery.md`
+§4 (the ownership model this inherits), #103 (why the config file cannot be a
+packaged file).
+
+Measurements are from the 0.3.0 release build on 2026-09-13, x86-64, glibc.
+
+---
+
+## 0. Summary
+
+1. The install set is **six files and two directories**, 8.85 MiB, of which the
+   binary is 99.9%. §1.
+2. **`/etc/xtgeoip.conf` must not be a packaged file.** It is rewritten in
+   place by `conf --set-credentials` and left at 0600 holding ciphertext. As a
+   dpkg conffile or an rpm `%config` it would be diffed against the shipped
+   original on every upgrade, and the operator's credentials would be prompted
+   over or moved to `.rpmsave`. §2.
+3. Three build facts constrain every recipe: `aws-lc-rs` needs a C toolchain,
+   the lockfile has 306 crates, and `publish = false` means there is no
+   crates.io tarball to build from. §3.
+4. Eight recipes cover effectively every distribution anyone will ask about,
+   and they share one shape. §5.
+5. Release assets should be a per-target tarball plus a **self-published**
+   source tarball and `SHA256SUMS` — GitHub's auto-generated source archive is
+   not a stable artefact to check against. §4.
+
+---
+
+## 1. The install set
+
+| File | Target | Mode | Bytes |
+|---|---|---|---|
+| `xtgeoip` (release, stripped) | `/usr/bin/xtgeoip` | 0755 root:root | 9,265,824 |
+| `xtgeoip.1.gz` | `/usr/share/man/man1/` | 0644 root:root | 6,453 |
+| `xtgeoip.conf.example` | `/usr/share/xt_geoip/` | 0644 root:root | 621 |
+| logrotate fragment | `/etc/logrotate.d/xtgeoip` | 0644 root:root | 118 |
+| `LICENSE` | `/usr/share/doc/xtgeoip/` | 0644 root:root | 1,066 |
+| `README.md` | `/usr/share/doc/xtgeoip/` | 0644 root:root | 3,235 |
+| — | `/var/lib/xt_geoip/` | 0755 root:root | dir |
+| — | `/usr/share/xt_geoip/` | 0755 root:root | dir |
+
+**Total 9,277,317 bytes (8.85 MiB)**; 11.88 MiB unstripped. Compressed: 3.76 MB
+gzip -9, 2.94 MB zstd -19, 2.71 MB xz -9 — so a 2.7–3.0 MB package.
+
+`xtgeoip.conf.example`'s path is **not a convention**: `conf.rs` holds
+`/usr/share/xt_geoip/xtgeoip.conf.example` as a compiled-in constant
+(`DEFAULT_CONFIG`) and reads it to print the default config and to create the
+system one. A package that installs it anywhere else breaks
+`conf --default`, `conf --show`, `conf --edit` and `conf --set-credentials`,
+all at once and only at runtime.
+
+The two directories are the configured `archive_dir` and `output_dir` defaults,
+named in `xtgeoip.conf.example` and in the man page's FILES section. The code
+does *not* need the package to create them — `fetch` and `build` both
+`create_dir_all` on demand, and `check_plan_writable` probes the nearest
+existing ancestor precisely so a missing directory under a writable parent is
+not an error. Package them anyway: it puts their ownership and mode under the
+package manager's control rather than inheriting whatever umask the first root
+run happened to have, and it lets an uninstall reason about them.
+
+### Deliberately not installed
+
+- **`xtgeoip-tests` and `xtgeoip-docgen`.** Development tools. One requires
+  root, a release build and `openssl(1)`; the other regenerates files in the
+  source tree. Neither has any meaning on an installed system.
+- **`/etc/xtgeoip.conf`.** §2.
+- **`extra/dkms/`.** A vendored copy of xtables-addons' `xt_geoip` kernel
+  module — third-party, GPL, and already packaged by every distribution here
+  as `xtables-addons`. Depend on it; do not ship it. Shipping a second copy of
+  someone else's kernel module under our own package name is the kind of thing
+  a distribution will reject, and rightly.
+- **`extra/ufw/`.** Prose fragments that say "add this block before the COMMIT
+  line". They are documentation, not installable configuration, and belong
+  under `/usr/share/doc/xtgeoip/examples/` if anywhere.
+
+---
+
+## 2. The config file cannot be a packaged file
+
+This is the decision that shapes the rest, and it runs against the reflex to
+ship a default configuration.
+
+`conf --set-credentials` reads `/etc/xtgeoip.conf`, splices an encrypted
+`[maxmind.credentials]` table into it, and writes it back through a temp file
+and an atomic rename. Since 2026-09-13 that temp file states mode 0600, so the
+installed file ends up 0600 root:root with ciphertext in it — see
+`conf.rs::credentials_temp_file`.
+
+Both major packaging systems treat a file under `/etc` as the administrator's
+to modify and the package's to compare against:
+
+- **dpkg conffile**: on upgrade, dpkg compares the on-disk file against the
+  one it shipped. Ours will always differ, so every upgrade prompts — and the
+  default action on a non-interactive upgrade is to keep the local file, which
+  is right, but the prompt is noise generated by design.
+- **rpm `%config`**: without `(noreplace)` the operator's file is moved to
+  `.rpmsave` and replaced. With `(noreplace)` the new one lands as
+  `.rpmnew`. The first case relocates live credentials; the second is merely
+  untidy.
+
+Neither is a disaster, and both are avoidable: the file does not need to be
+packaged at all. It is already created on demand.
+`ensure_system_config_exists` runs as a precondition of `conf --show`,
+`--edit` and `--set-credentials`; if the file is absent it offers to create it
+from the installed example, at 0644 — a credential-free file, deliberately more
+permissive than the credential-carrying rewrite, and pinned by a test so a
+later reader does not "fix" the asymmetry. (`conf --default` only *prints* the
+example; it creates nothing.)
+
+**Recommendation**: package the example at exactly
+`/usr/share/xt_geoip/xtgeoip.conf.example`, point the package description and
+`README.md` at `xtgeoip conf --show` as the first command to run, and leave
+`/etc/xtgeoip.conf` entirely to the operator. The only thing this package puts
+under `/etc` is the logrotate fragment, which nobody edits.
+
+One consequence worth stating, because it is a packaging property and not an
+accident: the creation prompt is interactive. A postinst that tried to create
+the config non-interactively would be working against the design, and would
+also be creating a file the operator has not yet decided to own.
+
+The counter-argument is that some packaging policies expect a daemon-like
+package to arrive configured. This is not a daemon: it has no unit file, no
+socket and nothing that starts on boot, and it cannot function without
+credentials the packager cannot supply. A default config that cannot work is
+not a working default.
+
+---
+
+## 3. Build-time facts every recipe must account for
+
+**`aws-lc-rs` is the TLS backend.** `reqwest`'s `rustls` feature selects
+`__rustls-aws-lc-rs`, so `aws-lc-sys` is compiled — a C library. Every recipe
+needs a C compiler in its build dependencies, and cmake where available.
+`reqwest` does expose `rustls-no-provider`, which would allow ring instead, but
+that is a source change (a provider must then be installed explicitly), not a
+packaging flag. Do not make it to satisfy a packager without measuring what it
+costs in review.
+
+**306 crates in `Cargo.lock`.** Debian and Fedora policy prefers dependencies
+packaged separately; in practice, for a leaf application, vendoring is
+tolerated. `cargo vendor` expands to roughly 185 MB. Ship a vendored source
+tarball alongside the plain one (§4) so a packager can choose.
+
+**`publish = false`.** There is no crates.io tarball, by decision — the `[lib]`
+target exists so the binaries can share code, and publishing it would both
+expose an API this project does not support and make some ecosystems generate
+a `librust-xtgeoip-dev`. Consequence: every recipe builds from a git tag or a
+release asset, **and there are no tags yet**. Tag `v0.3.0` before anything
+else here is possible.
+
+**Do not set `strip = true` in `Cargo.toml`.** Debian and Fedora strip
+binaries themselves and extract `-dbgsym` / `-debuginfo` packages from what
+they remove; pre-stripping silently produces an empty debug package. Strip only
+when building the release tarball in §4, where nobody is extracting symbols.
+
+**Build with `--locked`.** The six credential-path crates (`argon2`,
+`chacha20poly1305`, `secrecy`, `zeroize`, `toml_edit`, `serde-saphyr`) are
+exact-pinned on purpose. A packager who resolves fresh undoes that without
+noticing, which is the same drift the toolchain pin exists to prevent.
+
+**Runtime dependency**: `xtables-addons` (or the distribution's equivalent
+name for the `xt_geoip` match). The binary produces data files that are useless
+without it. `logrotate` is a weak dependency — the fragment is inert if
+logrotate is absent.
+
+---
+
+## 4. Release assets
+
+There are no releases yet. The convention for a Rust CLI is a per-target
+tarball, not a bare binary:
+
+```
+xtgeoip-0.3.0-x86_64-unknown-linux-gnu.tar.gz
+  xtgeoip-0.3.0-x86_64-unknown-linux-gnu/
+    xtgeoip                  (stripped)
+    xtgeoip.1
+    xtgeoip.conf.example
+    logrotate/xtgeoip
+    LICENSE
+    README.md
+xtgeoip-0.3.0.tar.gz              (source, self-published)
+xtgeoip-0.3.0-vendored.tar.gz     (source + cargo vendor, for distro builds)
+SHA256SUMS
+SHA256SUMS.asc                    (optional; see below)
+```
+
+**Publish your own source tarball.** GitHub's auto-generated "Source code
+(tar.gz)" is produced on demand, and its checksum has not historically been
+stable across server-side changes to archive generation. Any recipe that
+verifies a hash against it is taking a dependency on that stability. Ours costs
+423 KB.
+
+**Signing.** A signed `SHA256SUMS` is natural for a project that already
+signs its own source files. Use a **separate release key** — the guardian
+signing key attests that a file passed an audit, which is a different claim
+from "this is the artefact we published", and one key making both claims makes
+neither checkable.
+
+**A musl target is worth adding.** `x86_64-unknown-linux-musl` yields a single
+static binary that runs on any distribution, which is what most people actually
+want from a release page. Verify that `aws-lc-sys` builds against musl before
+promising it — that is the piece most likely to object.
+
+---
+
+## 5. Recipes
+
+Eight formats cover effectively every distribution in DistroWatch's top 20.
+The ranking itself moves and could not be verified here (DistroWatch returns
+403 to scripted requests), so this maps formats to families rather than
+claiming an order.
+
+| Format | Artefact | Families covered |
+|---|---|---|
+| deb | `debian/{control,rules,install,changelog,copyright}`, `dh` + `dh-cargo` | Debian, Ubuntu, Mint, MX, Pop!_OS, Zorin, Kali, elementary |
+| rpm | `xtgeoip.spec`, `%cargo_build` / `%cargo_install` | Fedora, openSUSE, Rocky, Alma, Nobara |
+| pacman | `PKGBUILD` | Arch, Manjaro, EndeavourOS, Garuda, CachyOS |
+| xbps | `srcpkgs/xtgeoip/template`, `build_style=cargo` | Void |
+| ebuild | `xtgeoip-0.3.0.ebuild`, `cargo.eclass`, `CRATES=` | Gentoo |
+| apk | `APKBUILD` | Alpine |
+| nix | `rustPlatform.buildRustPackage` with `cargoHash` | NixOS |
+| SlackBuild | shell script | Slackware |
+
+Every one of them is the same package expressed eight ways:
+
+1. build `cargo build --release --locked`;
+2. install the six files of §1 and create the two directories;
+3. depend on `xtables-addons` at runtime, and on a C toolchain at build time;
+4. put nothing in `/etc` but the logrotate fragment.
+
+**Where to start: deb and PKGBUILD.** They are the least ceremonious of the
+eight and cover the most users, and writing them will surface whatever the
+other six also need — most likely the `aws-lc-sys` build dependency and the
+absence of shell completions.
+
+---
+
+## 6. Open questions
+
+1. **Shell completions.** None exist. `clap_complete` would generate bash,
+   zsh and fish from the existing `Cargo`-declared surface, at the cost of one
+   build dependency and a generation step in docgen — which is where it
+   belongs, since docgen already owns everything derived from the CLI
+   definition. Several packaging policies expect completions when they are
+   this cheap. Not decided.
+2. **A musl release**, per §4 — needs one build to answer.
+3. **Who maintains the recipes.** A `contrib/` directory in this repository is
+   the honest home for recipes nobody downstream has adopted yet; a recipe that
+   lives only in a distribution's own tree and is never built here will drift
+   from the install set in §1 without anything reporting it. The same
+   generated-vs-hand-written problem the spec work exists to solve, in a new
+   place — and worth solving the same way if more than two recipes appear:
+   derive the file list from one declaration rather than restating it eight
+   times.

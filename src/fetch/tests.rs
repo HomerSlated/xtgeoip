@@ -429,6 +429,97 @@ fn checksum_mismatch_leaves_no_partial_download() {
     );
 }
 
+/// A minimal but genuine GeoLite2 CSV archive: the three files
+/// `validate_csv_contents` requires, under the one common prefix directory a
+/// real MaxMind archive carries.
+fn geolite_zip() -> Vec<u8> {
+    const DIR: &str = "GeoLite2-Country-CSV_20260101";
+    // Header and row are separate constants, and the newlines are added by
+    // `format!`. A single literal carrying "...provider\n192.0.2.0/24..." is
+    // long enough for rustfmt's `format_strings` to wrap it *inside* the
+    // escape, turning `\n` into a line continuation and silently deleting the
+    // line break — which is how the CA fixture broke on 2026-09-12.
+    const LOCATIONS: &str = "geoname_id,country_iso_code,continent_code";
+    const BLOCKS: &str =
+        "network,geoname_id,is_anonymous_proxy,is_satellite_provider";
+    let files = [
+        (
+            "GeoLite2-Country-Locations-en.csv",
+            format!("{LOCATIONS}\n2635167,GB,EU\n"),
+        ),
+        (
+            "GeoLite2-Country-Blocks-IPv4.csv",
+            format!("{BLOCKS}\n192.0.2.0/24,2635167,0,0\n"),
+        ),
+        (
+            "GeoLite2-Country-Blocks-IPv6.csv",
+            format!("{BLOCKS}\n2001:db8::/32,2635167,0,0\n"),
+        ),
+    ];
+    let mut zip = ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for (name, body) in files {
+        zip.start_file(format!("{DIR}/{name}"), SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(body.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap().into_inner()
+}
+
+/// Guardian I-2 (2026-09-05): the *entire* checksum response body used to be
+/// written to `archive_dir` once verification passed — up to 4 KiB of
+/// attacker-chosen UTF-8 in a root-owned file, of which only the first token
+/// is ever read or validated. What is persisted is now derived from values
+/// this code has already proved.
+///
+/// The only test here that drives a remote fetch all the way to `Ok`, which
+/// is what makes it the one that can see what the successful path leaves on
+/// disk.
+#[test]
+fn the_saved_checksum_is_canonical_not_the_response_body() {
+    let dir = tempfile::tempdir().unwrap();
+    let zip = geolite_zip();
+    let digest = format!("{:x}", Sha256::digest(&zip));
+    let junk = "<html>not a checksum</html>";
+    let body = format!("{digest}  whatever-they-called-it.zip\t{junk}");
+
+    let server = MockServer::start(move |req| {
+        if req.target().contains("sha256") {
+            MockReply::ok(body.clone())
+        } else {
+            versioned_reply(&zip)
+        }
+    });
+    let cfg = mock_config(&server.url(), dir.path());
+
+    let (_tmp, version) =
+        fetch(&cfg, FetchMode::Remote, "123456", "test-license-key", None)
+            .expect("the happy path must succeed");
+    assert_eq!(version.to_string(), "20260101");
+
+    let saved = fs::read_to_string(
+        dir.path().join("GeoLite2-Country-CSV_20260101.zip.sha256"),
+    )
+    .expect("the sidecar must be written");
+    assert_eq!(
+        saved,
+        format!("{digest}  GeoLite2-Country-CSV_20260101.zip\n")
+    );
+    assert!(
+        !saved.contains(junk),
+        "response text reached the disk: {saved:?}"
+    );
+
+    // And what is written is still what the cached-archive path accepts, so
+    // canonicalising did not break the reuse it feeds.
+    assert!(
+        verify_cached_archive(
+            &dir.path().join("GeoLite2-Country-CSV_20260101.zip"),
+            &dir.path().join("GeoLite2-Country-CSV_20260101.zip.sha256"),
+        )
+        .unwrap()
+    );
+}
+
 /// The property `redirect_policy` cannot express, and the reason the R2 hop
 /// is safe (#101). `reqwest` strips `Authorization` cross-origin; since
 /// MaxMind redirects to a different origin on *every* fetch, that stripping
@@ -999,6 +1090,18 @@ MzEzaQqPE+KhWe89zpOyciBnWKDbrEyacYJy
 -----END CERTIFICATE-----
 ";
 
+/// True when `err` is the rejection `build()` produces, naming `path`.
+///
+/// `from_pem_bundle` performs no DER validation under rustls — PEM framing and
+/// base64 only — so every DER-level rejection lands at `build()` and nowhere
+/// else. Tests of the decode legs assert *this* rather than the file name,
+/// because the file name is produced by all three legs and so cannot say which
+/// one ran.
+fn rejected_at_build(err: &anyhow::Error, path: &Path) -> bool {
+    let msg = format!("{err:#}");
+    msg.contains("were rejected") && msg.contains(&path.display().to_string())
+}
+
 #[test]
 fn a_client_builds_with_no_ca_file_given() {
     assert!(
@@ -1017,6 +1120,53 @@ fn a_valid_ca_bundle_is_accepted() {
         build_client(Some(&path)).is_ok(),
         "a well-formed PEM bundle must build a client"
     );
+}
+
+/// Guardian I-2 (2026-09-12): `fs::read` on the CA bundle was the last
+/// unbounded read in this file. Operator-supplied and root-only, so this is
+/// robustness rather than a trust boundary — but a bound makes the provenance
+/// argument unnecessary. A valid certificate is padded past the cap, so only
+/// the size can be what rejects it.
+///
+/// What this discriminates: the `+ 1` on the `take`. Without it the read is
+/// truncated to exactly the cap, the length check cannot fire, and an
+/// oversized bundle is used — confirmed by mutating it. What it cannot
+/// discriminate is the `take` itself: with `u64::MAX` there the length check
+/// still rejects this file. The `take` bounds *memory*, and showing that needs
+/// a file large enough to matter, which no unit test should write.
+#[test]
+fn an_oversized_ca_bundle_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ca.pem");
+    let mut oversized = TEST_CA_PEM.to_owned();
+    oversized.push_str(&"#\n".repeat(MAX_CA_BUNDLE_BYTES as usize));
+    fs::write(&path, &oversized).unwrap();
+
+    let err = build_client(Some(&path)).expect_err("must refuse");
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("exceeded") && msg.contains(&path.display().to_string()),
+        "the error must say why and name the file: {msg}"
+    );
+}
+
+/// The cap admits what it says it admits: a bundle of exactly the limit is
+/// used, not refused. A boundary pin, not a discriminator — it survives every
+/// mutation of the bound that the test above catches, and exists so a later
+/// tightening to `>=` is a deliberate act rather than an off-by-one.
+#[test]
+fn a_ca_bundle_at_exactly_the_cap_is_accepted() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ca.pem");
+    let mut padded = TEST_CA_PEM.to_owned();
+    // PEM skips text outside the markers, so the padding is inert.
+    while (padded.len() as u64) < MAX_CA_BUNDLE_BYTES {
+        padded.push('#');
+    }
+    assert_eq!(padded.len() as u64, MAX_CA_BUNDLE_BYTES);
+    fs::write(&path, &padded).unwrap();
+
+    assert!(build_client(Some(&path)).is_ok());
 }
 
 #[test]
@@ -1060,8 +1210,8 @@ fn a_ca_bundle_with_corrupt_der_is_rejected() {
     let err = build_client(Some(&path))
         .expect_err("a PEM section that is not a certificate must be refused");
     assert!(
-        format!("{err:#}").contains("ca.pem"),
-        "the error must name the file: {err:#}"
+        rejected_at_build(&err, &path),
+        "must fail at DER validation, naming the file: {err:#}"
     );
 }
 
@@ -1093,9 +1243,14 @@ fn a_truncated_certificate_is_rejected() {
 
     let err = build_client(Some(&path))
         .expect_err("half a certificate is not a certificate");
+    // Asserting the `build()` context, not just the file name. Only the
+    // DER-validation leg produces this text, so a fixture that decayed into a
+    // PEM-framing error — which is what the formatter did to `CORRUPT_DER_PEM`
+    // on 2026-09-12 — fails here instead of passing as a weaker test. The
+    // assertion is the durable guard; the fixture's `\n` escapes are not.
     assert!(
-        format!("{err:#}").contains("ca.pem"),
-        "the error must name the file: {err:#}"
+        rejected_at_build(&err, &path),
+        "must fail at DER validation, naming the file: {err:#}"
     );
 }
 
@@ -1113,8 +1268,8 @@ fn a_bundle_with_one_corrupt_certificate_is_rejected_whole() {
     let err = build_client(Some(&path))
         .expect_err("one bad certificate must reject the whole bundle");
     assert!(
-        format!("{err:#}").contains("ca.pem"),
-        "the error must name the file: {err:#}"
+        rejected_at_build(&err, &path),
+        "must fail at DER validation, naming the file: {err:#}"
     );
 }
 

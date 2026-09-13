@@ -291,7 +291,14 @@ The option narrows what is trusted; it never disables a check.
 Intended for an installation behind a TLS\-intercepting proxy, or a private
 mirror presenting a self\-signed certificate.
 An unreadable, malformed or empty bundle is an error, not a silent fall back
-to the system roots.
+to the system roots; a bundle larger than 1 MiB is refused unread.
+.IP
+The option has no effect on
+.BR build ,
+which extracts an archive already in the archive directory and opens no
+connection.
+A bad path given there is therefore not reported \(em there is nothing to
+verify it against.
 '''
 
 execution_order = '''
