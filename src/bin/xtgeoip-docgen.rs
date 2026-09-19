@@ -6,10 +6,12 @@ use std::{
 };
 
 use anyhow::Context;
+use clap::CommandFactory;
+use clap_complete::{Shell, generate};
 use serde::{Deserialize, Serialize};
 // The spec model is shared with the library so the generator and the
 // program it generates for cannot drift apart on what the spec means.
-use xtgeoip::spec::*;
+use xtgeoip::{cli::Cli, spec::*};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -91,6 +93,7 @@ fn main() -> anyhow::Result<()> {
     let outputs = render_outputs(&spec, &tmpl)?;
 
     fs::create_dir_all("docs/generated")?;
+    fs::create_dir_all("docs/generated/completions")?;
     fs::create_dir_all("src/generated")?;
     for (path, body) in outputs {
         fs::write(path, body)?;
@@ -121,7 +124,7 @@ fn render_outputs(
     spec: &Spec,
     tmpl: &ManpageTemplate,
 ) -> anyhow::Result<Vec<(&'static str, String)>> {
-    Ok(vec![
+    let mut outputs = vec![
         ("docs/generated/usage.md", generate_usage_md(spec)?),
         ("docs/generated/tldr.md", generate_tldr_md(spec)?),
         ("docs/generated/xtgeoip.1", generate_manpage(spec, tmpl)?),
@@ -139,7 +142,48 @@ fn render_outputs(
             "docs/generated/testcases.yaml",
             generate_testcases_yaml(spec)?,
         ),
-    ])
+    ];
+    outputs.extend(generate_completions()?);
+    Ok(outputs)
+}
+
+/// Emit bash, zsh and fish completions from the clap definition.
+///
+/// The one generated output with no spec input. Everything else here is
+/// derived from `docs/spec/cli.yaml`; completions come from `Cli::command()`,
+/// because `clap_complete` reads a `clap::Command` and reproducing its three
+/// shell dialects by hand from the spec would be a great deal of fiddly
+/// quoting for an advisory artefact. That is a second source of truth, and the
+/// reason `cli::contradiction::clap_surface_matches_the_spec` exists: it
+/// asserts the clap surface is exactly `flags` ∪ `global_options` ∪
+/// `subcommand_options`, so "derived from clap" and "derived from the spec"
+/// cannot diverge without a test failing.
+///
+/// `bin_name` is `xtgeoip` for all three and is *not* cosmetic: it is what the
+/// generated function names and zsh's `#compdef` line are built from, so a
+/// wrong value produces a script that loads and then silently never fires.
+/// The zsh file must therefore be named `_xtgeoip`, which is what zsh looks
+/// for on `fpath`.
+///
+/// Note that `generate` takes `&mut Command` and builds it internally, so
+/// unlike the contradiction test's unbuilt command these do include clap's
+/// injected `--help` and `--version` — correct, since a user types them.
+fn generate_completions() -> anyhow::Result<Vec<(&'static str, String)>> {
+    let mut cmd = Cli::command();
+    let mut outputs = Vec::new();
+    for (shell, path) in [
+        (Shell::Bash, "docs/generated/completions/xtgeoip.bash"),
+        (Shell::Zsh, "docs/generated/completions/_xtgeoip"),
+        (Shell::Fish, "docs/generated/completions/xtgeoip.fish"),
+    ] {
+        let mut buf = Vec::new();
+        generate(shell, &mut cmd, "xtgeoip", &mut buf);
+        let body = String::from_utf8(buf).with_context(|| {
+            format!("{shell} completion was not valid UTF-8")
+        })?;
+        outputs.push((path, body));
+    }
+    Ok(outputs)
 }
 
 /* ---------------- VALIDATION ---------------- */
@@ -1836,6 +1880,55 @@ mod tests {
             "a mistyped long option must not truncate to -l: {typo:?}"
         );
     }
+    /// Every shell's completion must contain a real per-command block for
+    /// every subcommand clap declares.
+    ///
+    /// A bare `contains(name)` would be vacuous here: the `--config` global
+    /// puts the string `conf` in all three files whether or not the `conf`
+    /// subcommand still exists. So each shell is checked with the marker it
+    /// actually uses — bash and zsh both key their per-command blocks on
+    /// `xtgeoip__subcmd__<name>` (zsh's `_xtgeoip__subcmd__<name>_commands`
+    /// contains it), while fish predicates on
+    /// `__fish_xtgeoip_using_subcommand <name>`. The subcommand list is
+    /// derived from clap rather than written out, so a fifth is covered the
+    /// day it is added.
+    ///
+    /// `ca-file` is asserted without its dashes deliberately: fish writes
+    /// `-l ca-file`, so the `--ca-file` spelling appears in bash and zsh only
+    /// and a shared `--ca-file` assertion would fail on correct fish output.
+    #[test]
+    fn completions_cover_every_subcommand_in_every_shell() {
+        let outputs =
+            generate_completions().expect("completions must generate");
+        assert_eq!(outputs.len(), 3, "expected bash, zsh and fish");
+
+        let subcommands: Vec<String> = Cli::command()
+            .get_subcommands()
+            .map(|s| s.get_name().to_owned())
+            .collect();
+        assert!(!subcommands.is_empty(), "clap declares no subcommands");
+
+        for (path, body) in &outputs {
+            assert!(!body.is_empty(), "{path} is empty");
+            for sub in &subcommands {
+                let marker = if path.ends_with(".fish") {
+                    format!("using_subcommand {sub}")
+                } else {
+                    format!("xtgeoip__subcmd__{sub}")
+                };
+                assert!(
+                    body.contains(&marker),
+                    "{path} has no block for the {sub} subcommand (looked for \
+                     {marker:?})"
+                );
+            }
+            assert!(
+                body.contains("ca-file"),
+                "{path} omits the --ca-file global option"
+            );
+        }
+    }
+
     use super::*;
 
     fn example(valid: bool) -> Example {
