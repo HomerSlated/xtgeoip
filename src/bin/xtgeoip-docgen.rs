@@ -90,7 +90,11 @@ fn main() -> anyhow::Result<()> {
     let tmpl: ManpageTemplate = toml::from_str(&toml_str)?;
     validate_manpage_template(&spec, &tmpl)?;
 
-    let outputs = render_outputs(&spec, &tmpl)?;
+    let install_str = fs::read_to_string("docs/spec/install.yaml")?;
+    let install: InstallSpec = serde_saphyr::from_str(&install_str)?;
+    validate_install(&install)?;
+
+    let outputs = render_outputs(&spec, &tmpl, &install)?;
 
     fs::create_dir_all("docs/generated")?;
     fs::create_dir_all("docs/generated/completions")?;
@@ -123,6 +127,7 @@ fn main() -> anyhow::Result<()> {
 fn render_outputs(
     spec: &Spec,
     tmpl: &ManpageTemplate,
+    install: &InstallSpec,
 ) -> anyhow::Result<Vec<(&'static str, String)>> {
     let mut outputs = vec![
         ("docs/generated/usage.md", generate_usage_md(spec)?),
@@ -143,8 +148,144 @@ fn render_outputs(
             generate_testcases_yaml(spec)?,
         ),
     ];
+    outputs.push((
+        "docs/generated/install-manifest.tsv",
+        generate_install_manifest(install),
+    ));
     outputs.extend(generate_completions()?);
     Ok(outputs)
+}
+
+/// The install set, declared in `docs/spec/install.yaml`.
+///
+/// One declaration, so the nine files and two directories are not restated
+/// once per recipe format. See `docs/design/packaging.md` §6.3.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InstallSpec {
+    version: u32,
+    files: Vec<InstallFile>,
+    directories: Vec<InstallDir>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InstallFile {
+    /// Where the bytes come from, relative to the repository root.
+    source: String,
+    /// `tracked`, `generated` or `build` — see `install.yaml`.
+    producer: String,
+    /// `none`, `gzip` or `strip`: what packaging does on the way.
+    transform: String,
+    /// Absolute installed path, including the installed file name, which is
+    /// not always the source name (bash completions, the gzipped man page).
+    dest: String,
+    mode: String,
+    #[allow(dead_code)]
+    summary: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InstallDir {
+    dest: String,
+    mode: String,
+    #[allow(dead_code)]
+    summary: String,
+}
+
+const INSTALL_SCHEMA_VERSION: u32 = 1;
+const PRODUCERS: [&str; 3] = ["tracked", "generated", "build"];
+const TRANSFORMS: [&str; 3] = ["none", "gzip", "strip"];
+
+/// Reject an install declaration that no recipe could act on.
+///
+/// Every field here is consumed by a shell loop in someone else's build, so
+/// the failure modes are all silent-until-packaged: an unknown `transform` is
+/// simply not applied, a relative `dest` installs into the build directory,
+/// and a malformed `mode` is whatever `install -m` makes of it. None of that
+/// surfaces in a test run of this project, so it is checked at generation.
+fn validate_install(install: &InstallSpec) -> anyhow::Result<()> {
+    if install.version != INSTALL_SCHEMA_VERSION {
+        anyhow::bail!(
+            "install.yaml is schema version {}, expected {}",
+            install.version,
+            INSTALL_SCHEMA_VERSION
+        );
+    }
+    if install.files.is_empty() {
+        anyhow::bail!("install.yaml declares no files");
+    }
+
+    let well_formed_mode = |m: &str| {
+        m.len() == 4
+            && m.starts_with('0')
+            && m[1..].chars().all(|c| ('0'..='7').contains(&c))
+    };
+
+    for f in &install.files {
+        if !PRODUCERS.contains(&f.producer.as_str()) {
+            anyhow::bail!(
+                "{}: unknown producer {:?} (expected one of {PRODUCERS:?})",
+                f.source,
+                f.producer
+            );
+        }
+        if !TRANSFORMS.contains(&f.transform.as_str()) {
+            anyhow::bail!(
+                "{}: unknown transform {:?} (expected one of {TRANSFORMS:?})",
+                f.source,
+                f.transform
+            );
+        }
+        if !f.dest.starts_with('/') {
+            anyhow::bail!("{}: dest {:?} is not absolute", f.source, f.dest);
+        }
+        if !well_formed_mode(&f.mode) {
+            anyhow::bail!("{}: mode {:?} is not octal 0nnn", f.source, f.mode);
+        }
+    }
+    for d in &install.directories {
+        if !d.dest.starts_with('/') {
+            anyhow::bail!("directory dest {:?} is not absolute", d.dest);
+        }
+        if !well_formed_mode(&d.mode) {
+            anyhow::bail!(
+                "directory {}: mode {:?} is not octal 0nnn",
+                d.dest,
+                d.mode
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Emit `docs/generated/install-manifest.tsv`.
+///
+/// One neutral manifest rather than a fragment per packaging format. No recipe
+/// exists yet to validate a `debian/install` or an rpm `%files` block against,
+/// and generating eight dialects against zero real consumers would be guessing
+/// with a build step attached. When `debian/` is written, its fragment can be
+/// added here with something to check it against.
+///
+/// Tab-separated because a recipe's install step is a `while read` loop in
+/// whatever shell the format uses, and none of these paths contain tabs.
+fn generate_install_manifest(install: &InstallSpec) -> String {
+    let mut out = String::from(
+        "# Generated by xtgeoip-docgen from docs/spec/install.yaml — do not \
+         edit.\n# See contrib/README.md for how a recipe consumes this.\n",
+    );
+    out.push_str("# kind\tsource\ttransform\tdest\tmode\n");
+    for f in &install.files {
+        out.push_str(&format!(
+            "file\t{}\t{}\t{}\t{}\n",
+            f.source, f.transform, f.dest, f.mode
+        ));
+    }
+    for d in &install.directories {
+        out.push_str(&format!("dir\t-\t-\t{}\t{}\n", d.dest, d.mode));
+    }
+    out
 }
 
 /// Emit bash, zsh and fish completions from the clap definition.
@@ -1927,6 +2068,68 @@ mod tests {
                 "{path} omits the --ca-file global option"
             );
         }
+    }
+
+    /// Every source the install set declares must actually be there.
+    ///
+    /// `docs/spec/install.yaml` is consumed by recipes running in other
+    /// people's build systems, where a wrong path fails late and
+    /// confusingly — often as an empty package rather than an error. This is
+    /// the check that a declared file is real before anyone packages it.
+    ///
+    /// Three things it deliberately does not assert:
+    ///
+    /// - **Byte sizes.** §1 of the design note is a measured snapshot, and the
+    ///   binary's size changes every release. Asserting it would turn every
+    ///   unrelated code change into a failure here.
+    /// - **Modes against the working tree.** `mode` is what the *package*
+    ///   declares; `conf/etc/logrotate.d/xtgeoip` on disk is whatever the
+    ///   author's umask made it, which is not a packaging fact.
+    /// - **Existence for `producer: build`.** `target/release/xtgeoip` is
+    ///   absent from a fresh checkout and `cargo test` builds debug, so
+    ///   requiring it would fail in CI for no good reason. Those entries are
+    ///   checked for coherence instead.
+    #[test]
+    fn install_set_sources_exist() {
+        let yaml = std::fs::read_to_string("docs/spec/install.yaml")
+            .expect("docs/spec/install.yaml missing");
+        let install: InstallSpec =
+            serde_saphyr::from_str(&yaml).expect("install.yaml does not parse");
+
+        validate_install(&install).expect("install.yaml is not well formed");
+
+        // Vacuity guard: an empty declaration satisfies every loop below.
+        assert!(!install.files.is_empty(), "install.yaml declares no files");
+
+        for f in &install.files {
+            match f.producer.as_str() {
+                "tracked" | "generated" => assert!(
+                    std::path::Path::new(&f.source).exists(),
+                    "{} is declared {} but is not on disk",
+                    f.source,
+                    f.producer
+                ),
+                "build" => assert!(
+                    f.source.starts_with("target/"),
+                    "{} is declared build but is not a build output",
+                    f.source
+                ),
+                other => panic!("{}: unknown producer {other:?}", f.source),
+            }
+        }
+
+        assert_eq!(
+            install.files.len(),
+            9,
+            "packaging.md §1 counts nine files; install.yaml declares {}",
+            install.files.len()
+        );
+        assert_eq!(
+            install.directories.len(),
+            2,
+            "packaging.md §1 counts two directories; install.yaml declares {}",
+            install.directories.len()
+        );
     }
 
     use super::*;

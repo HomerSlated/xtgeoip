@@ -53,8 +53,17 @@ Measurements are from the 0.3.0 release build on 2026-09-13, x86-64, glibc.
 | — | `/var/lib/xt_geoip/` | 0755 root:root | dir |
 | — | `/usr/share/xt_geoip/` | 0755 root:root | dir |
 
-**Total 9,277,317 bytes (8.85 MiB)**; 11.88 MiB unstripped. Compressed: 3.76 MB
-gzip -9, 2.94 MB zstd -19, 2.71 MB xz -9 — so a 2.7–3.0 MB package.
+**Subtotal 9,277,317 bytes (8.85 MiB)** for the six files above; 11.88 MiB
+unstripped. Compressed: 3.76 MB gzip -9, 2.94 MB zstd -19, 2.71 MB xz -9 — so
+a 2.7–3.0 MB package. The completions below take the full set to nine files and
+9,297,218 bytes (8.87 MiB).
+
+Two of the nine are not files on disk anywhere in this repository, which any
+recipe and the declaration in §6.3 both have to model. `xtgeoip.1.gz` is the
+17,359-byte generated man page under `gzip -9`, and the 9,265,824-byte binary
+is the 11,866,528-byte build output after stripping — which §3 says to do when
+packaging rather than in `Cargo.toml`, so the package manager can still take
+its `-dbgsym`.
 
 `xtgeoip.conf.example`'s path is **not a convention**: `conf.rs` holds
 `/usr/share/xt_geoip/xtgeoip.conf.example` as a compiled-in constant
@@ -382,6 +391,17 @@ Left alone, for the same reason as the `-b build` wart below: `hide` is doing
 real work in the error path, and changing it to tidy an advisory artefact would
 be the wrong trade.
 
+**One of the three did not ship.** `8574af2` committed the bash and zsh
+completions and not the fish one: `.gitignore` carried a `*.fish` rule under
+*personal local config*, `git add` honours `.gitignore`, `git status` hides
+ignored paths, and `docgen-check` regenerates the file before
+`git diff --exit-code` runs — so all four CI jobs passed while a third of this
+section's output was absent from the repository. The gate that keeps generated
+files from going *stale* is structurally blind to one never arriving. Fixed
+with a narrow negation beside the rule, in the same idiom as the existing
+`*.pdf` / `!docs/papers/*.pdf` pair; the comment there explains why, because
+the rule looks like clutter to anyone who does not know what it cost.
+
 **Known limitation, recorded now rather than discovered later**: the rule in
 `Cli::try_parse_argv` — that a non-global top-level argument conflicts with a
 subcommand — lives outside clap, so generated completions will offer `-b` and
@@ -412,6 +432,34 @@ This is the generated-vs-hand-written problem the spec work exists to solve,
 in a new place, and it should be solved the same way. Note that 6.1 sharpens
 it: completions take the install set from six files to nine, and nine files
 restated across eight recipes is 72 statements that nothing verifies.
+
+**Done.** `docs/spec/install.yaml` declares the nine files and two directories
+once; docgen emits `docs/generated/install-manifest.tsv` from it, which picks
+up the `docgen-check` gate for free; and `contrib/README.md` documents the
+convention and holds the `while read` loop a recipe's install step becomes.
+
+The schema models what §1 measured: a flat source→destination map would
+misrepresent a third of the install set, because **two of the nine entries are
+not files on disk in the form they ship**. So each carries a `producer`
+(`tracked`, `generated`, `build` — where the bytes come from) and a
+`transform` (`none`, `gzip`, `strip` — what packaging does on the way). A
+recipe that ignores the `transform` column installs an unstripped binary and
+an uncompressed man page: both work, and both are flagged in review.
+
+One neutral manifest, not eight format fragments. No recipe exists yet to
+check a `debian/install` or an rpm `%files` block against, and generating
+eight dialects against zero real consumers is guessing with a build step
+attached. When `debian/` is written, its emitter can be added here with
+something to validate it against.
+
+`tests::install_set_sources_exist` pins the declaration to reality, and is
+mutation-confirmed on both of its claims: pointing a `tracked` source at a
+missing file fails it, and deleting an entry fails the nine-file count.
+It deliberately asserts neither byte sizes (§1 is a snapshot; the binary's
+size changes every release) nor modes against the working tree (`mode` is what
+the *package* declares; the repo copy is whatever the author's umask made it).
+`producer: build` entries are not checked for existence — `cargo test` builds
+debug, and `target/release/xtgeoip` is absent from a fresh checkout.
 
 ### 6.4 `extra/` is excluded from the source tarball
 

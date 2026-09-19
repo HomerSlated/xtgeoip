@@ -89,7 +89,7 @@ create the real one on demand via `ensure_system_config_exists`, while
 4. **`extra/ export-ignore`**, keeping the vendored GPL-2 xtables-addons
    tarball out of the published MIT source artefact.
 
-**Built so far**: all of decision 2. Its safety net first —
+**Built so far**: decisions 2 and 3 in full. Decision 2's safety net first —
 `cli::contradiction::clap_surface_matches_the_spec`, which pins clap's argument
 surface to `flags` ∪ `global_options` ∪ `subcommand_options` in both
 directions, each direction mutation-confirmed. It was worth building on its own
@@ -104,8 +104,16 @@ existing `docgen-check` and verified idempotent. One measured surprise —
 `fetch`'s four rejected flags. Left alone: `hide` earns its place in the error
 path, and an advisory artefact is not worth changing it for.
 
-**Still to write**: `contrib/` and the eight recipes, the derived install-set
-declaration, and the `.gitattributes`.
+Then decision 3: `docs/spec/install.yaml` declares the nine files and two
+directories once, docgen emits `docs/generated/install-manifest.tsv` from it,
+and `contrib/README.md` documents how a recipe consumes it. Each entry carries
+a `producer` and a `transform`, because two of the nine are not files on disk
+in the form they ship — the man page is gzipped and the binary stripped at
+package time. `tests::install_set_sources_exist` pins it, mutation-confirmed
+on both claims.
+
+**Still to write**: the eight recipes themselves (`debian/` and `PKGBUILD`
+first) and the `.gitattributes` for decision 4.
 
 No longer blocking: `v0.3.0` was tagged and pushed on 2026-09-19, so the
 `publish = false` problem is solved — every recipe can build from that tag.

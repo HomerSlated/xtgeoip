@@ -53,6 +53,15 @@
 
 # Personal local config (not project-relevant)
 *.fish
+# ...except the generated fish completion, which ships with the package.
+# Narrow by design, exactly like the *.pdf guard above: every other .fish is
+# still caught. Do not widen this, and do not delete it — without it the file
+# is silently absent from the repo and nothing reports it. `git add` honours
+# .gitignore, `git status` hides ignored paths, and CI's docgen-check
+# regenerates the file before `git diff --exit-code` runs, so all four jobs go
+# green while one of the three completions never ships. That is what happened
+# in 8574af2, which committed the bash and zsh completions and not this one.
+!docs/generated/completions/*.fish
 *.vimrc
 
 # Local working directories (not for sharing).

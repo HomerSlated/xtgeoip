@@ -1,0 +1,127 @@
+# The install set: what a package puts on disk, declared once.
+#
+# Read by `xtgeoip-docgen`, which emits `docs/generated/install-manifest.tsv`.
+# Recipes in `contrib/` consume that manifest instead of restating this list,
+# so the nine files and two directories are written down in exactly one place.
+# Nine files across eight recipe formats would otherwise be 72 restatements
+# that nothing verifies. Rationale: `docs/design/packaging.md` §6.3.
+#
+# Pinned to reality by `tests::install_set_sources_exist`, which checks that
+# every declared source is either a tracked file that exists or a documented
+# producer's output. It deliberately does NOT assert byte sizes: §1 of the
+# design note is a measured snapshot, and the binary's size changes every
+# release, so a size assertion would turn unrelated code changes into a
+# failing test.
+#
+# `mode` is what the *package* declares, not what the working tree happens to
+# hold — `conf/etc/logrotate.d/xtgeoip` is whatever the author's umask made
+# it, and that is not a packaging fact.
+
+version: 1
+
+# Where each source comes from:
+#   tracked    a file committed in this repository
+#   generated  written by xtgeoip-docgen into docs/generated/
+#   build      produced by `cargo build --release`
+#
+# What packaging does to it on the way:
+#   none   installed byte-for-byte
+#   gzip   compressed; man pages are installed compressed by every distro here
+#   strip  symbols removed at package time, NOT via `strip = true` in
+#          Cargo.toml — see packaging.md §3, which explains that pre-stripping
+#          silently produces an empty -dbgsym / -debuginfo package
+#
+# Two entries therefore name a source that does not exist on disk in the form
+# it ships: the man page is gzipped and the binary is stripped. Any recipe has
+# to perform those two transforms itself.
+
+files:
+  - source: target/release/xtgeoip
+    producer: build
+    transform: strip
+    dest: /usr/bin/xtgeoip
+    mode: "0755"
+    summary: The program.
+
+  - source: docs/generated/xtgeoip.1
+    producer: generated
+    transform: gzip
+    dest: /usr/share/man/man1/xtgeoip.1.gz
+    mode: "0644"
+    summary: Man page, generated from cli.yaml and manpage-template.toml.
+
+  # Not a convention, and not relocatable: conf.rs holds this exact path as
+  # the compiled-in constant DEFAULT_CONFIG and reads it to print the default
+  # configuration and to create the system one. A package that installs it
+  # anywhere else breaks `conf --default`, `--show`, `--edit` and
+  # `--set-credentials` at once, and only at runtime.
+  - source: conf/usr/share/xt_geoip/xtgeoip.conf.example
+    producer: tracked
+    transform: none
+    dest: /usr/share/xt_geoip/xtgeoip.conf.example
+    mode: "0644"
+    summary: Example configuration. NOT /etc/xtgeoip.conf — see packaging.md §2.
+
+  - source: conf/etc/logrotate.d/xtgeoip
+    producer: tracked
+    transform: none
+    dest: /etc/logrotate.d/xtgeoip
+    mode: "0644"
+    summary: The only thing this package puts under /etc.
+
+  - source: LICENSE
+    producer: tracked
+    transform: none
+    dest: /usr/share/doc/xtgeoip/LICENSE
+    mode: "0644"
+    summary: MIT.
+
+  - source: README.md
+    producer: tracked
+    transform: none
+    dest: /usr/share/doc/xtgeoip/README.md
+    mode: "0644"
+    summary: Point the package description at `xtgeoip conf --show`.
+
+  # The installed name is not the generated name for two of the three shells:
+  # bash-completion looks up the command's own name, and zsh wants a leading
+  # underscore on fpath. Getting this wrong yields a file that is installed,
+  # is never loaded, and reports nothing.
+  - source: docs/generated/completions/xtgeoip.bash
+    producer: generated
+    transform: none
+    dest: /usr/share/bash-completion/completions/xtgeoip
+    mode: "0644"
+    summary: bash completion.
+
+  - source: docs/generated/completions/_xtgeoip
+    producer: generated
+    transform: none
+    dest: /usr/share/zsh/site-functions/_xtgeoip
+    mode: "0644"
+    summary: zsh completion.
+
+  # Kept out of the repository by the *.fish rule in .gitignore until 8574af2
+  # shipped without it; there is now a narrow negation for this path. See the
+  # comment there before touching either.
+  - source: docs/generated/completions/xtgeoip.fish
+    producer: generated
+    transform: none
+    dest: /usr/share/fish/vendor_completions.d/xtgeoip.fish
+    mode: "0644"
+    summary: fish completion.
+
+# The code does not need these to exist — `fetch` and `build` both
+# `create_dir_all` on demand, and `check_plan_writable` probes the nearest
+# existing ancestor so a missing directory under a writable parent is not an
+# error. Package them anyway: it puts ownership and mode under the package
+# manager rather than under whatever umask the first root run happened to
+# have, and it lets an uninstall reason about them.
+directories:
+  - dest: /var/lib/xt_geoip
+    mode: "0755"
+    summary: archive_dir default.
+
+  - dest: /usr/share/xt_geoip
+    mode: "0755"
+    summary: output_dir default.
