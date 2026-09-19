@@ -292,9 +292,9 @@ pregenerated-source `cc` path (§4).
 
 ## 6. Decisions (2026-09-19)
 
-All four questions this section opened with are settled. None is implemented;
-this records what was decided and why, so the implementation does not re-argue
-it.
+All four questions this section opened with are settled. Only 6.1's
+contradiction test is implemented; the rest records what was decided and why,
+so the implementation does not re-argue it.
 
 ### 6.1 Shell completions: yes — but the deliverable is the test
 
@@ -331,6 +331,19 @@ That coverage does not exist today, and its absence is not obvious:
 asserts that clap's surface equals the spec's. Add that test and the generator
 is safe by construction — and the existing surface is hardened whether or not
 completions ever ship. It is worth adding even if 6.1 is later reversed.
+
+**Done** (`cli::contradiction::clap_surface_matches_the_spec`). It joins on
+`long:`, the only field common to all three buckets — the spec's *keys* are
+short letters in `flags` and `subcommand_options` but snake-case names in
+`global_options`, so they are not a usable join. Both directions are asserted
+separately, since they are different mistakes, and each was mutation-confirmed:
+adding an undeclared `#[arg(long)]` to `Cli` fails the first, and adding a
+`global_options` entry clap has no argument for fails the second. Two clap
+properties it depends on were checked rather than assumed — `hide = true` does
+not suppress an argument from `get_arguments` (which matters, because `fetch`
+declares its four rejected flags hidden), and `Cli::command()` is left unbuilt,
+so clap has not yet injected `--help`/`--version` and there is nothing to
+filter out. The generator itself is still to be written.
 
 **Known limitation, recorded now rather than discovered later**: the rule in
 `Cli::try_parse_argv` — that a non-global top-level argument conflicts with a

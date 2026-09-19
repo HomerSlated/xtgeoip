@@ -619,6 +619,183 @@ mod contradiction {
         }
     }
 
+    /// Clap's argument surface must be exactly the surface `cli.yaml`
+    /// declares, in both directions.
+    ///
+    /// The spec describes the whole CLI in three buckets: `flags` (the five
+    /// carrying combination semantics, which form the guard bitmask),
+    /// `global_options` (apply everywhere, constrain nothing) and
+    /// `subcommand_options` (belong to one command). Until now nothing
+    /// asserted that those three *together* are what clap actually parses.
+    /// The existing checks each cover one part and none covers the union:
+    /// `global_options_are_documented` pins the globals to the man page, and
+    /// `every_flag_is_referenced_by_some_guard` pins `flags` to the guards. An
+    /// argument added to `cli.rs` and forgotten in the spec — or renamed in
+    /// one and not the other — was invisible to every one of them.
+    ///
+    /// Both directions are asserted separately because they are different
+    /// mistakes: an argument clap has and the spec does not is undeclared
+    /// surface, while one the spec has and clap does not is a rename or a
+    /// deletion that the generated docs still advertise.
+    ///
+    /// **Join on the long name**, not the key: the spec's keys are short
+    /// letters in `flags` and `subcommand_options` but snake-case names in
+    /// `global_options`, whereas `long:` is present in all three and is what
+    /// `Arg::get_long` returns.
+    ///
+    /// Two properties of clap this relies on, both confirmed by inspection
+    /// rather than assumed. `Cli::command()` is deliberately *not*
+    /// `build()`-ed: clap injects `--help`/`--version` during the build,
+    /// and on an unbuilt command `get_arguments` yields only declared
+    /// arguments, so there is nothing to filter out. (If a later change
+    /// builds it first, those two will surface here as undeclared — which
+    /// is the right failure, since filtering by "absent from the spec"
+    /// would make this test vacuous.) And `hide = true` does not suppress
+    /// an argument from `get_arguments`, which matters because `fetch`'s
+    /// four rejected flags are declared hidden and must still be accounted
+    /// for.
+    #[test]
+    fn clap_surface_matches_the_spec() {
+        use std::collections::{BTreeMap, BTreeSet};
+
+        use crate::spec::{FlagDef, Spec};
+
+        fn longs(m: &BTreeMap<String, FlagDef>) -> BTreeSet<String> {
+            m.values().map(|f| f.long.clone()).collect()
+        }
+        fn long_of(a: &clap::Arg) -> String {
+            a.get_long()
+                .expect("every argument has a long form")
+                .to_owned()
+        }
+
+        let yaml = std::fs::read_to_string("docs/spec/cli.yaml")
+            .expect("docs/spec/cli.yaml missing");
+        let spec: Spec =
+            serde_saphyr::from_str(&yaml).expect("cli.yaml does not parse");
+
+        let flag_longs = longs(&spec.flags);
+        let global_longs = longs(&spec.global_options);
+
+        // Vacuity guard. A silently empty parse would satisfy both directions
+        // below without checking anything at all.
+        assert!(!flag_longs.is_empty(), "cli.yaml declares no flags");
+        assert!(
+            !global_longs.is_empty(),
+            "cli.yaml declares no global_options"
+        );
+        assert!(
+            !spec.subcommand_options.is_empty(),
+            "cli.yaml declares no subcommand_options"
+        );
+
+        let cmd = Cli::command();
+
+        // ── clap → spec ──────────────────────────────────────────────────
+        let mut undeclared = Vec::new();
+        for a in cmd.get_arguments() {
+            let long = long_of(a);
+            let (declared, kind) = if a.is_global_set() {
+                (global_longs.contains(&long), "global option")
+            } else {
+                (flag_longs.contains(&long), "flag")
+            };
+            if !declared {
+                undeclared.push(format!(
+                    "  --{long}: clap parses it as a top-level {kind}, \
+                     cli.yaml declares it nowhere"
+                ));
+            }
+        }
+        for sub in cmd.get_subcommands() {
+            let name = sub.get_name();
+            let own = spec
+                .subcommand_options
+                .get(name)
+                .map(longs)
+                .unwrap_or_default();
+            for a in sub.get_arguments() {
+                // Globals are checked once, above. Clap does not repeat them
+                // on subcommands today; skipping keeps that from mattering.
+                if a.is_global_set() {
+                    continue;
+                }
+                let long = long_of(a);
+                if !flag_longs.contains(&long) && !own.contains(&long) {
+                    undeclared.push(format!(
+                        "  {name} --{long}: clap parses it, cli.yaml declares \
+                         it in neither flags nor subcommand_options.{name}"
+                    ));
+                }
+            }
+        }
+        assert!(
+            undeclared.is_empty(),
+            "clap parses {} argument(s) the spec does not declare:\n{}",
+            undeclared.len(),
+            undeclared.join("\n")
+        );
+
+        // ── spec → clap ──────────────────────────────────────────────────
+        let top_non_global: BTreeSet<String> = cmd
+            .get_arguments()
+            .filter(|a| !a.is_global_set())
+            .map(long_of)
+            .collect();
+        let top_global: BTreeSet<String> = cmd
+            .get_arguments()
+            .filter(|a| a.is_global_set())
+            .map(long_of)
+            .collect();
+
+        let mut missing = Vec::new();
+        for long in &flag_longs {
+            if !top_non_global.contains(long) {
+                missing.push(format!(
+                    "  --{long}: cli.yaml declares it in flags, clap has no \
+                     such top-level argument"
+                ));
+            }
+        }
+        for long in &global_longs {
+            if !top_global.contains(long) {
+                missing.push(format!(
+                    "  --{long}: cli.yaml declares it in global_options, clap \
+                     has no such global argument"
+                ));
+            }
+        }
+        for (name, opts) in &spec.subcommand_options {
+            match cmd
+                .get_subcommands()
+                .find(|s| s.get_name() == name.as_str())
+            {
+                None => missing.push(format!(
+                    "  cli.yaml declares subcommand_options.{name}, clap has \
+                     no {name} subcommand"
+                )),
+                Some(sub) => {
+                    let have: BTreeSet<String> =
+                        sub.get_arguments().map(long_of).collect();
+                    for long in longs(opts) {
+                        if !have.contains(&long) {
+                            missing.push(format!(
+                                "  {name} --{long}: cli.yaml declares it, \
+                                 clap's {name} has no such argument"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "cli.yaml declares {} argument(s) clap does not parse:\n{}",
+            missing.len(),
+            missing.join("\n")
+        );
+    }
+
     /// Every global option works on either side of every subcommand, and
     /// reaches the same field either way.
     ///

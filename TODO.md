@@ -62,8 +62,9 @@ is meant.
 
 Early, but no longer unexamined: `docs/design/packaging.md` (2026-09-13)
 measures the install set and settles the shape. Six files and two directories,
-8.85 MiB; eight recipes cover the top 20 distributions and are the same package
-eight times over; deb and `PKGBUILD` first.
+8.85 MiB — nine files once shell completions land; eight recipes cover the top
+20 distributions and are the same package eight times over; deb and `PKGBUILD`
+first.
 
 **The decision in it worth knowing without reading it**: `/etc/xtgeoip.conf`
 must *not* be a packaged file. `conf --set-credentials` rewrites it in place
@@ -74,19 +75,36 @@ prompt or relocate live credentials. The example ships under
 create the real one on demand via `ensure_system_config_exists`, while
 `conf --default` only *prints* the example and creates nothing.
 
-**§6 settled 2026-09-19** — four decisions, none implemented: no binary tarball
-(so no musl build; the probe did prove cmake is not a build dependency);
-shell completions via `clap_complete` in docgen, gated behind a new
-contradiction test pinning `Cli::command()` to the spec's declared surface;
-recipes in `contrib/` with the install set derived from one declaration rather
-than restated eight times; and `extra/ export-ignore` to keep the vendored
-GPL-2 xtables-addons tarball out of the published MIT source artefact.
+**§6 settled 2026-09-19.** Four decisions:
 
-Blocking everything: **there is no git tag**. `publish = false`, so every
-recipe builds from a tag or a release asset, and neither exists. Tag `v0.3.0`
-first.
+1. **No binary tarball**, and therefore no musl build — a program that cannot
+   run without a distribution-supplied kernel module is served by recipes, not
+   by a static binary. The probe was still worth running: it proved **cmake is
+   not a build dependency** (`aws-lc-sys` takes its pregenerated-source `cc`
+   path), which simplifies all eight recipes.
+2. **Shell completions** via `clap_complete` in docgen, behind a contradiction
+   test pinning `Cli::command()` to the spec's declared surface.
+3. **Recipes in `contrib/`**, with the install set derived from one declaration
+   rather than restated eight times.
+4. **`extra/ export-ignore`**, keeping the vendored GPL-2 xtables-addons
+   tarball out of the published MIT source artefact.
 
-Still true as of 2026-09-13: no `debian/`, no `rpm/`, no `*.spec`.
+**Built so far**: decision 2's safety net only —
+`cli::contradiction::clap_surface_matches_the_spec`, which pins clap's argument
+surface to `flags` ∪ `global_options` ∪ `subcommand_options` in both
+directions, each direction mutation-confirmed. It was worth building on its own
+account: the globals were pinned only to the man page and `flags` only to the
+guards, so nothing asserted the union, and an argument added to `cli.rs` and
+forgotten in the spec was invisible to every existing check.
+
+**Still to write**: the completion generator itself, `contrib/` and the eight
+recipes, the derived install-set declaration, and the `.gitattributes`.
+
+No longer blocking: `v0.3.0` was tagged and pushed on 2026-09-19, so the
+`publish = false` problem is solved — every recipe can build from that tag.
+
+Still true as of 2026-09-19: no `contrib/`, no `debian/`, no `rpm/`, no
+`*.spec`, no `.gitattributes`.
 
 ---
 
