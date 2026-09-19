@@ -70,7 +70,17 @@ must *not* be a packaged file. `conf --set-credentials` rewrites it in place
 and leaves it 0600 with ciphertext in it, so as a dpkg conffile or an rpm
 `%config` every upgrade would diff it against the shipped original and either
 prompt or relocate live credentials. The example ships under
-`/usr/share/xt_geoip/` and `conf --default` creates the real one.
+`/usr/share/xt_geoip/`; `conf --show` (and `--edit`, `--set-credentials`)
+create the real one on demand via `ensure_system_config_exists`, while
+`conf --default` only *prints* the example and creates nothing.
+
+**§6 settled 2026-09-19** — four decisions, none implemented: no binary tarball
+(so no musl build; the probe did prove cmake is not a build dependency);
+shell completions via `clap_complete` in docgen, gated behind a new
+contradiction test pinning `Cli::command()` to the spec's declared surface;
+recipes in `contrib/` with the install set derived from one declaration rather
+than restated eight times; and `extra/ export-ignore` to keep the vendored
+GPL-2 xtables-addons tarball out of the published MIT source artefact.
 
 Blocking everything: **there is no git tag**. `publish = false`, so every
 recipe builds from a tag or a release asset, and neither exists. Tag `v0.3.0`
