@@ -1,10 +1,11 @@
 # Design: Packaging and release
 
 Status: **analysis, with §6 settled**. Written 2026-09-13; §6's four decisions
-taken 2026-09-19. Nothing here is implemented yet — there is no `debian/`, no
-spec file, no `contrib/` — but `v0.3.0` is now tagged and pushed, so recipes
-have a stable ref to build from. One decision in §2 is load-bearing and should
-be settled before any recipe is written.
+taken 2026-09-19, and §4's exclusions extended 2026-09-20. `contrib/` and the
+derived install manifest exist; no recipe does — there is no `debian/` and no
+spec file. Recipes need a tag to build from and do not yet have a usable one:
+see §4 on why `v0.3.0` cannot be it. One decision in §2 is load-bearing and
+should be settled before any recipe is written.
 
 Related: TODO.md (*Packaging and deployment*), `98-state-ownership-recovery.md`
 §4 (the ownership model this inherits), #103 (why the config file cannot be a
@@ -203,8 +204,10 @@ contributor's workflow. Noted rather than fixed.
 target exists so the binaries can share code, and publishing it would both
 expose an API this project does not support and make some ecosystems generate
 a `librust-xtgeoip-dev`. Consequence: every recipe builds from a git tag or a
-release asset. `v0.3.0` was tagged and pushed on 2026-09-19, so that is no
-longer a blocker — build from the tag.
+release asset — and the tag has to be one cut after `.gitattributes` landed.
+`v0.3.0` was tagged on 2026-09-19 but is not usable: `export-ignore` is read
+from the tree being archived, so `git archive v0.3.0` still carries the GPL-2
+xtables-addons tarball. `Cargo.toml` is at 0.4.0 for a tag that can be.
 
 **Do not set `strip = true` in `Cargo.toml`.** Debian and Fedora strip
 binaries themselves and extract `-dbgsym` / `-debuginfo` packages from what

@@ -113,13 +113,16 @@ package time. `tests::install_set_sources_exist` pins it, mutation-confirmed
 on both claims.
 
 **Still to write**: the eight recipes themselves (`debian/` and `PKGBUILD`
-first) and the `.gitattributes` for decision 4.
+first).
 
-No longer blocking: `v0.3.0` was tagged and pushed on 2026-09-19, so the
-`publish = false` problem is solved — every recipe can build from that tag.
+Blocking, until a tag is cut: `publish = false` means every recipe builds from
+a git tag, and `v0.3.0` cannot be that tag. `export-ignore` is read from the
+tree being archived, so `git archive v0.3.0` still carries the GPL-2
+xtables-addons tarball regardless of what `.gitattributes` says today.
+`Cargo.toml` is bumped to 0.4.0 for a tag that can be; annotation drafted at
+`private/TAG_MSG_v0.4.0`.
 
-Still true as of 2026-09-19: no `contrib/`, no `debian/`, no `rpm/`, no
-`*.spec`, no `.gitattributes`.
+Still true as of 2026-09-20: no `debian/`, no `rpm/`, no `*.spec`.
 
 ---
 
