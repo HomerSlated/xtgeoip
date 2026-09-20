@@ -373,11 +373,14 @@ fn set_credentials() -> Result<()> {
     // The read below may well succeed unprivileged — the config is 0644 until
     // this function first succeeds, after which `credentials_temp_file`'s 0600
     // carries onto it through the rename and only its owner can read it.
-    // Either way, writing the result back needs write access to the file,
-    // which on a default install means root — there is no root gate here, root
-    // is simply who owns /etc. Check that now, before prompting for anything,
-    // so an unprivileged operator doesn't type their real license_key and wait
-    // on the KDF only to hit EACCES at the last step.
+    // Either way, writing the result back needs write access to the config's
+    // *directory*, not to the file: the rewrite is a temp file plus a rename,
+    // so it is /etc that has to admit us. On a default install that means
+    // root, and only because root owns /etc — there is no root gate here.
+    // `check_system_config_writable` probes exactly that, by creating a temp
+    // file in the parent. Check it now, before prompting for anything, so an
+    // unprivileged operator doesn't type their real license_key and wait on
+    // the KDF only to hit EACCES at the last step.
     check_system_config_writable()?;
 
     let raw = fs::read_to_string(system_config_path()).with_context(|| {
