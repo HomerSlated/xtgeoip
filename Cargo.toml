@@ -37,6 +37,32 @@ syslog = "7.0.0"
 time = { version = "0.3.47", features = ["macros", "local-offset"] }
 chrono = "0.4.44"
 fern = { version = "0.7.1", features = ["chrono"] }
+# The six crates below are pinned exactly; everything above floats on a caret
+# range. The rule is on-disk format, not security exposure — `reqwest` and
+# `zip` are at least as exposed, and are not pinned.
+#
+# An encrypted credential blob (#103) sits in /etc/xtgeoip.conf indefinitely,
+# and its format is whatever `argon2` and `chacha20poly1305` produced on the
+# day it was written. A minor bump that changes a KDF default or an output
+# framing detail breaks no build and fails no test — it makes every existing
+# blob undecryptable, reported as the deliberately ambiguous "wrong passphrase
+# or corrupt ciphertext". `secrecy` and `zeroize` shape the same blob in
+# memory; `toml_edit` decides how the ciphertext is spliced into the
+# operator's config without reformatting the rest of it.
+#
+# `rpassword` is on the credential path and is *not* pinned. That is the rule
+# working, not an oversight: it reads a terminal and persists nothing.
+#
+# These constraints bind only when the lockfile is regenerated. Cargo.lock is
+# committed and §3 of docs/design/packaging.md has recipes build `--locked`,
+# so they guard against our own `cargo update`, not against downstream drift.
+# Do not extend `=` to crates with no format contract — Debian re-resolves
+# against its own packaged versions, and an `=` pin is the shape most likely
+# to need patching downstream, which is a delta the maintainer then carries
+# through every security update.
+#
+# serde-saphyr's `=` is documentation rather than constraint: under Cargo's
+# caret rules `^0.0.29` already resolves to exactly 0.0.29.
 serde-saphyr = "=0.0.29"
 argon2 = "=0.5.3"
 chacha20poly1305 = "=0.11.0"

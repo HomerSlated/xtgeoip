@@ -42,11 +42,8 @@ extra/ export-ignore
 /TODO.md          export-ignore
 /CLAUDE.md        export-ignore
 
-# A pre-spec statement of the flag rules that no longer matches the program:
-# `prune.allowed_in` omits `build`, but `build -b -p` is valid (see
-# src/cli_snapshot.golden:47), and it names a `conf_delete` mode that is now
-# `conf --default`. Its three siblings — docs/xtgeoip-usage.{md,yaml} and
-# docs/spec/cli-prose.md — are still accurate and still ship; they are the
-# independent oracles that caught the `run -b -p` defect in 62e554a, and are
-# kept for that reason. This one would supply a false finding instead.
-/docs/spec/semantics.yaml  export-ignore
+# Deliberately NOT listed here: docs/xtgeoip-usage.{md,yaml} and
+# docs/spec/cli-prose.md. Nothing in the repository reads them, so a reference
+# check says to drop them, and that check asks the wrong question — they are
+# the hand-written oracles that caught the `run -b -p` defect in 62e554a, and
+# their value is exactly that nothing derives from them. They ship. See §4.

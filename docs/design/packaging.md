@@ -276,25 +276,38 @@ directory stays tracked as operator reference material.
 tarball, `DONE.md` alone larger than `build.rs`, `action.rs` and `cli.rs`
 combined. A closed work log, a plan for work not done, and operating
 instructions for an AI assistant working *in this* repository are things a
-downstream packager cannot act on. `docs/spec/semantics.yaml` goes with them
-for a different reason: it states the flag rules and no longer states them
-correctly (`prune.allowed_in` omits `build`, though `build -b -p` is valid;
-it names a `conf_delete` mode that is now `conf --default`).
+downstream packager cannot act on.
+
+`docs/spec/semantics.yaml` was excluded alongside them on the same day and
+then **deleted outright** on 2026-09-20, which is the better answer where it
+applies. It stated the flag rules and no longer stated them correctly:
+`prune.allowed_in` omitted `build`, though `build -b -p` is valid, and it named
+a `conf_delete` mode that is now `conf --default`. Nothing read it, so nothing
+broke.
 
 Its three siblings — `docs/xtgeoip-usage.md`, `docs/xtgeoip-usage.yaml` and
-`docs/spec/cli-prose.md` — do still ship, and the reason is worth recording,
-because a reference check says to drop them. Nothing in the repository reads
-any of the three. But `docs/design/spec-driven-validator.md` credits
-`xtgeoip-usage.yaml` with catching the `run -b -p` defect fixed in `62e554a`:
-single-source-of-truth detects drift, and only an artefact *outside* the
-derivation detects a wrong premise. Their value is exactly that nothing derives
-from them, which is also why no inbound-reference count can see it. They are
-kept, and `semantics.yaml` is not, because they are still true about the flag
-rules and it is not — a stale oracle is worse than none.
+`docs/spec/cli-prose.md` — are kept *and* shipped, and the reason is worth
+recording, because a reference check says to drop them too. Nothing in the
+repository reads any of the three either. But
+`docs/design/spec-driven-validator.md` credits `xtgeoip-usage.yaml` with
+catching the `run -b -p` defect fixed in `62e554a`: single-source-of-truth
+detects drift, and only an artefact *outside* the derivation detects a wrong
+premise. Their value is exactly that nothing derives from them, which is also
+why no inbound-reference count can see it.
 
-Together with `extra/`, this takes the tarball from 1,269,300 bytes to
-1,039,162 (68 files, −18.1%). That baseline is `HEAD`; the two documents
-deleted in the working tree take it to 1,024,991 once they are committed.
+So "nothing reads it" decided neither case. What decided both is whether the
+document is still true: the three are, and `semantics.yaml` was not. A stale
+oracle is worse than none, because the next audit that trusts it inherits a
+false premise instead of catching one.
+
+Together with `extra/`, the rules removed 230,138 bytes: 73 files and
+1,269,300 bytes became 67 and 1,031,608 at `cdba118`, a fifth smaller. Treat
+that as a scale, not a constant — it moves with every documentation commit.
+What is fixed is the rule set, and the way to check it is to look:
+
+```sh
+git archive HEAD --format=tar | tar -t | grep -v '/$'
+```
 
 **Build the source tarball with `git archive`, and nothing else.** That is not
 a style preference: `export-ignore` is an attribute `git archive` consults, so
@@ -515,8 +528,9 @@ missing is that "not installed" and "not in the source tarball" are different
 claims, governed in different places.
 
 Extended 2026-09-20 after auditing the full 73-file list: the four
-development-history files and `docs/spec/semantics.yaml` are excluded too, for
-the reasons in §4. Five `export-ignore` lines, 230,138 bytes.
+development-history files are excluded too, for the reasons in §4.
+`docs/spec/semantics.yaml` was excluded with them and then deleted the same
+day, so its rule is gone rather than kept as a line matching nothing.
 
 The general rule that came out of the audit: **prune by name, never by
 directory.** `docs/spec/` holds both docgen inputs and hand-written oracles;
