@@ -71,12 +71,20 @@ and an uncompressed man page. Both work; both will be flagged in review.
   release build succeeds on a machine with no cmake installed.
 - Runtime-depends on **`xtables-addons`** (or the distribution's name for the
   `xt_geoip` match). The data files this produces are useless without it.
-- Build from the `v0.4.0` tag or later — **not** from `v0.3.0`. The tarball
-  exclusions in `.gitattributes` were added after that tag was cut, and
-  `export-ignore` is read from the tree being archived, so `git archive v0.3.0`
-  still carries `extra/dkms/xt-geoip-3.30.tar.gz`: third-party GPL-2 source
-  inside a release whose root `LICENSE` is MIT. `publish = false`, so there is
-  no crates.io tarball either way.
+- Build from **`v0.4.1` or later**. The two earlier tags are both unsuitable,
+  for unrelated reasons, and neither announces it:
+  - `v0.3.0` predates `.gitattributes`. `export-ignore` is read from the tree
+    being archived, so `git archive v0.3.0` still carries
+    `extra/dkms/xt-geoip-3.30.tar.gz` — third-party GPL-2 source inside a
+    release whose root `LICENSE` is MIT.
+  - `v0.4.0` predates the emitter audit of 2026-09-20. Its `xtgeoip-docgen`
+    writes `install-manifest.tsv` without validating the fields it
+    interpolates, which is the finding that put a forged row — and therefore
+    an arbitrary `install` line — into the manifest a recipe consumes. Since
+    this file is that recipe's instructions, building from that tag defeats
+    the point of reading it.
+
+  `publish = false`, so there is no crates.io tarball either way.
 - Roll the tarball with `git archive`, not `tar czf`. `export-ignore` is an
   attribute `git archive` consults; anything that copies files from a working
   tree silently reincludes everything it was added to keep out.

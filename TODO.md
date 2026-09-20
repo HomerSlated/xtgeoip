@@ -115,12 +115,16 @@ on both claims.
 **Still to write**: the eight recipes themselves (`debian/` and `PKGBUILD`
 first).
 
-Blocking, until a tag is cut: `publish = false` means every recipe builds from
-a git tag, and `v0.3.0` cannot be that tag. `export-ignore` is read from the
-tree being archived, so `git archive v0.3.0` still carries the GPL-2
-xtables-addons tarball regardless of what `.gitattributes` says today.
-`Cargo.toml` is bumped to 0.4.0 for a tag that can be; annotation drafted at
-`private/TAG_MSG_v0.4.0`.
+Recipes build from a git tag, since `publish = false`, and the first two tags
+are both unusable — each for a reason invisible from the tag itself. `v0.3.0`
+predates `.gitattributes`, and `export-ignore` is read from the tree being
+archived, so `git archive v0.3.0` still carries the GPL-2 xtables-addons
+tarball regardless of what `.gitattributes` says today. `v0.4.0` was cut at
+`cdba118` on 2026-09-20, hours before the emitter audit, so its
+`xtgeoip-docgen` still interpolates `install.yaml` into the manifest with no
+validation — the H-1 finding, in the packaging path itself. Both tags stand
+where they are; `v0.4.1` is the recipe target, annotation at
+`private/TAG_MSG_v0.4.1`.
 
 Still true as of 2026-09-20: no `debian/`, no `rpm/`, no `*.spec`.
 
@@ -284,7 +288,7 @@ Deliberate omissions, kept so the next audit does not re-file them as new
 findings.
 
 - **Three INFORMATIONAL notes from `guardian_report_20260920_185130.md`**, left
-  open at the `v0.4.0` tag because all three are text or test-quality and the
+  open at the `v0.4.1` tag because all three are text or test-quality and the
   audit chain had converged — that round found nothing above INFORMATIONAL
   after three consecutive rounds that each found something real. Worth doing,
   not worth another round before the tag:
