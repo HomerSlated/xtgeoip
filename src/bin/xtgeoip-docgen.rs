@@ -235,6 +235,27 @@ fn validate_install(install: &InstallSpec) -> anyhow::Result<()> {
     // reasoning per-field about which values can reach the emitter is exactly
     // what let this through. The delimiter is a property of the format, not
     // of the field.
+    // `starts_with('/')` is not enough. The stated purpose of the check is to
+    // control where a file lands — see the `dest` note in install.yaml — and
+    // `/../../../etc/cron.d/pwn` satisfies the letter of it while defeating
+    // that purpose: `contrib/README.md`'s consumer runs
+    // `install -D -m "$mode" "$src" "$DESTDIR$dest"`, and `install -D` creates
+    // the parents, so the write lands on the build host's real filesystem
+    // rather than in the staging root and never appears in the packaged file
+    // list. Requiring RootDir followed by none but Normal components also
+    // rejects `.` and `//`.
+    let plain_absolute = |field: &str, value: &str| -> anyhow::Result<()> {
+        let mut c = std::path::Path::new(value).components();
+        let rooted = c.next() == Some(std::path::Component::RootDir);
+        if !rooted || !c.all(|p| matches!(p, std::path::Component::Normal(_))) {
+            anyhow::bail!(
+                "{field} {value:?} is not a plain absolute path (it must \
+                 start at / and contain no `.` or `..` component)"
+            );
+        }
+        Ok(())
+    };
+
     let no_control = |field: &str, value: &str| -> anyhow::Result<()> {
         if let Some(c) = value.chars().find(|c| c.is_control()) {
             anyhow::bail!(
@@ -266,9 +287,12 @@ fn validate_install(install: &InstallSpec) -> anyhow::Result<()> {
                 f.transform
             );
         }
-        if !f.dest.starts_with('/') {
-            anyhow::bail!("{}: dest {:?} is not absolute", f.source, f.dest);
-        }
+        plain_absolute("dest", &f.dest).with_context(|| {
+            format!(
+                "{}: dest {:?} is not a plain absolute path",
+                f.source, f.dest
+            )
+        })?;
         if !well_formed_mode(&f.mode) {
             anyhow::bail!("{}: mode {:?} is not octal 0nnn", f.source, f.mode);
         }
@@ -276,9 +300,7 @@ fn validate_install(install: &InstallSpec) -> anyhow::Result<()> {
     for d in &install.directories {
         no_control("directory dest", &d.dest)?;
         no_control("directory mode", &d.mode)?;
-        if !d.dest.starts_with('/') {
-            anyhow::bail!("directory dest {:?} is not absolute", d.dest);
-        }
+        plain_absolute("directory dest", &d.dest)?;
         if !well_formed_mode(&d.mode) {
             anyhow::bail!(
                 "directory {}: mode {:?} is not octal 0nnn",
@@ -301,49 +323,58 @@ fn validate_install(install: &InstallSpec) -> anyhow::Result<()> {
 /// Tab-separated because a recipe's install step is a `while read` loop in
 /// whatever shell the format uses, and none of these paths contain tabs.
 fn generate_install_manifest(install: &InstallSpec) -> anyhow::Result<String> {
+    // Build the rows as data, check them, and only then concatenate.
+    //
+    // The first version of this check rendered the blob and re-parsed it,
+    // dropping `#` lines the way the consumer does. That is exploitable: a
+    // `source` ending in "\n#" pushes the legitimate row onto a comment line,
+    // where the filter discards it, so the row count matches, every surviving
+    // row has five fields, and the check passes with the forged row as the
+    // only one the consumer sees. A self-check must not re-parse its own
+    // output using a filter whose input the attacker supplies — there is then
+    // a predicate to satisfy instead of a property to hold.
+    //
+    // Checked here rather than left to `validate_install` because this
+    // function owns the *format*. The validator knows field semantics; a
+    // value can satisfy every semantic rule it enforces and still carry a
+    // delimiter. Both layers must hold independently, and this one is now
+    // genuinely independent rather than nominally so.
+    let mut rows: Vec<String> =
+        Vec::with_capacity(install.files.len() + install.directories.len());
+    for f in &install.files {
+        rows.push(format!(
+            "file\t{}\t{}\t{}\t{}",
+            f.source, f.transform, f.dest, f.mode
+        ));
+    }
+    for d in &install.directories {
+        rows.push(format!("dir\t-\t-\t{}\t{}", d.dest, d.mode));
+    }
+
+    for row in &rows {
+        anyhow::ensure!(
+            !row.contains('\n') && !row.contains('\r'),
+            "install-manifest.tsv row {row:?} carries a line break — it would \
+             forge a manifest row"
+        );
+        let n = row.matches('\t').count();
+        anyhow::ensure!(
+            n == 4,
+            "install-manifest.tsv row {row:?} has {} tab-separated fields, \
+             expected 5 — a field carried a tab",
+            n + 1
+        );
+    }
+
     let mut out = String::from(
         "# Generated by xtgeoip-docgen from docs/spec/install.yaml — do not \
          edit.\n# See contrib/README.md for how a recipe consumes this.\n",
     );
     out.push_str("# kind\tsource\ttransform\tdest\tmode\n");
-    for f in &install.files {
-        out.push_str(&format!(
-            "file\t{}\t{}\t{}\t{}\n",
-            f.source, f.transform, f.dest, f.mode
-        ));
-    }
-    for d in &install.directories {
-        out.push_str(&format!("dir\t-\t-\t{}\t{}\n", d.dest, d.mode));
-    }
-
-    // Structural self-check, in the shape `generate_testcases_yaml` uses.
-    // `validate_install` rejects the control characters that could forge a
-    // row, but it checks the *parsed struct* and this function owns the
-    // *format* — a value can satisfy every semantic rule the validator knows
-    // and still carry a delimiter. Counting the rows and fields the consumer
-    // will actually see closes that gap at generation time, and keeps it
-    // closed if a sixth field is ever added on one side only.
-    let expected = install.files.len() + install.directories.len();
-    let rows: Vec<&str> = out
-        .lines()
-        .filter(|l| !l.starts_with('#') && !l.is_empty())
-        .collect();
-    anyhow::ensure!(
-        rows.len() == expected,
-        "install-manifest.tsv emitted {} data rows for {} declared entries — \
-         a field carried a newline",
-        rows.len(),
-        expected
-    );
     for row in &rows {
-        let n = row.split('\t').count();
-        anyhow::ensure!(
-            n == 5,
-            "install-manifest.tsv row {row:?} has {n} tab-separated fields, \
-             expected 5 — a field carried a tab"
-        );
+        out.push_str(row);
+        out.push('\n');
     }
-
     Ok(out)
 }
 
@@ -2170,36 +2201,67 @@ mod tests {
 
         // Control: the same shape without the payload must pass, or the
         // assertions below would hold for the wrong reason.
-        validate_install(&sound("target/release/xtgeoip"))
+        let benign = "target/release/xtgeoip";
+        validate_install(&sound(benign))
             .expect("the benign case must validate");
+        generate_install_manifest(&sound(benign))
+            .expect("the benign case must emit");
 
-        let forged = "target/release/xtgeoip\nfile\tcontrib/payload.sh\tnone\\
-                      t/usr/bin/xtgeoip-helper\t4755";
-        let err = validate_install(&sound(forged))
+        // Built from short pieces, never as one long literal with escapes in
+        // it. `rustfmt.toml` sets `format_strings`, which reflows a long
+        // literal and will wrap *inside* an escape — which is exactly what
+        // happened to the first version of this fixture, turning the `\t`
+        // before the dest into a line continuation and a bare `t`. The test
+        // still passed, on a payload that no longer forged anything. See the
+        // warning in CLAUDE.md; `fetch::tests::geolite_zip` is the pattern.
+        let row = [
+            "file",
+            "contrib/payload.sh",
+            "none",
+            "/usr/bin/xtgeoip-helper",
+            "4755",
+        ]
+        .join("\t");
+
+        // Layer 1: the validator knows the field semantics.
+        let forged = format!("{benign}\n{row}");
+        let err = validate_install(&sound(&forged))
             .expect_err("a newline in `source` must be refused");
         assert!(
             err.to_string().contains("control character"),
             "refused for the wrong reason: {err}"
         );
 
-        let mut tabbed = sound("target/release/xtgeoip");
+        let mut tabbed = sound(benign);
         tabbed.files[0].dest = "/usr/bin\tsmuggled".to_string();
         assert!(
             validate_install(&tabbed).is_err(),
             "a tab in `dest` must be refused"
         );
 
-        // Second layer, reached by calling the emitter directly rather than
-        // by disabling the first. If `validate_install` ever stops checking a
-        // field, this is what is left.
-        let emitted = generate_install_manifest(&sound(forged))
-            .expect_err("the emitter must refuse to write a forged row");
+        // A `dest` that is absolute and still escapes $DESTDIR.
+        let mut dots = sound(benign);
+        dots.files[0].dest = "/../../../etc/cron.d/pwn".to_string();
+        let err = validate_install(&dots)
+            .expect_err("a `..` component in `dest` must be refused");
         assert!(
-            emitted.to_string().contains("data rows"),
-            "refused for the wrong reason: {emitted}"
+            err.to_string().contains("plain absolute path"),
+            "refused for the wrong reason: {err}"
         );
-        generate_install_manifest(&sound("target/release/xtgeoip"))
-            .expect("the benign case must still emit");
+
+        // Layer 2, reached by calling the emitter directly rather than by
+        // disabling layer 1. Both carriers, because they fail differently:
+        // the plain one trips the row check, while the `#`-tailed one is the
+        // carrier that defeated the first version of this check by pushing
+        // the legitimate row onto a comment line.
+        for carrier in [forged.clone(), format!("{forged}\n#")] {
+            let err = generate_install_manifest(&sound(&carrier))
+                .expect_err("the emitter must refuse to write a forged row");
+            assert!(
+                err.to_string().contains("line break"),
+                "refused for the wrong reason: {err}"
+            );
+        }
     }
 
     /// Every source the install set declares must actually be there.
