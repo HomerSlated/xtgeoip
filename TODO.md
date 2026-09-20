@@ -283,6 +283,32 @@ the same investigation twice.
 Deliberate omissions, kept so the next audit does not re-file them as new
 findings.
 
+- **Three INFORMATIONAL notes from `guardian_report_20260920_185130.md`**, left
+  open at the `v0.4.0` tag because all three are text or test-quality and the
+  audit chain had converged — that round found nothing above INFORMATIONAL
+  after three consecutive rounds that each found something real. Worth doing,
+  not worth another round before the tag:
+  - `plain_relative`'s error message says "start at neither `/` nor a drive",
+    but on Unix `Component::Prefix` is never produced: `C:foo` is a single
+    `Normal` component and is accepted. Same overstatement class as IN-3,
+    reintroduced by the closure written to fix M-2, two lines above it
+  - the five `source` cases in
+    `control_characters_cannot_forge_a_manifest_row` assert `is_err()` where
+    every other assertion in that test pins the reason. Verified to fail for
+    the right reason today, so rot-prone rather than wrong. Remedy is to carry
+    the expected fragment in each tuple
+  - `plain_relative` bounds shape, not character class. Spaces, globs,
+    `$(...)`, backslashes and `~` still pass, and are inert only because the
+    documented consumer quotes its expansions. That is a dependency on the
+    recipe, not a property of the manifest, and it should be stated in
+    `contrib/README.md` when the first recipe is written
+- **The tab assertion cannot detect decay of its own fixture.** A `\t`
+  reflowed to a bare `t` by `format_strings` leaves seven tabs — still not
+  four, still the same error message, still green. No test can close this;
+  fixture intactness is established by reading the committed bytes, which is
+  what the 18:51 audit did. Noted so nobody adds a test believing it covers
+  this
+
 - **A check comparing OPTIONS prose against the guard table.** The five
   man-page checks compare prose against the *planner* and the *config*; nothing
   compares the "is an error" claims in the OPTIONS `.RS` block against the
