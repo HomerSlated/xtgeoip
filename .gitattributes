@@ -1,0 +1,52 @@
+# What `git archive` leaves out of the published source tarball.
+#
+# This file affects archives only. Nothing here is removed from the repository
+# or from a clone — `extra/` stays tracked, because it is operator reference
+# material. See docs/design/packaging.md §6.4.
+#
+# Two properties to know before trusting it:
+#
+#   * Attributes are read from the tree being archived, so this is NOT
+#     retroactive. `git archive v0.3.0` still carries everything, because that
+#     tag's tree has no .gitattributes. Only tags cut after this commit are
+#     covered, which matters because §3 tells recipes to build from a tag.
+#   * It binds `git archive` and nothing else. A tarball rolled with `tar czf`
+#     over a working tree ignores every line here, which is why §4 pins the
+#     release tarball to `git archive`.
+#
+# Verify rather than assume — the failure is silent, with no error and no diff:
+#
+#   git archive HEAD --format=tar | tar -t | grep -v '/$'
+#
+# `grep -v '/$'` is not optional: `tar -t` lists directory entries too, and
+# counting them is how an earlier draft of docs/design/packaging.md came to
+# say `extra/` was ten files when it is seven. To check one rule rather than
+# read the whole list, add `| grep '^extra/'` — it must print nothing.
+#
+# (Before this file is committed, add --worktree-attributes, or git reads the
+# attributes from HEAD's tree and appears to ignore your edit.)
+
+# Third-party xtables-addons source (GPL-2) plus ufw reference snippets.
+# Bundled upstream source inside a release tarball is refused by Debian and
+# Fedora packaging policy, and this project's root LICENSE is MIT. We depend
+# on xtables-addons; we do not ship a second copy of it.
+extra/ export-ignore
+
+# Development history. A closed work log, a plan for work not done, and
+# operating instructions for an AI assistant working in this repository —
+# none of which a downstream packager can act on. 227,912 bytes, 18% of the
+# tarball. All four stay tracked; `git log` and the release notes are the
+# right place to read history from.
+/DONE.md          export-ignore
+/DONE_tldr.md     export-ignore
+/TODO.md          export-ignore
+/CLAUDE.md        export-ignore
+
+# A pre-spec statement of the flag rules that no longer matches the program:
+# `prune.allowed_in` omits `build`, but `build -b -p` is valid (see
+# src/cli_snapshot.golden:47), and it names a `conf_delete` mode that is now
+# `conf --default`. Its three siblings — docs/xtgeoip-usage.{md,yaml} and
+# docs/spec/cli-prose.md — are still accurate and still ship; they are the
+# independent oracles that caught the `run -b -p` defect in 62e554a, and are
+# kept for that reason. This one would supply a false finding instead.
+/docs/spec/semantics.yaml  export-ignore

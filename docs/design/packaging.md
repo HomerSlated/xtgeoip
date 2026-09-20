@@ -257,7 +257,7 @@ from "this is the artefact we published", and one key making both claims makes
 neither checkable.
 
 **Exclude `extra/` from the source tarball.** `git archive HEAD` currently
-includes ten files under `extra/`, among them `extra/dkms/xt-geoip-3.30.tar.gz`
+includes seven files under `extra/`, among them `extra/dkms/xt-geoip-3.30.tar.gz`
 — third-party xtables-addons source under **GPL-2**, inside a release whose
 root `LICENSE` is MIT. This is not a licence violation; the root licence does
 not claim to cover `extra/`. But a bundled upstream tarball is something Debian
@@ -266,6 +266,45 @@ reviewer rather than by us. §1 already excludes `extra/` from the *installed*
 set; this is the *source* artefact, a different path that §1 does not govern.
 A `.gitattributes` carrying `extra/ export-ignore` settles it, and the
 directory stays tracked as operator reference material.
+
+**Exclude the development history, and one stale spec file** (decided
+2026-09-20, from the audit in `private/release-tarball-audit.md`). `DONE.md`,
+`DONE_tldr.md`, `TODO.md` and `CLAUDE.md` are 227,912 bytes — 18% of the
+tarball, `DONE.md` alone larger than `build.rs`, `action.rs` and `cli.rs`
+combined. A closed work log, a plan for work not done, and operating
+instructions for an AI assistant working *in this* repository are things a
+downstream packager cannot act on. `docs/spec/semantics.yaml` goes with them
+for a different reason: it states the flag rules and no longer states them
+correctly (`prune.allowed_in` omits `build`, though `build -b -p` is valid;
+it names a `conf_delete` mode that is now `conf --default`).
+
+Its three siblings — `docs/xtgeoip-usage.md`, `docs/xtgeoip-usage.yaml` and
+`docs/spec/cli-prose.md` — do still ship, and the reason is worth recording,
+because a reference check says to drop them. Nothing in the repository reads
+any of the three. But `docs/design/spec-driven-validator.md` credits
+`xtgeoip-usage.yaml` with catching the `run -b -p` defect fixed in `62e554a`:
+single-source-of-truth detects drift, and only an artefact *outside* the
+derivation detects a wrong premise. Their value is exactly that nothing derives
+from them, which is also why no inbound-reference count can see it. They are
+kept, and `semantics.yaml` is not, because they are still true about the flag
+rules and it is not — a stale oracle is worse than none.
+
+Together with `extra/`, this takes the tarball from 1,269,300 bytes to
+1,039,162 (68 files, −18.1%). That baseline is `HEAD`; the two documents
+deleted in the working tree take it to 1,024,991 once they are committed.
+
+**Build the source tarball with `git archive`, and nothing else.** That is not
+a style preference: `export-ignore` is an attribute `git archive` consults, so
+a tarball rolled with `tar czf` over a working tree — or assembled by a CI job
+that copies files — silently reincludes everything the attribute was added to
+keep out. The exclusion is a property of the command, not of the release.
+
+Two consequences follow. The attribute is read from *the tree being archived*,
+so it is not retroactive: `git archive v0.3.0` still contains `extra/`, because
+that tag predates the file. And the failure mode is silent in both directions —
+no error, no diff, just a tarball with the wrong contents — so the release
+procedure should end with `git archive HEAD | tar -t` and an actual look at the
+list, not with an assumption that the attribute did its job.
 
 **musl: measured, then dropped.** Recorded because the measurement outlives the
 decision. `x86_64-unknown-linux-musl` was probed on 2026-09-19: it fails at
@@ -461,7 +500,7 @@ the *package* declares; the repo copy is whatever the author's umask made it).
 `producer: build` entries are not checked for existence — `cargo test` builds
 debug, and `target/release/xtgeoip` is absent from a fresh checkout.
 
-### 6.4 `extra/` is excluded from the source tarball
+### 6.4 What the source tarball leaves out
 
 Per §4. `extra/` stays tracked — it is operator reference material — but
 `extra/ export-ignore` in `.gitattributes` keeps it out of the published
@@ -471,3 +510,12 @@ The distinction to hold on to: **`conf/` is install-set staging; `extra/` is
 reference material.** §1 already says the latter is not installed; what was
 missing is that "not installed" and "not in the source tarball" are different
 claims, governed in different places.
+
+Extended 2026-09-20 after auditing the full 73-file list: the four
+development-history files and `docs/spec/semantics.yaml` are excluded too, for
+the reasons in §4. Five `export-ignore` lines, 230,138 bytes.
+
+The general rule that came out of the audit: **prune by name, never by
+directory.** `docs/spec/` holds both docgen inputs and hand-written oracles;
+`docs/generated/` holds install-set members and the test corpus. Neither can be
+excluded wholesale, and both look like documentation from the outside.

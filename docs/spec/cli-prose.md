@@ -19,22 +19,22 @@ xtgeoip can:
 - Verify the integrity of the downloaded zip file using the corresponding sha256 checksum.
 - Unzip the downloaded zip file and extract the relevant CSV files to a temporary directory.
 - Convert the CSV data into the binary format supported by the xt_geoip Linux kernel module, one data file per country, then store them in /usr/share/xt_geoip/. The files are named according to the country code (e.g. US, CN, etc.) and the IP version (e.g. iv4, iv6), e.g. US.iv4, US.iv6, CN.iv4, CN.iv6, etc.
-- Create a sha256 checksum of the generated binary files, which will be used as a manifest for backup and housekeeping purposes.
+- Create a Blake3 checksum of the generated binary files, which will be used as a manifest for backup and housekeeping purposes.
 - Back up the binary files to a tarball in /var/lib/xt_geoip/, for future reference and potential rollback.
-- Prune older binary tarballs from /usr/share/xt_geoip/ to save disk space, keeping only the latest n versions (configurable, default: 3).
-- Delete the current binary files in /usr/share/xt_geoip/, to ensure no orphaned files are left behind. This also removes any metadata files created by xtgeoip (typically a file called "version" and the sha256 manifest file).
+- Prune older binary tarballs from /var/lib/xt_geoip/ to save disk space, keeping only the latest n versions (configurable, default: 3).
+- Delete the current binary files in /usr/share/xt_geoip/, to ensure no orphaned files are left behind. This also removes any metadata files created by xtgeoip (typically a file called "version" and the Blake3 manifest file).
 
 ## Force Flag
 
 Two operations support the "force" flag: backup and clean.
 
-Normally, backup requires a minimum of 3 files in /usr/share/xt_geoip/: the "version" file, the sha256 manifest file, and at least one iv4/iv6 binary file, the latter of which must also be named in the manifest, and pass checksum verification. However, typically you would expect to see hundreds of iv4/iv6 files. When backup runs, all files named in the manifest must exist in /usr/share/xt_geoip/, and pass checksum verification, otherwise the backup will not run, and the program will exit with an error. However, the force flag allows you to bypass these checks, and run the backup even if the version file or manifest is missing, or if some of the iv4/iv6 files are missing or fail checksum verification. This can be useful in certain scenarios, such as when you want to create a backup of the current state of /usr/share/xt_geoip/, even if it's in a broken state.
+Normally, backup requires a minimum of 3 files in /usr/share/xt_geoip/: the "version" file, the Blake3 manifest file, and at least one iv4/iv6 binary file, the latter of which must also be named in the manifest, and pass checksum verification. However, typically you would expect to see hundreds of iv4/iv6 files. When backup runs, all files named in the manifest must exist in /usr/share/xt_geoip/, and pass checksum verification, otherwise the backup will not run, and the program will exit with an error. However, the force flag allows you to bypass these checks, and run the backup even if the version file or manifest is missing, or if some of the iv4/iv6 files are missing or fail checksum verification. This can be useful in certain scenarios, such as when you want to create a backup of the current state of /usr/share/xt_geoip/, even if it's in a broken state.
 
 Similarly, the clean operation normally requires that the version file and manifest file be present in /usr/share/xt_geoip/, which it then uses to delete only those files that were originally created by xtgeoip, as named in the manifest. However, as with backup, the force flag allows you to bypass these checks, and any file matching the pattern *.iv4 or *.iv6 in /usr/share/xt_geoip/ will be deleted, along with any metadata files created by xtgeoip (e.g. the version file and manifest).
 
 ## Order of Operations vs Order of Flags
 
-Certain flags can be combined, such as -b (backup) and -c (clean). In this case, the order of operations is always to back up first, then clean, as the reverse would fail (you've just deleted the files you wanted to back up), and the order of the flags given are ignored (i.e. xtgeip -b -c == xtgeoip -c -b). Generally, the order of subcommands and flags is always ignored, and the order of exexution is fixed, based on the most logical order of operations requested.
+Certain flags can be combined, such as -b (backup) and -c (clean). In this case, the order of operations is always to back up first, then clean, as the reverse would fail (you've just deleted the files you wanted to back up), and the order of the flags given are ignored (i.e. xtgeoip -b -c == xtgeoip -c -b). Generally, the order of subcommands and flags is always ignored, and the order of exexution is fixed, based on the most logical order of operations requested.
 
 ## Context of Flags
 
