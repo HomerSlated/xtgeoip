@@ -250,7 +250,44 @@ fn validate_install(install: &InstallSpec) -> anyhow::Result<()> {
         if !rooted || !c.all(|p| matches!(p, std::path::Component::Normal(_))) {
             anyhow::bail!(
                 "{field} {value:?} is not a plain absolute path (it must \
-                 start at / and contain no `.` or `..` component)"
+                 start at / and climb no `..` component)"
+            );
+        }
+        Ok(())
+    };
+
+    // `source` reaches the consumer as the *first operand* of
+    // `install -D -m "$mode" "$src" "$DESTDIR$dest"`, which makes it a
+    // different problem from `dest` and a worse one. GNU install permutes
+    // options among operands, so a `source` of `-t/etc/cron.d` is eaten as
+    // `--target-directory` and the sole remaining operand is the staged file
+    // — which is then copied *out* of the staging root, rc=0 and no
+    // diagnostic. Measured on coreutils 9.4. `--target-directory=/DIR` is the
+    // same trick spelled out.
+    //
+    // An absolute `source` is the other half: `/etc/shadow` passes
+    // `tests::install_set_sources_exist`, because that test asks whether the
+    // path exists and `/etc/shadow` does. Every real source is repo-relative,
+    // so requiring that closes both.
+    //
+    // The leading-dash check is separate and cannot be folded into the
+    // component walk: `-t/etc/cron.d` is two perfectly Normal components.
+    let plain_relative = |field: &str, value: &str| -> anyhow::Result<()> {
+        let mut c = std::path::Path::new(value).components().peekable();
+        let non_empty = c.peek().is_some();
+        if !non_empty
+            || !c.all(|p| matches!(p, std::path::Component::Normal(_)))
+        {
+            anyhow::bail!(
+                "{field} {value:?} is not a plain relative path (it must name \
+                 at least one component, start at neither / nor a drive, and \
+                 climb no `..`)"
+            );
+        }
+        if value.starts_with('-') {
+            anyhow::bail!(
+                "{field} {value:?} begins with `-`; a recipe passes it to \
+                 install(1) as an operand, which would read it as an option"
             );
         }
         Ok(())
@@ -269,6 +306,7 @@ fn validate_install(install: &InstallSpec) -> anyhow::Result<()> {
 
     for f in &install.files {
         no_control("source", &f.source)?;
+        plain_relative("source", &f.source)?;
         no_control("producer", &f.producer)?;
         no_control("transform", &f.transform)?;
         no_control("dest", &f.dest)?;
@@ -2239,6 +2277,24 @@ mod tests {
             "a tab in `dest` must be refused"
         );
 
+        // `source` reaches install(1) as an operand, so its shape matters
+        // as much as its contents. Each of these passes `no_control`.
+        for (bad, why) in [
+            ("-t/etc/cron.d", "a leading dash is read as an option"),
+            ("--target-directory=/etc", "likewise, spelled out"),
+            (
+                "/etc/shadow",
+                "absolute: exists(), so the source test passes it",
+            ),
+            ("../../etc/shadow", "climbs out of the repository"),
+            ("", "names nothing"),
+        ] {
+            assert!(
+                validate_install(&sound(bad)).is_err(),
+                "source {bad:?} must be refused — {why}"
+            );
+        }
+
         // A `dest` that is absolute and still escapes $DESTDIR.
         let mut dots = sound(benign);
         dots.files[0].dest = "/../../../etc/cron.d/pwn".to_string();
@@ -2262,6 +2318,17 @@ mod tests {
                 "refused for the wrong reason: {err}"
             );
         }
+
+        // Layer 2's *other* half. Without this the tab count could be
+        // disabled and every assertion above would still hold, because the
+        // line-break check catches the carriers on its own. Both halves are
+        // load-bearing or the comment above the check is wrong.
+        let err = generate_install_manifest(&sound(&row))
+            .expect_err("a tab-only carrier must be refused by the emitter");
+        assert!(
+            err.to_string().contains("tab-separated fields"),
+            "refused for the wrong reason: {err}"
+        );
     }
 
     /// Every source the install set declares must actually be there.
