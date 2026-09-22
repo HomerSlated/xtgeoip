@@ -16,7 +16,14 @@ export DH_VERBOSE = 1
 # of it with one rm; and the build never writes to the packager's ~/.cargo.
 export CARGO_HOME = $(CURDIR)/debian/cargo_home
 
-DESTDIR  := $(CURDIR)/debian/xtgeoip
+# `dh_auto_install` would normally be handed --destdir=debian/<package>; the
+# override below does its own installing and so has to derive the same path.
+# Ask dh rather than writing `debian/xtgeoip`, so a rename or a `dh -p` cannot
+# silently stage into a directory nothing later picks up.
+DESTDIR  := $(CURDIR)/debian/$(firstword $(shell dh_listpackages))
+ifeq ($(DESTDIR),$(CURDIR)/debian/)
+$(error dh_listpackages named no package; refusing to stage into /)
+endif
 MANIFEST := docs/generated/install-manifest.tsv
 
 # `cargo vendor` before building and everything below goes offline, which is
@@ -64,8 +71,10 @@ override_dh_auto_test:
 # Two rewrites happen here and nowhere else:
 #
 #   * The `gzip` transform becomes a dest with `.gz` removed, because
-#     dh_compress compresses /usr/share/man itself, at -9n. A `gzip -9` in this
-#     file would embed a timestamp and lose reproducibility.
+#     dh_compress compresses /usr/share/man itself, and it does so with
+#     `gzip -9nf` — read out of /usr/bin/dh_compress in debhelper
+#     13.14.1ubuntu5 rather than recalled. The `-n` is the point: a plain
+#     `gzip -9` here would embed a timestamp and lose reproducibility.
 #   * The `strip` transform is a no-op, because dh_strip does it.
 #
 # Both `case` statements have a `*)` arm on purpose. Without one, a transform or

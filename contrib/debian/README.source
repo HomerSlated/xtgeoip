@@ -82,8 +82,16 @@ floor, not a tested MSRV, and upstream declares none.
 Tests
 -----
 
-`debian/rules` runs `cargo test`, the hermetic suite: no root, no network, no
-fixtures outside the source tree. `DEB_BUILD_OPTIONS=nocheck` skips it.
+`debian/rules` runs `cargo test`, the hermetic suite: no root and no network.
+`DEB_BUILD_OPTIONS=nocheck` skips it.
+
+It also writes nothing into the source tree, which matters more here than it
+looks: under `3.0 (quilt)` anything a test left behind would surface on the
+second `dpkg-source` pass as an unexplained change to upstream source, and fail
+the build in a way that reads like a packaging bug. Checked rather than assumed
+— `cargo test` followed by `git status --porcelain` leaves the tree clean.
+`debian/rules clean` removes the only two things a build does create,
+`debian/cargo_home/` and `target/`.
 
 It does *not* run `xtgeoip-tests`, the integration suite, and should not: that
 one needs root, a release build, `openssl(1)`, and it prompts for the
