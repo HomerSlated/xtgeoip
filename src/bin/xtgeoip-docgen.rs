@@ -2395,6 +2395,85 @@ mod tests {
 
     use super::*;
 
+    /// The recipes' `case` arms and the manifest's `transform` column agree.
+    ///
+    /// `contrib/debian/rules` installs the set with a shell loop that branches
+    /// on `transform`, and the other seven recipes will each carry their own
+    /// copy of that branch. Every one has a `*)` arm that aborts the build, so
+    /// a new transform fails loudly rather than silently skipping a file — but
+    /// only if someone updates the recipes. This test is that reminder.
+    ///
+    /// It reads the generated TSV rather than `install.yaml`, because the TSV
+    /// is what a recipe consumes: directory rows carry a literal `-` in the
+    /// transform column, which the spec has no field for at all.
+    #[test]
+    fn install_manifest_transforms_are_known() {
+        let path = "docs/generated/install-manifest.tsv";
+        let tsv = std::fs::read_to_string(path).expect("manifest missing");
+
+        let rows: Vec<Vec<&str>> = tsv
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+            .map(|l| l.split('\t').collect())
+            .collect();
+
+        // Vacuity guard: an empty manifest satisfies every loop below.
+        assert!(!rows.is_empty(), "the manifest declares nothing");
+
+        for row in &rows {
+            assert_eq!(row.len(), 5, "row is not five fields: {row:?}");
+            let (kind, transform, dest) = (row[0], row[2], row[3]);
+
+            assert!(
+                matches!(transform, "none" | "gzip" | "strip" | "-"),
+                "{transform:?} is not an arm of the recipes' case statement; \
+                 teach contrib/debian/rules about it before declaring it here"
+            );
+            if transform == "gzip" {
+                assert!(
+                    dest.ends_with(".gz"),
+                    "{dest:?} is gzip-transformed but does not end in .gz; \
+                     contrib/debian/rules removes that suffix so dh_compress \
+                     can restore it, and would install to the wrong path"
+                );
+            }
+            assert!(
+                kind != "dir" || transform == "-",
+                "a directory row carries transform {transform:?}, not `-`"
+            );
+        }
+    }
+
+    /// `contrib/debian/changelog` states the version a second time.
+    ///
+    /// Everything else a recipe needs is read from
+    /// `docs/generated/install-manifest.tsv`, but a Debian changelog cannot be
+    /// generated: its version carries a package revision and its entries are
+    /// prose. So exactly one restatement survives, and this is what keeps it
+    /// honest — the top entry's upstream version must be `Cargo.toml`'s.
+    #[test]
+    fn debian_changelog_version_matches_crate() {
+        let log = std::fs::read_to_string("contrib/debian/changelog")
+            .expect("contrib/debian/changelog missing");
+        let first = log.lines().next().expect("changelog is empty");
+
+        // `xtgeoip (0.4.1-1) unstable; urgency=medium`
+        let bracketed = first
+            .split_once('(')
+            .and_then(|(_, rest)| rest.split_once(')'))
+            .map(|(v, _)| v)
+            .unwrap_or_else(|| panic!("no version in {first:?}"));
+        let upstream = bracketed.rsplit_once('-').map_or(bracketed, |(u, _)| u);
+
+        assert_eq!(
+            upstream,
+            env!("CARGO_PKG_VERSION"),
+            "contrib/debian/changelog is at {}, Cargo.toml at {}; bump both",
+            upstream,
+            env!("CARGO_PKG_VERSION")
+        );
+    }
+
     fn example(valid: bool) -> Example {
         Example {
             case_id: Some("X-001".into()),

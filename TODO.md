@@ -61,10 +61,10 @@ is meant.
 ### Packaging and deployment
 
 Early, but no longer unexamined: `docs/design/packaging.md` (2026-09-13)
-measures the install set and settles the shape. Six files and two directories,
-8.85 MiB — nine files once shell completions land; eight recipes cover the top
-20 distributions and are the same package eight times over; deb and `PKGBUILD`
-first.
+measures the install set and settles the shape. Nine files and two
+directories, 8.87 MiB once the shell completions landed on 2026-09-19; eight
+recipes cover the top 20 distributions and are the same package eight times
+over; deb and `PKGBUILD` first.
 
 **The decision in it worth knowing without reading it**: `/etc/xtgeoip.conf`
 must *not* be a packaged file. `conf --set-credentials` rewrites it in place
@@ -112,8 +112,39 @@ in the form they ship — the man page is gzipped and the binary stripped at
 package time. `tests::install_set_sources_exist` pins it, mutation-confirmed
 on both claims.
 
-**Still to write**: the eight recipes themselves (`debian/` and `PKGBUILD`
-first).
+**Written 2026-09-22**: `contrib/debian/` — `control`, `rules`, `changelog`,
+`copyright`, `source/format` and a `README.source` for whoever builds it. Its
+install step is a shell loop over `install-manifest.tsv` inside
+`override_dh_auto_install`, so there is no `debian/install` file and nothing to
+keep in step. Two new pins came with it, both mutation-confirmed:
+`tests::install_manifest_transforms_are_known` (the recipe branches on the
+`transform` column, so the column's vocabulary is now asserted) and
+`tests::debian_changelog_version_matches_crate` (the one restatement a Debian
+changelog forces).
+
+Three things it settled that were open, and one it corrected:
+
+- **Plain `dh`, not `dh-cargo`** — dh-cargo re-resolves against Debian's crate
+  registry, which is what `--locked` exists to prevent, and would need all 307
+  lockfile crates packaged in Debian at the pinned versions. §5's table said
+  `dh` + `dh-cargo` and has been corrected.
+- **The `transform` column is Debian's job, not the recipe's** — `dh_strip` and
+  `dh_compress` are exactly `strip` and `gzip`, so `rules` performs neither and
+  only rewrites the man page's `dest` to drop `.gz`.
+- **No `-dbgsym`** — `Cargo.toml` sets no `[profile.release]`, so Cargo's
+  release default leaves no debug info for `dh_strip` to extract. §3's
+  do-not-pre-strip rule is still right and does not yet pay; `rules` suppresses
+  the empty package and records how to get a real one.
+- **The C compiler needs no `Build-Depends` line on Debian.** §3 predicted
+  `aws-lc-sys` would be the interesting build dependency. It is not: gcc comes
+  from `build-essential`, which Policy makes implicit and then forbids listing.
+
+**Not built end to end.** `debhelper` is not installed on this machine, so the
+recipe is verified by inspection plus a standalone run of its install loop
+against a staging directory (nine files, two directories, modes as declared).
+A real `dpkg-buildpackage` is the next thing it wants.
+
+**Still to write**: seven recipes. `PKGBUILD` next.
 
 Recipes build from a git tag, since `publish = false`, and the first two tags
 are both unusable — each for a reason invisible from the tag itself. `v0.3.0`
@@ -126,7 +157,7 @@ validation — the H-1 finding, in the packaging path itself. Both tags stand
 where they are; `v0.4.1` is the recipe target, annotation at
 `private/TAG_MSG_v0.4.1`.
 
-Still true as of 2026-09-20: no `debian/`, no `rpm/`, no `*.spec`.
+Still true as of 2026-09-22: no `rpm/` and no `*.spec`.
 
 ---
 

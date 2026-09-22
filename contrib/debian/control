@@ -1,0 +1,59 @@
+# debian/control — source and binary package metadata.
+#
+# This is NOT an official Debian package. Nobody upstream maintains one and no
+# ITP has been filed; the recipe lives in the upstream tree so that it is built
+# against the install set it claims to install (docs/design/packaging.md §6.3).
+# See debian/README.source before building.
+
+Source: xtgeoip
+Section: net
+Priority: optional
+Maintainer: xtgeoip packaging <packaging@example.invalid>
+# ^ Replace before uploading anywhere. Whoever uploads a package owns this
+#   field, and it is not upstream. `.invalid` is reserved by RFC 2606, so the
+#   address above cannot be delivered to by accident.
+#
+# No C compiler is listed although §3 of the design note says every recipe
+# needs one: `aws-lc-sys` is compiled for the TLS backend. On Debian gcc comes
+# from build-essential, which Policy §4.2 makes implicit for every source
+# package, and Policy §7.6 says not to list it. cmake is deliberately absent —
+# aws-lc-sys takes its pregenerated-source `cc` path on the architectures
+# Debian builds for, measured 2026-09-19.
+Build-Depends:
+ debhelper-compat (= 13),
+ cargo,
+ rustc (>= 1.85),
+Standards-Version: 4.7.0
+Homepage: https://github.com/HomerSlated/xtgeoip
+Vcs-Git: https://github.com/HomerSlated/xtgeoip.git
+Vcs-Browser: https://github.com/HomerSlated/xtgeoip
+Rules-Requires-Root: no
+
+Package: xtgeoip
+Architecture: any
+Depends:
+ ${shlibs:Depends},
+ ${misc:Depends},
+ xtables-addons-common,
+Recommends: xtables-addons-dkms | xtables-addons-source
+Suggests: logrotate
+Description: GeoLite2 database builder for the xt_geoip iptables match
+ xtgeoip downloads MaxMind's GeoLite2 country CSV database and converts it into
+ the binary per-country IP range files that the xt_geoip netfilter match reads,
+ letting iptables and nftables rules select traffic by country. It is a Rust
+ reimplementation of xt_geoip_build_maxmind(1) from xtables-addons-common.
+ .
+ It detects the remote version before downloading, so a run that finds nothing
+ new transfers nothing; it archives and prunes previous datasets; and it stores
+ the MaxMind account credentials encrypted rather than in plain text.
+ .
+ The data files it produces do no matching by themselves. That is done by
+ xt_geoip: the userspace extension in xtables-addons-common, which this package
+ depends on, and the kernel module, which on Debian comes from
+ xtables-addons-dkms.
+ .
+ There is no packaged /etc/xtgeoip.conf. That file holds the encrypted
+ credentials and is rewritten in place, so it belongs to the operator rather
+ than to the package manager. Run "xtgeoip conf --show" first: it offers to
+ create the configuration from the example this package installs under
+ /usr/share/xt_geoip/.

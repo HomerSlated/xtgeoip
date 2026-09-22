@@ -1,0 +1,114 @@
+#!/usr/bin/make -f
+#
+# debian/rules — build xtgeoip as a .deb.
+#
+# The install step is a loop over docs/generated/install-manifest.tsv, not a
+# debian/install file. That manifest is generated from docs/spec/install.yaml,
+# where the nine files and two directories are declared once for all eight
+# recipe formats (docs/design/packaging.md §6.3). A debian/install file here
+# would be the tenth restatement of a list that nothing verifies.
+
+export DH_VERBOSE = 1
+
+# Keep cargo's registry, git checkouts and caches inside debian/. Three reasons:
+# the build leaves no trace outside debian/, so `dpkg-source` on a second pass
+# reports no changes to the upstream source; `debian/rules clean` can remove all
+# of it with one rm; and the build never writes to the packager's ~/.cargo.
+export CARGO_HOME = $(CURDIR)/debian/cargo_home
+
+DESTDIR  := $(CURDIR)/debian/xtgeoip
+MANIFEST := docs/generated/install-manifest.tsv
+
+# `cargo vendor` before building and everything below goes offline, which is
+# what a buildd needs. Without it the build resolves over the network, which is
+# fine locally and fails on any real build machine. See debian/README.source.
+VENDOR   := $(wildcard $(CURDIR)/vendor)
+OFFLINE  := $(if $(VENDOR),--offline)
+
+%:
+	dh $@
+
+# Not `dh --buildsystem=cargo`. dh-cargo builds --offline against Debian's own
+# /usr/share/cargo/registry, which re-resolves every dependency against whatever
+# version Debian packages. §3 of the design note has recipes build --locked
+# precisely to stop that: six crates on the credential path are exact-pinned
+# because an encrypted blob sits in /etc/xtgeoip.conf indefinitely, in whatever
+# format argon2 and chacha20poly1305 produced on the day it was written. A
+# re-resolve changes no build output that anything checks, and makes every
+# existing blob undecryptable. It also needs all 307 lockfile crates packaged in
+# Debian at the pinned versions, which they are not.
+override_dh_auto_configure:
+ifneq ($(VENDOR),)
+	mkdir -p $(CARGO_HOME)
+	printf '%s\n' \
+	  '[source.crates-io]' \
+	  'replace-with = "vendored-sources"' \
+	  '[source.vendored-sources]' \
+	  'directory = "$(CURDIR)/vendor"' \
+	  > $(CARGO_HOME)/config.toml
+endif
+
+# No CARGO_PROFILE_RELEASE_DEBUG. See override_dh_strip below for why.
+override_dh_auto_build:
+	cargo build --release --locked $(OFFLINE)
+
+# The hermetic suite only. `xtgeoip-tests` is the other one and does not belong
+# on a buildd: it needs root, a release build, openssl(1), and it prompts for
+# the credentials passphrase on the terminal once per remote case.
+# DEB_BUILD_OPTIONS=nocheck skips this whole target — dh handles that itself.
+override_dh_auto_test:
+	cargo test --locked $(OFFLINE)
+
+# Every file and directory this package ships, read from the one declaration.
+#
+# Two rewrites happen here and nowhere else:
+#
+#   * The `gzip` transform becomes a dest with `.gz` removed, because
+#     dh_compress compresses /usr/share/man itself, at -9n. A `gzip -9` in this
+#     file would embed a timestamp and lose reproducibility.
+#   * The `strip` transform is a no-op, because dh_strip does it.
+#
+# Both `case` statements have a `*)` arm on purpose. Without one, a transform or
+# kind added to install.yaml later would be skipped in silence, producing a
+# package missing a file — which is the failure §6.3 exists to prevent, arriving
+# through the recipe instead of around it.
+override_dh_auto_install:
+	set -e; \
+	sed -e '/^#/d' -e '/^$$/d' $(MANIFEST) \
+	| while IFS="$$(printf '\t')" read -r kind src transform dest mode; do \
+	    case "$$transform" in \
+	      none|-) ;; \
+	      strip)  ;; \
+	      gzip)   dest="$${dest%.gz}" ;; \
+	      *) echo "$(MANIFEST): unknown transform '$$transform'" >&2; exit 1 ;; \
+	    esac; \
+	    case "$$kind" in \
+	      dir)  install -d -m "$$mode" -- "$(DESTDIR)$$dest" ;; \
+	      file) install -D -m "$$mode" -- "$$src" "$(DESTDIR)$$dest" ;; \
+	      *) echo "$(MANIFEST): unknown kind '$$kind'" >&2; exit 1 ;; \
+	    esac; \
+	  done
+
+# §3 says not to pre-strip, so that dh_strip can extract xtgeoip-dbgsym from
+# what it removes. On this package there is nothing to extract: Cargo's release
+# profile defaults to debug = false and Cargo.toml sets no [profile.release], so
+# the binary carries a symbol table and no DWARF. An empty -dbgsym is the very
+# thing §3 is trying to avoid, reached by a different road, so suppress it.
+#
+# To ship a real one, add CARGO_PROFILE_RELEASE_DEBUG=line-tables-only (file and
+# line, enough for a backtrace) or =2 (full) to override_dh_auto_build and drop
+# the flag below. Do not set debug in Cargo.toml: that would slow every
+# developer build for a packaging concern.
+override_dh_strip:
+	dh_strip --no-automatic-dbgsym
+
+# `dh_auto_clean` would run `cargo clean`, which needs a working cargo and a
+# resolvable lockfile. rm is enough and works on a tree that never built.
+override_dh_auto_clean:
+	rm -rf $(CARGO_HOME) target
+
+# Note for a reader coming from §2 of the design note: /etc/logrotate.d/xtgeoip
+# lands under $(DESTDIR)/etc, so dh_installdeb registers it as a conffile, and
+# that is wanted — rotation policy is the operator's to edit and dpkg's to keep.
+# §2 is about /etc/xtgeoip.conf, which this package deliberately does not ship
+# at all, so there is no conffile to prompt over.

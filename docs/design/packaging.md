@@ -1,11 +1,12 @@
 # Design: Packaging and release
 
-Status: **analysis, with §6 settled**. Written 2026-09-13; §6's four decisions
-taken 2026-09-19, and §4's exclusions extended 2026-09-20. `contrib/` and the
-derived install manifest exist; no recipe does — there is no `debian/` and no
-spec file. Recipes need a tag to build from and do not yet have a usable one:
-see §4 on why `v0.3.0` cannot be it. One decision in §2 is load-bearing and
-should be settled before any recipe is written.
+Status: **analysis, with §6 settled and the first recipe written**. Written
+2026-09-13; §6's four decisions taken 2026-09-19, and §4's exclusions extended
+2026-09-20. `contrib/debian/` landed 2026-09-22, built against the derived
+install manifest; the other seven of §5 do not exist yet. `v0.4.1` is the tag
+recipes build from — §4 explains why neither earlier tag can be. §2's decision
+is load-bearing and was settled before the recipe was written, which is why
+`debian/` ships no `/etc/xtgeoip.conf`.
 
 Related: TODO.md (*Packaging and deployment*), `98-state-ownership-recovery.md`
 §4 (the ownership model this inherits), #103 (why the config file cannot be a
@@ -345,7 +346,7 @@ claiming an order.
 
 | Format | Artefact | Families covered |
 |---|---|---|
-| deb | `debian/{control,rules,install,changelog,copyright}`, `dh` + `dh-cargo` | Debian, Ubuntu, Mint, MX, Pop!_OS, Zorin, Kali, elementary |
+| deb | `debian/{control,rules,changelog,copyright,source/format}`, plain `dh` | Debian, Ubuntu, Mint, MX, Pop!_OS, Zorin, Kali, elementary |
 | rpm | `xtgeoip.spec`, `%cargo_build` / `%cargo_install` | Fedora, openSUSE, Rocky, Alma, Nobara |
 | pacman | `PKGBUILD` | Arch, Manjaro, EndeavourOS, Garuda, CachyOS |
 | xbps | `srcpkgs/xtgeoip/template`, `build_style=cargo` | Void |
@@ -370,6 +371,34 @@ eight and cover the most users, and writing them will surface whatever the
 other six also need — most likely the `aws-lc-sys` build dependency. Note that
 cmake is *not* among the build dependencies: `aws-lc-sys` takes its
 pregenerated-source `cc` path (§4).
+
+**deb is written** (2026-09-22, `contrib/debian/`), and two of this table's own
+claims did not survive it.
+
+The first is the row above, which used to say `dh` + `dh-cargo`. It does not:
+`dh --buildsystem=cargo` builds `--offline` against Debian's
+`/usr/share/cargo/registry`, which means re-resolving every dependency against
+whatever version Debian packages — the precise thing §3's `--locked` exists to
+prevent, and for the one class of crate where a silent re-resolve is not
+recoverable. It would also need all 307 lockfile crates packaged in Debian at
+the pinned versions, which they are not. Plain `dh` with an
+`override_dh_auto_build` calling `cargo` directly. The same question is waiting
+in the rpm, ebuild and apk recipes, each of which has its own Rust helper.
+
+The second is the `aws-lc-sys` prediction, which was right about the fact and
+wrong about the consequence. A C compiler is needed, and on Debian it needs no
+`Build-Depends` entry: gcc comes from `build-essential`, which Policy §4.2
+makes implicit for every source package and Policy §7.6 forbids listing. So the
+build dependency that was expected to be the recipe's interesting part is the
+one line the recipe does not contain.
+
+What the recipe actually cost is written down in `contrib/debian/README.source`
+and summarised in `contrib/README.md`'s status table; the two findings likely
+to bind on the other seven are that a packaging system may already *be* the
+`transform` column (Debian's `dh_strip` and `dh_compress` are exactly `strip`
+and `gzip`, so `debian/rules` performs neither), and that this package's
+`-dbgsym` is empty because `Cargo.toml` sets no `[profile.release]` — which
+makes §3's do-not-pre-strip rule correct but unpaid.
 
 ---
 
@@ -501,11 +530,26 @@ not files on disk in the form they ship**. So each carries a `producer`
 recipe that ignores the `transform` column installs an unstripped binary and
 an uncompressed man page: both work, and both are flagged in review.
 
-One neutral manifest, not eight format fragments. No recipe exists yet to
-check a `debian/install` or an rpm `%files` block against, and generating
-eight dialects against zero real consumers is guessing with a build step
-attached. When `debian/` is written, its emitter can be added here with
-something to validate it against.
+One neutral manifest, not eight format fragments. No recipe existed to check a
+`debian/install` or an rpm `%files` block against, and generating eight
+dialects against zero real consumers is guessing with a build step attached.
+
+**`debian/` is now written, and it wants no emitter.** Its install step reads
+the TSV in a nine-line shell loop inside `override_dh_auto_install`, so there
+is no `debian/install` file to generate and nothing to keep in step. Emitting
+one would replace a loop that cannot go stale with a generated artefact that
+can. The decision above stands, and the evidence for it is now a recipe rather
+than a prediction; revisit only if a format turns up whose install step cannot
+run a loop.
+
+What the recipe did want is a second pin, because it branches on a column:
+`tests::install_manifest_transforms_are_known` asserts that every `transform`
+in the generated TSV is one of `none`, `gzip`, `strip` or `-`, that a `gzip`
+entry's `dest` ends in `.gz` (the recipe strips that suffix so `dh_compress`
+can restore it), and that directory rows carry `-`. Mutation-confirmed on all
+four claims. One restatement survived and is pinned too:
+`debian/changelog`'s version, which cannot be generated, is checked against
+`CARGO_PKG_VERSION` by `tests::debian_changelog_version_matches_crate`.
 
 `tests::install_set_sources_exist` pins the declaration to reality, and is
 mutation-confirmed on both of its claims: pointing a `tracked` source at a

@@ -1,0 +1,14 @@
+xtgeoip (0.4.1-1) unstable; urgency=medium
+
+  * Initial packaging, from contrib/debian in the upstream tree. Not uploaded
+    to Debian and no ITP filed; see debian/README.source.
+  * Install step reads docs/generated/install-manifest.tsv rather than a
+    debian/install file, so the nine files and two directories stay declared
+    in one place (docs/design/packaging.md §6.3).
+  * Build with plain dh, not dh-cargo: dh-cargo re-resolves against Debian's
+    crate registry, and six credential-path crates are exact-pinned against an
+    on-disk format that a re-resolve would silently change.
+  * No xtgeoip-dbgsym. Cargo's release profile carries no debug info, so the
+    package would hold a symbol table and nothing else.
+
+ -- xtgeoip packaging <packaging@example.invalid>  Tue, 22 Sep 2026 16:14:37 +0000

@@ -1,0 +1,121 @@
+Building the Debian package
+===========================
+
+This file is not installed into the binary package; `README.source` is the
+conventional name for instructions aimed at whoever builds the source package.
+
+What this is, and is not
+------------------------
+
+It is a recipe kept in the upstream tree, under `contrib/`, so that it is
+maintained beside the install set it claims to install. Rationale:
+`docs/design/packaging.md` §6.3 — a recipe that lives only in a distribution's
+own tree drifts from the install set with nothing reporting it.
+
+It is not an official Debian package. No ITP has been filed, nobody upstream
+maintains one, and `debian/control`'s `Maintainer:` is a deliberately
+undeliverable placeholder. Replace it before uploading anywhere.
+
+Rolling the orig tarball
+------------------------
+
+Build from `v0.4.1` or later. The two earlier tags are unusable for unrelated
+reasons and neither announces it; `contrib/README.md` explains both.
+
+    git archive --prefix=xtgeoip-0.4.1/ -o ../xtgeoip_0.4.1.orig.tar.gz v0.4.1
+
+Use `git archive`, not `tar czf`. `export-ignore` in `.gitattributes` is an
+attribute `git archive` consults and nothing else does; a tarball rolled by
+copying a working tree silently reincludes `extra/`, which carries third-party
+GPL-2 xtables-addons source that `debian/copyright` does not account for.
+
+Then:
+
+    tar xf ../xtgeoip_0.4.1.orig.tar.gz
+    cd xtgeoip-0.4.1
+    cp -r contrib/debian debian
+    dpkg-buildpackage -us -uc
+
+`debian/source/format` is `3.0 (quilt)` rather than `3.0 (native)`, and the
+distinction is not cosmetic here. `dpkg-source` does not read `.gitignore`: a
+native build over a git working tree would tar `private/` and `scripts/`,
+neither of which is tracked and neither of which may be published. Building
+from the orig tarball above removes the question entirely — those paths are not
+in git, so `git archive` cannot emit them.
+
+Dependencies, and the buildd problem
+------------------------------------
+
+`Cargo.lock` has 307 crates and none of them come from Debian. Two ways to feed
+the build:
+
+  * **Network available** (a local build, or a build machine you control).
+    Nothing more to do. `debian/rules` resolves over the network.
+
+  * **No network** (a real buildd, and `sbuild`/`pbuilder` by default). Run
+    `cargo vendor` in the unpacked source before `dpkg-buildpackage`.
+    `debian/rules` detects `vendor/` and adds `--offline` to both the build and
+    the test step, and writes the source-replacement config under
+    `debian/cargo_home/` so that nothing outside `debian/` changes.
+
+    `cargo vendor` expands to roughly 185 MB. If you put it in the orig tarball
+    rather than generating it after unpacking, every vendored crate becomes part
+    of the source package and `debian/copyright` has to account for all 307 —
+    see the `Comment:` field there.
+
+The build is `cargo build --release --locked`. The `--locked` is load-bearing
+and not a style preference: six crates on the credential path (`argon2`,
+`chacha20poly1305`, `secrecy`, `zeroize`, `toml_edit`, `serde-saphyr`) are
+exact-pinned because an encrypted blob sits in `/etc/xtgeoip.conf`
+indefinitely, in whatever format those crates produced on the day it was
+written. A version bump there breaks no build and fails no test; it makes every
+existing blob undecryptable. That is also why this recipe does not use
+`dh --buildsystem=cargo`, which re-resolves by design.
+
+`rust-toolchain.toml` pins 1.98.0. Debian's `cargo` is not rustup and ignores
+that file, which is what you want on a build machine. If you test-build with a
+rustup toolchain in the source directory it will honour the pin and fetch
+1.98.0 — expected, not a fault of this recipe. `Build-Depends` asks for
+`rustc (>= 1.85)` because the crate is edition 2024; that is the edition's
+floor, not a tested MSRV, and upstream declares none.
+
+Tests
+-----
+
+`debian/rules` runs `cargo test`, the hermetic suite: no root, no network, no
+fixtures outside the source tree. `DEB_BUILD_OPTIONS=nocheck` skips it.
+
+It does *not* run `xtgeoip-tests`, the integration suite, and should not: that
+one needs root, a release build, `openssl(1)`, and it prompts for the
+credentials passphrase on a terminal once per remote case.
+
+Known deviations from what lintian expects
+------------------------------------------
+
+`/usr/share/doc/xtgeoip/LICENSE` duplicates `debian/copyright`, and lintian
+flags a shipped licence file as redundant. It is here because the install set
+is declared once, in `docs/spec/install.yaml`, and this recipe consumes that
+declaration rather than curating it — dropping the entry here is exactly the
+per-format divergence §6.3 exists to prevent. If you upload, add a
+`debian/xtgeoip.lintian-overrides` carrying the tag your lintian actually
+emits. Upstream does not ship one: asserting a tag name that nobody here can
+run lintian to confirm is how such a file goes stale.
+
+No `xtgeoip-dbgsym` is produced. `debian/rules` explains why in the comment
+above `override_dh_strip`, and how to get one.
+
+Cross-building is not handled. `debian/rules` calls `cargo build` without
+`--target`, so `dpkg-buildpackage -a<arch>` will produce a host-architecture
+binary. Native builds on each architecture work.
+
+Keeping this in step with upstream
+----------------------------------
+
+`debian/changelog`'s version has to be bumped alongside `Cargo.toml`'s. That is
+a restatement, and it is the only one in this recipe; it is pinned by
+`tests::debian_changelog_version_matches_crate` in `src/bin/xtgeoip-docgen.rs`,
+which fails the build if the two drift.
+
+Everything else about what gets installed comes from
+`docs/generated/install-manifest.tsv` and needs no edit here when the install
+set changes.
