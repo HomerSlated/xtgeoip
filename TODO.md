@@ -139,10 +139,32 @@ Three things it settled that were open, and one it corrected:
   `aws-lc-sys` would be the interesting build dependency. It is not: gcc comes
   from `build-essential`, which Policy makes implicit and then forbids listing.
 
-**Not built end to end.** `debhelper` is not installed on this machine, so the
-recipe is verified by inspection plus a standalone run of its install loop
-against a staging directory (nine files, two directories, modes as declared).
-A real `dpkg-buildpackage` is the next thing it wants.
+**Built end to end 2026-09-29**, twice: with the network, and offline from an
+`orig-vendor` component tarball with `CARGO_HTTP_PROXY` pointed at a closed
+port. Every manifest row lands with its declared mode, the binary is stripped
+with no `-dbgsym`, the man page's gzip header carries no mtime (the `-9n`
+claim, now checked from output), `/etc/logrotate.d/xtgeoip` is a conffile, and
+`debian/rules clean` restores the pristine tree. Building found three faults
+that inspection had not:
+
+- `README.source` told the packager to `cp -r contrib/debian` out of the
+  `v0.4.1` tarball, which has no recipe in it — the recipe postdates the tag.
+- Its offline instructions vendored into the unpacked tree, which `dpkg-source`
+  rejects as "unrepresentable changes to source". Now a component tarball.
+- `dh_clean` deletes `*.orig` tree-wide, including the 306 `Cargo.toml.orig`
+  files the vendored checksums list, so the offline path could never have
+  worked. `rules` now runs `dh_clean -X./vendor/`.
+
+Not run: lintian (not installed here), so the one tag `README.source`
+predicts is still a prediction.
+
+**Open — the unit suite is not hermetic under a proxy.** Found by that build:
+with `http_proxy` or `ALL_PROXY` set and no `NO_PROXY`, nine `fetch::tests`
+fail after 14 s each with `client error (Connect)`, because reqwest honours the
+environment for the 127.0.0.1 stub too. CLAUDE.md calls `cargo test`
+hermetic; this is the exception. Documented for packagers in `README.source`;
+the likely fix is a proxy-free client in the test harness, which touches the
+signed `src/fetch.rs`. Undecided.
 
 **Still to write**: seven recipes. `PKGBUILD` next.
 

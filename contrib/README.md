@@ -126,7 +126,7 @@ and an uncompressed man page. Both work; both will be flagged in review.
 
 | Format | State |
 |---|---|
-| deb | `debian/`, written 2026-09-22 against `v0.4.1`. Not built end to end — no `debhelper` on the authoring machine. |
+| deb | `debian/`, written 2026-09-22 against `v0.4.1`. Built end to end on 2026-09-29, both with the network and offline from a vendored component tarball. |
 | pacman | next |
 | rpm, xbps, ebuild, apk, nix, SlackBuild | not started |
 
@@ -150,6 +150,9 @@ remaining seven will each have to answer:
    the notes above is still right, but it does not pay for this package until
    somebody turns debug info on. `debian/rules` suppresses the empty package
    and says how to get a real one.
-4. **Feeding 307 crates to a network-less build machine.** `cargo vendor`, and
-   then a decision about whether the vendored tree goes in the source tarball —
-   which is a licensing question, not a build one.
+4. **Feeding 306 crates to a network-less build machine.** `cargo vendor`
+   into the source package, which makes it a licensing question as well as a
+   build one: every vendored crate then needs accounting for. The build half
+   has a trap in the Debian case, and possibly others: vendored crates ship
+   `Cargo.toml.orig`, and anything that tidies `*.orig` away (as `dh_clean`
+   does by default) breaks their checksums.

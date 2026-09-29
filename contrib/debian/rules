@@ -26,9 +26,10 @@ $(error dh_listpackages named no package; refusing to stage into /)
 endif
 MANIFEST := docs/generated/install-manifest.tsv
 
-# `cargo vendor` before building and everything below goes offline, which is
-# what a buildd needs. Without it the build resolves over the network, which is
-# fine locally and fails on any real build machine. See debian/README.source.
+# A vendor/ directory — unpacked from an orig-vendor component tarball — takes
+# everything below offline, which is what a buildd needs. Without it the build
+# resolves over the network, which is fine locally and fails on any real build
+# machine. See debian/README.source for how to roll that tarball.
 VENDOR   := $(wildcard $(CURDIR)/vendor)
 OFFLINE  := $(if $(VENDOR),--offline)
 
@@ -115,6 +116,14 @@ override_dh_strip:
 # resolvable lockfile. rm is enough and works on a tree that never built.
 override_dh_auto_clean:
 	rm -rf $(CARGO_HOME) target
+
+# dh_clean deletes every `*.orig` in the tree, and every vendored crate carries
+# a Cargo.toml.orig listed in its .cargo-checksum.json. Without the exclusion
+# the first clean of an offline build removes all 306 of them and cargo refuses
+# the vendor directory. -X becomes `find -regex '.*\./vendor/.*'` — read out of
+# Dh_Lib.pm in debhelper 13.14.1ubuntu5 — so only ./vendor is spared.
+override_dh_clean:
+	dh_clean -X./vendor/
 
 # Note for a reader coming from §2 of the design note: /etc/logrotate.d/xtgeoip
 # lands under $(DESTDIR)/etc, so dh_installdeb registers it as a conffile, and

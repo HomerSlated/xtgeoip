@@ -4,10 +4,10 @@ Upstream-Contact: https://github.com/HomerSlated/xtgeoip/issues
 Source: https://github.com/HomerSlated/xtgeoip
 Comment: The orig tarball is rolled with `git archive`, whose export-ignore
  rules drop extra/ — and with it the vendored GPL-2 xtables-addons source
- that would otherwise need its own stanza here. If you add a vendor/
- directory to the orig tarball (debian/README.source explains when you must),
- every crate in it becomes part of the source package and this file has to
- account for all 307 of them. `cargo-lock`, `licensecheck` and
+ that would otherwise need its own stanza here. If you add the orig-vendor
+ component tarball (debian/README.source explains when you must), every
+ crate in it becomes part of the source package and this file has to
+ account for all 306 of them. `cargo-lock`, `licensecheck` and
  `cargo-license` are the usual ways to generate that; it is not a small job,
  and it is the main reason to prefer a network-enabled build if you have one.
 

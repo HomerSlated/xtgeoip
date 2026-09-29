@@ -29,12 +29,25 @@ attribute `git archive` consults and nothing else does; a tarball rolled by
 copying a working tree silently reincludes `extra/`, which carries third-party
 GPL-2 xtables-addons source that `debian/copyright` does not account for.
 
-Then:
+This recipe is newer than `v0.4.1`: it was committed after the tag, so that
+tarball has no `contrib/debian/` in it. Until the next tag, take it from a
+current checkout:
 
     tar xf ../xtgeoip_0.4.1.orig.tar.gz
     cd xtgeoip-0.4.1
-    cp -r contrib/debian debian
+    cp -r /path/to/checkout/contrib/debian debian
     dpkg-buildpackage -us -uc
+
+Pairing a newer recipe with an older source is only sound while the build
+inputs have not moved between them. Check before trusting it:
+
+    git diff --stat v0.4.1 HEAD -- src Cargo.toml Cargo.lock \
+        rust-toolchain.toml docs/generated
+
+As of this recipe the only change that prints is a test-only hunk in
+`src/bin/xtgeoip-docgen.rs`, and the pairing was built end to end on
+2026-09-29. From the next tag on, the tarball carries its own recipe and
+`cp -r contrib/debian debian` from inside it is enough.
 
 `debian/source/format` is `3.0 (quilt)` rather than `3.0 (native)`, and the
 distinction is not cosmetic here. `dpkg-source` does not read `.gitignore`: a
@@ -46,22 +59,42 @@ in git, so `git archive` cannot emit them.
 Dependencies, and the buildd problem
 ------------------------------------
 
-`Cargo.lock` has 307 crates and none of them come from Debian. Two ways to feed
-the build:
+`Cargo.lock` has 307 entries — 306 dependencies plus xtgeoip itself — and none
+of them come from Debian. Two ways to feed the build:
 
   * **Network available** (a local build, or a build machine you control).
     Nothing more to do. `debian/rules` resolves over the network.
 
-  * **No network** (a real buildd, and `sbuild`/`pbuilder` by default). Run
-    `cargo vendor` in the unpacked source before `dpkg-buildpackage`.
-    `debian/rules` detects `vendor/` and adds `--offline` to both the build and
-    the test step, and writes the source-replacement config under
-    `debian/cargo_home/` so that nothing outside `debian/` changes.
+  * **No network** (a real buildd, and `sbuild`/`pbuilder` by default). Vendor
+    the dependencies into a second orig tarball, a `3.0 (quilt)` component
+    named `vendor`, before building:
 
-    `cargo vendor` expands to roughly 185 MB. If you put it in the orig tarball
-    rather than generating it after unpacking, every vendored crate becomes part
-    of the source package and `debian/copyright` has to account for all 307 —
-    see the `Comment:` field there.
+        cd xtgeoip-0.4.1
+        cargo vendor --locked vendor
+        tar --sort=name --owner=0 --group=0 --numeric-owner \
+            -czf ../xtgeoip_0.4.1.orig-vendor.tar.gz vendor
+        dpkg-buildpackage -us -uc
+
+    `dpkg-source` records both tarballs in the `.dsc` and unpacks the second
+    into `vendor/`. `debian/rules` detects that directory, adds `--offline` to
+    both the build and the test step, and writes the source-replacement config
+    under `debian/cargo_home/` so that nothing outside `debian/` changes.
+
+    Running `cargo vendor` in the unpacked tree *without* rolling the
+    component does not work. `vendor/` is then a change to upstream source
+    that no orig tarball accounts for, and `dpkg-source` stops with
+    "unrepresentable changes to source" before anything compiles.
+
+    The vendor tree is about 300 MB unpacked and 50 MB as the gzipped
+    component, and it is part of the source package: `debian/copyright` has to
+    account for all 306 crates in it — see the `Comment:` field there.
+
+    This path was built end to end on 2026-09-29 from an unpacked `.dsc`, with
+    `CARGO_HTTP_PROXY` pointed at a closed port so that any network access by
+    cargo would fail rather than quietly succeed. That build is also why
+    `debian/rules` overrides `dh_clean`: every vendored crate ships a
+    `Cargo.toml.orig` that its checksum file lists, `dh_clean` deletes `*.orig`
+    everywhere by default, and without the override cargo refuses `vendor/`.
 
 The build is `cargo build --release --locked`. The `--locked` is load-bearing
 and not a style preference: six crates on the credential path (`argon2`,
@@ -79,11 +112,27 @@ rustup toolchain in the source directory it will honour the pin and fetch
 `rustc (>= 1.85)` because the crate is edition 2024; that is the edition's
 floor, not a tested MSRV, and upstream declares none.
 
+That floor is met by Debian unstable, which the changelog targets (rustc
+1.95.0 in sid per sources.debian.org, 2026-09-29), and not by Ubuntu 24.04.
+There apt's `rustc` is 1.75; the versioned `rustc-1.85`, `-1.89` and `-1.91`
+packages install suffixed binaries and do not `Provide: rustc`; and the one
+package that does, `rustc-1.74`, provides it at 1.74. Nothing in that archive
+satisfies the line. Building there with a rustup toolchain needs
+`dpkg-buildpackage -d`, because dpkg cannot see what rustup installed. That is
+a mismatch with the host, not with the recipe; do not loosen `Build-Depends`
+to hide it.
+
 Tests
 -----
 
 `debian/rules` runs `cargo test`, the hermetic suite: no root and no network.
 `DEB_BUILD_OPTIONS=nocheck` skips it.
+
+One caveat, measured on 2026-09-29: nine `fetch::tests` talk to an HTTP stub
+on 127.0.0.1 through reqwest, which honours `http_proxy` and `ALL_PROXY`. A
+build environment that exports either one without `NO_PROXY=127.0.0.1` sends
+that loopback traffic to the proxy, and the nine fail with `client error
+(Connect)`. Set `NO_PROXY`, or unset the proxy for the build.
 
 It also writes nothing into the source tree, which matters more here than it
 looks: under `3.0 (quilt)` anything a test left behind would surface on the

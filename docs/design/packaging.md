@@ -190,7 +190,8 @@ costs in review.
 
 **307 crates in `Cargo.lock`.** Debian and Fedora policy prefers dependencies
 packaged separately; in practice, for a leaf application, vendoring is
-tolerated. `cargo vendor` expands to roughly 185 MB. Ship a vendored source
+tolerated. `cargo vendor` expands to about 300 MB, 50 MB gzipped (measured
+2026-09-29; an earlier figure here said 185 MB). Ship a vendored source
 tarball alongside the plain one (§4) so a packager can choose.
 
 The 307th is `clap_complete`, added 2026-09-19 for §6.1. It is used only by
