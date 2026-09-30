@@ -158,13 +158,15 @@ that inspection had not:
 Not run: lintian (not installed here), so the one tag `README.source`
 predicts is still a prediction.
 
-**Open — the unit suite is not hermetic under a proxy.** Found by that build:
-with `http_proxy` or `ALL_PROXY` set and no `NO_PROXY`, nine `fetch::tests`
-fail after 14 s each with `client error (Connect)`, because reqwest honours the
-environment for the 127.0.0.1 stub too. CLAUDE.md calls `cargo test`
-hermetic; this is the exception. Documented for packagers in `README.source`;
-the likely fix is a proxy-free client in the test harness, which touches the
-signed `src/fetch.rs`. Undecided.
+**Fixed 2026-09-30 — the unit suite was not hermetic under a proxy.** Found by
+that build: with `http_proxy` or `ALL_PROXY` set and no `NO_PROXY`, nine
+`fetch::tests` failed after 14 s each with `client error (Connect)`, because
+reqwest honours the environment for the 127.0.0.1 stub too. `build_client` now
+adds `no_proxy()` under `#[cfg(test)]` only, so the shipped binary still
+honours an operator's proxy. With all six proxy variables pointed at a closed
+port, `fetch::tests` went from 9 failed in 98.8 s to 55 passed in 0.95 s. It
+touches the signed `src/fetch.rs`, which has a STALE row. The integration
+suite drives the release binary and is not covered by this.
 
 **Still to write**: seven recipes. `PKGBUILD` next.
 

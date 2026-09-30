@@ -86,6 +86,14 @@ fn build_client(ca_file: Option<&Path>) -> Result<Client> {
         .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
         .redirect(redirect_policy());
 
+    // Test builds only. This program configures no proxy of its own, so an
+    // operator behind one relies on reqwest reading `http_proxy`/`ALL_PROXY`
+    // from the environment — and that must stay. But reqwest applies them to
+    // loopback too, so a build environment exporting either one sent the
+    // unit tests' 127.0.0.1 stub traffic to the proxy, and nine tests failed.
+    #[cfg(test)]
+    let builder = builder.no_proxy();
+
     let Some(path) = ca_file else {
         return Ok(builder.build()?);
     };

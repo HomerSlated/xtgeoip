@@ -44,10 +44,12 @@ inputs have not moved between them. Check before trusting it:
     git diff --stat v0.4.1 HEAD -- src Cargo.toml Cargo.lock \
         rust-toolchain.toml docs/generated
 
-As of this recipe the only change that prints is a test-only hunk in
-`src/bin/xtgeoip-docgen.rs`, and the pairing was built end to end on
-2026-09-29. From the next tag on, the tarball carries its own recipe and
-`cp -r contrib/debian debian` from inside it is enough.
+As of this recipe two changes print, and both are test-only: a hunk inside
+`mod tests` in `src/bin/xtgeoip-docgen.rs`, and a `#[cfg(test)]` line in
+`src/fetch.rs` that keeps the unit tests off any proxy (see Tests below). The
+pairing was built end to end on 2026-09-29. From the next tag on, the tarball
+carries its own recipe and `cp -r contrib/debian debian` from inside it is
+enough.
 
 `debian/source/format` is `3.0 (quilt)` rather than `3.0 (native)`, and the
 distinction is not cosmetic here. `dpkg-source` does not read `.gitignore`: a
@@ -128,18 +130,24 @@ Tests
 `debian/rules` runs `cargo test`, the hermetic suite: no root and no network.
 `DEB_BUILD_OPTIONS=nocheck` skips it.
 
-One caveat, measured on 2026-09-29: nine `fetch::tests` talk to an HTTP stub
-on 127.0.0.1 through reqwest, which honours `http_proxy` and `ALL_PROXY`. A
-build environment that exports either one without `NO_PROXY=127.0.0.1` sends
-that loopback traffic to the proxy, and the nine fail with `client error
-(Connect)`. Set `NO_PROXY`, or unset the proxy for the build.
+Behind a proxy, the `v0.4.1` tarball rolled above needs `NO_PROXY=127.0.0.1`.
+Nine of its tests talk to an HTTP stub on 127.0.0.1 through reqwest, which
+applies `http_proxy` and `ALL_PROXY` to loopback too. With either exported and
+no `NO_PROXY`, they fail with `client error (Connect)`. Set `NO_PROXY`, or
+unset the proxy for the build.
 
-It also writes nothing into the source tree, which matters more here than it
-looks: under `3.0 (quilt)` anything a test left behind would surface on the
-second `dpkg-source` pass as an unexplained change to upstream source, and fail
-the build in a way that reads like a packaging bug. Checked rather than assumed
-— `cargo test` followed by `git status --porcelain` leaves the tree clean.
-`debian/rules clean` removes the only two things a build does create,
+This is fixed after that tag, so from the next one `NO_PROXY` is not needed.
+The stub tests' client disables proxies in test builds only, and the installed
+binary still honours `http_proxy` and friends. Checked on 2026-09-30 by running
+`cargo test` at HEAD with every proxy variable pointed at a closed port; the
+package build itself has not been rerun since.
+
+The suite also writes nothing into the source tree, which matters more here
+than it looks: under `3.0 (quilt)` anything a test left behind would surface on
+the second `dpkg-source` pass as an unexplained change to upstream source, and
+fail the build in a way that reads like a packaging bug. Checked rather than
+assumed — `cargo test` followed by `git status --porcelain` leaves the tree
+clean. `debian/rules clean` removes the only two things a build does create,
 `debian/cargo_home/` and `target/`.
 
 It does *not* run `xtgeoip-tests`, the integration suite, and should not: that
