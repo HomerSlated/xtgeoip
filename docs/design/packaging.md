@@ -3,10 +3,11 @@
 Status: **analysis, with §6 settled and the first recipe written**. Written
 2026-09-13; §6's four decisions taken 2026-09-19, and §4's exclusions extended
 2026-09-20. `contrib/debian/` landed 2026-09-22, built against the derived
-install manifest; the other seven of §5 do not exist yet. `v0.4.1` is the tag
-recipes build from — §4 explains why neither earlier tag can be. §2's decision
-is load-bearing and was settled before the recipe was written, which is why
-`debian/` ships no `/etc/xtgeoip.conf`.
+install manifest; the other seven of §5 do not exist yet. `v0.4.2` is the tag
+recipes build from — §4 explains why neither of the first two tags can be, and
+`contrib/README.md` why `v0.4.1` is superseded. §2's decision is load-bearing
+and was settled before the recipe was written, which is why `debian/` ships no
+`/etc/xtgeoip.conf`.
 
 Related: TODO.md (*Packaging and deployment*), `98-state-ownership-recovery.md`
 §4 (the ownership model this inherits), #103 (why the config file cannot be a

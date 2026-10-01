@@ -188,8 +188,9 @@ tarball regardless of what `.gitattributes` says today. `v0.4.0` was cut at
 `cdba118` on 2026-09-20, hours before the emitter audit, so its
 `xtgeoip-docgen` still interpolates `install.yaml` into the manifest with no
 validation — the H-1 finding, in the packaging path itself. Both tags stand
-where they are; `v0.4.1` is the recipe target, annotation at
-`private/TAG_MSG_v0.4.1`.
+where they are. `v0.4.1` was the recipe target until `v0.4.2`, the first tag
+to carry a recipe, which also moves `rustls` past RUSTSEC-2026-0285;
+annotations at `private/TAG_MSG_v0.4.1` and `private/TAG_MSG_v0.4.2`.
 
 Still true as of 2026-09-22: no `rpm/` and no `*.spec`.
 

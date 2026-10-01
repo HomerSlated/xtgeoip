@@ -19,37 +19,19 @@ undeliverable placeholder. Replace it before uploading anywhere.
 Rolling the orig tarball
 ------------------------
 
-Build from `v0.4.1` or later. The two earlier tags are unusable for unrelated
-reasons and neither announces it; `contrib/README.md` explains both.
+Build from `v0.4.2` or later. It is the first tag that carries this recipe;
+`contrib/README.md` explains why none of the three before it should be used.
 
-    git archive --prefix=xtgeoip-0.4.1/ -o ../xtgeoip_0.4.1.orig.tar.gz v0.4.1
+    git archive --prefix=xtgeoip-0.4.2/ -o ../xtgeoip_0.4.2.orig.tar.gz v0.4.2
+    tar xf ../xtgeoip_0.4.2.orig.tar.gz
+    cd xtgeoip-0.4.2
+    cp -r contrib/debian debian
+    dpkg-buildpackage -us -uc
 
 Use `git archive`, not `tar czf`. `export-ignore` in `.gitattributes` is an
 attribute `git archive` consults and nothing else does; a tarball rolled by
 copying a working tree silently reincludes `extra/`, which carries third-party
 GPL-2 xtables-addons source that `debian/copyright` does not account for.
-
-This recipe is newer than `v0.4.1`: it was committed after the tag, so that
-tarball has no `contrib/debian/` in it. Until the next tag, take it from a
-current checkout:
-
-    tar xf ../xtgeoip_0.4.1.orig.tar.gz
-    cd xtgeoip-0.4.1
-    cp -r /path/to/checkout/contrib/debian debian
-    dpkg-buildpackage -us -uc
-
-Pairing a newer recipe with an older source is only sound while the build
-inputs have not moved between them. Check before trusting it:
-
-    git diff --stat v0.4.1 HEAD -- src Cargo.toml Cargo.lock \
-        rust-toolchain.toml docs/generated
-
-As of this recipe two changes print, and both are test-only: a hunk inside
-`mod tests` in `src/bin/xtgeoip-docgen.rs`, and a `#[cfg(test)]` line in
-`src/fetch.rs` that keeps the unit tests off any proxy (see Tests below). The
-pairing was built end to end on 2026-09-29. From the next tag on, the tarball
-carries its own recipe and `cp -r contrib/debian debian` from inside it is
-enough.
 
 `debian/source/format` is `3.0 (quilt)` rather than `3.0 (native)`, and the
 distinction is not cosmetic here. `dpkg-source` does not read `.gitignore`: a
@@ -71,10 +53,10 @@ of them come from Debian. Two ways to feed the build:
     the dependencies into a second orig tarball, a `3.0 (quilt)` component
     named `vendor`, before building:
 
-        cd xtgeoip-0.4.1
+        cd xtgeoip-0.4.2
         cargo vendor --locked vendor
         tar --sort=name --owner=0 --group=0 --numeric-owner \
-            -czf ../xtgeoip_0.4.1.orig-vendor.tar.gz vendor
+            -czf ../xtgeoip_0.4.2.orig-vendor.tar.gz vendor
         dpkg-buildpackage -us -uc
 
     `dpkg-source` records both tarballs in the `.dsc` and unpacks the second
@@ -130,17 +112,12 @@ Tests
 `debian/rules` runs `cargo test`, the hermetic suite: no root and no network.
 `DEB_BUILD_OPTIONS=nocheck` skips it.
 
-Behind a proxy, the `v0.4.1` tarball rolled above needs `NO_PROXY=127.0.0.1`.
-Nine of its tests talk to an HTTP stub on 127.0.0.1 through reqwest, which
-applies `http_proxy` and `ALL_PROXY` to loopback too. With either exported and
-no `NO_PROXY`, they fail with `client error (Connect)`. Set `NO_PROXY`, or
-unset the proxy for the build.
-
-This is fixed after that tag, so from the next one `NO_PROXY` is not needed.
-The stub tests' client disables proxies in test builds only, and the installed
-binary still honours `http_proxy` and friends. Checked on 2026-09-30 by running
-`cargo test` at HEAD with every proxy variable pointed at a closed port; the
-package build itself has not been rerun since.
+A proxy in the build environment does not affect it. The tests that talk to
+an HTTP stub on 127.0.0.1 build their client with proxies disabled, in test
+builds only, so the installed binary still honours `http_proxy` and friends.
+Checked on 2026-09-30 by running `cargo test` with every proxy variable pointed
+at a closed port. `v0.4.1` predates this: there, nine stub tests fail under
+`http_proxy` or `ALL_PROXY` without `NO_PROXY=127.0.0.1`.
 
 The suite also writes nothing into the source tree, which matters more here
 than it looks: under `3.0 (quilt)` anything a test left behind would surface on
@@ -189,8 +166,7 @@ Two tags from an earlier run the same day, against the recipe before these
 changes, were acted on:
 
   * `copyright-without-copyright-notice`. lintian wants a four-digit year
-    after `Copyright`. `debian/copyright` now carries 2026, as does upstream
-    `LICENSE` from the next tag; the `v0.4.1` tarball predates it.
+    after `Copyright`. `debian/copyright` and upstream `LICENSE` now carry 2026.
   * `newer-standards-version 4.7.0 (current is 4.6.2)`. Misleading: that
     lintian knows Policy only up to 4.6.2, while sid had Policy 4.7.4 and
     lintian 2.141 on 2026-09-30, where 4.7.0 counts as out of date.

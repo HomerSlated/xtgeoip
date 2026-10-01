@@ -104,8 +104,9 @@ and an uncompressed man page. Both work; both will be flagged in review.
   extension and is a hard dependency, while the kernel module is a separate
   `xtables-addons-dkms` (or `-source`) and is a `Recommends`. Verified against
   the archive on 2026-09-22, not assumed.
-- Build from **`v0.4.1` or later**. The two earlier tags are both unsuitable,
-  for unrelated reasons, and neither announces it:
+- Build from **`v0.4.2` or later**, the first tag that carries a recipe. The
+  three earlier tags are all unsuitable, for unrelated reasons, and none of
+  them announces it:
   - `v0.3.0` predates `.gitattributes`. `export-ignore` is read from the tree
     being archived, so `git archive v0.3.0` still carries
     `extra/dkms/xt-geoip-3.30.tar.gz` — third-party GPL-2 source inside a
@@ -116,6 +117,10 @@ and an uncompressed man page. Both work; both will be flagged in review.
     an arbitrary `install` line — into the manifest a recipe consumes. Since
     this file is that recipe's instructions, building from that tag defeats
     the point of reading it.
+  - `v0.4.1` predates every recipe, so its tarball has no `contrib/debian/`.
+    Its `Cargo.lock` pins `rustls` 0.23.43, which RUSTSEC-2026-0285 affects
+    (fixed in 0.23.45). Because recipes build `--locked`, that is the TLS
+    library every package built from it would ship.
 
   `publish = false`, so there is no crates.io tarball either way.
 - Roll the tarball with `git archive`, not `tar czf`. `export-ignore` is an
@@ -126,7 +131,7 @@ and an uncompressed man page. Both work; both will be flagged in review.
 
 | Format | State |
 |---|---|
-| deb | `debian/`, written 2026-09-22 against `v0.4.1`. Built end to end on 2026-09-29, both with the network and offline from a vendored component tarball. |
+| deb | `debian/`, written 2026-09-22 against `v0.4.1`, first tagged in `v0.4.2`. Built end to end on 2026-09-29, both with the network and offline from a vendored component tarball. |
 | pacman | next |
 | rpm, xbps, ebuild, apk, nix, SlackBuild | not started |
 
