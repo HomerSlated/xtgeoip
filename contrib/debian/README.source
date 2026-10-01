@@ -157,14 +157,61 @@ credentials passphrase on a terminal once per remote case.
 Known deviations from what lintian expects
 ------------------------------------------
 
-`/usr/share/doc/xtgeoip/LICENSE` duplicates `debian/copyright`, and lintian
-flags a shipped licence file as redundant. It is here because the install set
-is declared once, in `docs/spec/install.yaml`, and this recipe consumes that
-declaration rather than curating it — dropping the entry here is exactly the
-per-format divergence §6.3 exists to prevent. If you upload, add a
-`debian/xtgeoip.lintian-overrides` carrying the tag your lintian actually
-emits. Upstream does not ship one: asserting a tag name that nobody here can
-run lintian to confirm is how such a file goes stale.
+Measured with lintian 2.117.0ubuntu1.5 (Ubuntu 24.04) on 2026-09-30:
+`lintian -EvIL +pedantic` against the `.changes` of a build from this recipe,
+under both the `debian` and the `ubuntu` profile. Every tag it still reports is
+expected, and each is listed here so that nobody chases it:
+
+  * `extra-license-file` (I). `/usr/share/doc/xtgeoip/LICENSE` duplicates
+    `debian/copyright`. It is here because the install set is declared once,
+    in `docs/spec/install.yaml`, and this recipe consumes that declaration
+    rather than curating it. Dropping the entry here is exactly the per-format
+    divergence §6.3 exists to prevent.
+  * `initial-upload-closes-no-bugs` (W). There is no ITP to close; see the top
+    of this file.
+  * `override_dh_auto_test-does-not-check-DEB_BUILD_OPTIONS` (I). A false
+    positive: at debhelper compat 13, `dh` omits the whole override itself
+    under `nocheck`. A real `DEB_BUILD_OPTIONS=nocheck debian/rules build`
+    printed `The call to "debian/rules override_dh_auto_test" was omitted due
+    to "DEB_BUILD_OPTIONS=nocheck"`. The tag's own description concedes this
+    for compat 13.
+  * `newer-standards-version 4.7.4 (current is 4.6.2)` (W). That lintian
+    knows Policy only up to 4.6.2; see below.
+  * `debian-watch-file-is-missing` (I). None is shipped yet.
+  * `upstream-metadata-file-is-missing` and
+    `very-long-line-length-in-source-file` (X, both experimental). Pedantic;
+    the long lines are paragraphs of Markdown prose.
+  * `bad-distribution-in-changes-file unstable` (E), under the `ubuntu`
+    profile only. The changelog targets Debian unstable. For an Ubuntu upload,
+    change the distribution.
+
+Two tags from an earlier run the same day, against the recipe before these
+changes, were acted on:
+
+  * `copyright-without-copyright-notice`. lintian wants a four-digit year
+    after `Copyright`. `debian/copyright` now carries 2026, as does upstream
+    `LICENSE` from the next tag; the `v0.4.1` tarball predates it.
+  * `newer-standards-version 4.7.0 (current is 4.6.2)`. Misleading: that
+    lintian knows Policy only up to 4.6.2, while sid had Policy 4.7.4 and
+    lintian 2.141 on 2026-09-30, where 4.7.0 counts as out of date.
+    `Standards-Version` is now 4.7.4, after the 4.7.1–4.7.4 upgrading
+    checklist. Nothing installs under `/bin`, `/sbin` or `/lib`; no package in
+    sid ships a file named `xtgeoip`, so there is no clash on `PATH`; the
+    program does not read its own man page. The lintian here cannot check
+    4.7.4, so run a current one before trusting that line.
+
+`Priority: optional` stays, although 4.7.3 no longer recommends stating the
+default and sid's lintian tags it `redundant-priority-optional-field`
+(pedantic). dpkg supplies the default only from 1.22.12. Without the field, a
+build here with dpkg 1.22.6 produced a `.deb` with no Priority at all, and
+lintian warned `recommended-field` twice. A pedantic tag on sid is the cheaper
+of the two.
+
+Upstream ships no `lintian-overrides`, even for the tags confirmed above. Tag
+names change between lintian versions — 2.117 itself records
+`initial-upload-closes-no-bugs` as renamed from
+`new-package-should-close-itp-bug` — and 2.117 is not the lintian an upload is
+checked with. If you upload, add overrides for the tags your lintian emits.
 
 No `xtgeoip-dbgsym` is produced. `debian/rules` explains why in the comment
 above `override_dh_strip`, and how to get one.

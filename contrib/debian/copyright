@@ -12,15 +12,15 @@ Comment: The orig tarball is rolled with `git archive`, whose export-ignore
  and it is the main reason to prefer a network-enabled build if you have one.
 
 Files: *
-Copyright: Haze N Sparkle
+Copyright: 2026 Haze N Sparkle
 License: MIT
 
 Files: debian/*
-Copyright: Haze N Sparkle
+Copyright: 2026 Haze N Sparkle
 License: MIT
 
 License: MIT
- Copyright (c) Haze N Sparkle
+ Copyright (c) 2026 Haze N Sparkle
  .
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal

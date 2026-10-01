@@ -155,8 +155,18 @@ that inspection had not:
   files the vendored checksums list, so the offline path could never have
   worked. `rules` now runs `dh_clean -X./vendor/`.
 
-Not run: lintian (not installed here), so the one tag `README.source`
-predicts is still a prediction.
+**lintian run 2026-09-30** (2.117, `debian` and `ubuntu` profiles,
+`-EvIL +pedantic`). The predicted tag is real: `extra-license-file`, at info
+level. Two were fixed: `copyright-without-copyright-notice` (`LICENSE` and
+`debian/copyright` now carry 2026), and `Standards-Version`, raised from 4.7.0
+to 4.7.4 after the upgrading checklist. `Priority: optional` was dropped per
+4.7.3 and then restored: dpkg < 1.22.12 (Ubuntu 24.04 has 1.22.6) supplies no
+default, so the `.deb` lost the field entirely. The local lintian called 4.7.0
+*newer* than current only because it knows Policy up to 4.6.2; sid's 2.141 has
+not been run. Every remaining tag is expected and is
+explained in `README.source`, including one verified false positive
+(`override_dh_auto_test` under `nocheck`: `dh` omits the call itself at compat
+13).
 
 **Fixed 2026-09-30 — the unit suite was not hermetic under a proxy.** Found by
 that build: with `http_proxy` or `ALL_PROXY` set and no `NO_PROXY`, nine

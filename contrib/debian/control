@@ -8,6 +8,10 @@
 Source: xtgeoip
 Section: net
 Priority: optional
+# ^ Policy 4.7.3 no longer recommends stating the default, and lintian 2.141
+#   calls it redundant (pedantic). Kept on purpose: dpkg supplies the default
+#   only from 1.22.12, and on anything older — Ubuntu 24.04 has 1.22.6 — the
+#   .deb is built with no Priority at all. Measured 2026-09-30.
 Maintainer: xtgeoip packaging <packaging@example.invalid>
 # ^ Replace before uploading anywhere. Whoever uploads a package owns this
 #   field, and it is not upstream. `.invalid` is reserved by RFC 2606, so the
@@ -23,7 +27,7 @@ Build-Depends:
  debhelper-compat (= 13),
  cargo,
  rustc (>= 1.85),
-Standards-Version: 4.7.0
+Standards-Version: 4.7.4
 Homepage: https://github.com/HomerSlated/xtgeoip
 Vcs-Git: https://github.com/HomerSlated/xtgeoip.git
 Vcs-Browser: https://github.com/HomerSlated/xtgeoip
