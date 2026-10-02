@@ -85,60 +85,93 @@ Note that there are both free and paid tiers of MaxMind accounts, and the free t
 
 ## Running xtgeoip
 
+This is the program's own help, from `xtgeoip --help`:
+
 ```
-Commands (only one of): build
-                        Optional flags: -b, -c, -f, -p
-                        Create ip4/ip6 data files from a stored copy of the database
+$ xtgeoip --help
+Build and manage xt_geoip data from MaxMind GeoLite2 CSVs
 
-                        fetch
-                        Optional flags: -p
-                        Download the latest database
+Usage: xtgeoip [OPTIONS]
+       xtgeoip <COMMAND>
 
-                        run
-                        Optional flags: -b, -c, -f, -l, -p
-                        Fetch then build
+Commands:
+  run    Fetch then build the full pipeline
+  build  Build binary database from local CSV archive
+  fetch  Download GeoLite2 CSV archive from MaxMind
+  conf   Manage system configuration
 
-                        conf
-                        Mandatory flags (only one of): -c, -d, -e, -s, -h
-                        
-flags:                  -b|--backup
-                        Backup ip4/ip6 data files listed in manifest
-                        Optional commands: build, run
+Options:
+  -b, --backup
+          Back up current database before replacing it
 
-                        -c|--clean
-                        Delete ip4/ip6 data files listed in manifest
-                        With the conf command: -c|--set-credentials
-                        Prompt for and encrypt MaxMind credentials
+  -c, --clean
+          Delete current binary database files
 
-                        -d|--default
-                        Show the default config
-                        Requires the conf command
+  -f, --force
+          Force the operation (overrides safety checks)
+          
+          With `build -c`, extends the clean to stale-owned files — those left by a previous manifest, such as EU.iv4/EU.iv6 after leaving legacy mode. It does not widen the clean to files xtgeoip did not create: eligibility is structural (extension iv4/iv6 and a two-character [A-Z0-9] stem), so --force cannot reach an unowned file.
 
-                        -e|--edit
-                        Edit the current config
-                        Requires the conf command
+  -l, --legacy
+          Enable legacy mode (historical compatibility only)
+          
+          Switching back to default mode leaves EU.iv4/EU.iv6 behind; they are listed in the `orphaned` file. Which clean form removes them depends on when you act, because --clean runs before build regenerates the manifest: `build -c` in the same invocation that leaves legacy mode (still owned), or `build -c -f` afterwards (stale-owned, needs the glob). Files xtgeoip did not create are never touched by either. See xtgeoip(1), FILE OWNERSHIP and LEGACY MODE.
 
-                        -f|--force
-                        Force backup or clean
-                        Requires the -b or -c flag, but not both in a single invocation (ambiguous)
+  -p, --prune
+          Prune old bin archives (requires --backup)
 
-                        -h|--help
-                        Show help
+      --log-file <PATH>
+          Write the log to PATH, overriding [logging] in the config
+          
+          Takes precedence over `log_file` in `/etc/xtgeoip.conf`. Because the override is known before the config is read, it also captures a config-load failure — which the configured path cannot, since that path is only known once the load has succeeded.
 
-                        -l|--legacy
-                        Produce legacy (incorrect) data files, for comparison
+      --no-log
+          Disable file logging, overriding [logging] in the config
+          
+          Terminal output is unaffected: `init_logger` always installs the stdout/stderr dispatches, and only the file sink is conditional (#1).
 
-                        -p|--prune
-                        Delete older binary backups or CSV databases, but not both in a single invocation (ambiguous)
-                        Requires the -b flag or fetch command, but not both in a single invocation (ambiguous)
+      --config <PATH>
+          Read configuration from PATH instead of /etc/xtgeoip.conf
+          
+          Applies to every command, `conf` included: `conf --show --config P` shows `P`, and `conf --set-credentials --config P` encrypts into `P`. A flag that redirected reads but not writes would be a trap.
+          
+          This is what makes the integration suite able to run against a temporary tree instead of the live `/usr/share/xt_geoip` and `/var/lib/xt_geoip` — `output_dir` and `archive_dir` are ordinary `[paths]` keys, so redirecting the config redirects everything the program touches. It is a general capability rather than a test hook, which is why it is documented rather than hidden: an operator running a non-default install has the same need.
 
-                        -s|--show
-                        Show the current config
-                        Requires the conf command
+      --ca-file <PATH>
+          Verify the MaxMind server against the CA bundle in PATH
+          
+          Replaces the system trust roots for this run rather than adding to them: naming a CA says which CA to trust, and merging would let a wrong or stale bundle succeed against a different anchor than the one named. Verification is otherwise unchanged — chain, hostname and validity are still checked, against these roots instead of the system's. It narrows what is trusted; it never disables a check.
+          
+          For an installation behind a TLS-intercepting proxy, or against a private mirror with a self-signed certificate. It is also what lets the integration suite verify a local https stub without touching the host's trust configuration, which `SSL_CERT_FILE` cannot do: the suite spawns cases via `sudo`, and `sudo` resets the environment while passing arguments through unchanged.
 
-                        -V|--version
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
 ```
 
+The `conf` command's flags are listed by its own help:
+
+```
+$ xtgeoip conf -h
+Manage system configuration
+
+Usage: xtgeoip conf [OPTIONS]
+
+Options:
+  -d, --default          Show default (example) configuration
+  -s, --show             Show system configuration
+  -e, --edit             Open system configuration in $EDITOR
+  -c, --set-credentials  Encrypt and store MaxMind account_id/license_key (#103)
+      --log-file <PATH>  Write the log to PATH, overriding [logging] in the config
+      --no-log           Disable file logging, overriding [logging] in the config
+      --config <PATH>    Read configuration from PATH instead of /etc/xtgeoip.conf
+      --ca-file <PATH>   Verify the MaxMind server against the CA bundle in PATH
+  -h, --help             Print help (see more with '--help')
+```
+
+Each command has its own `-h` and `--help`.
 
 ## The xt_geoip Kernel Module
 
