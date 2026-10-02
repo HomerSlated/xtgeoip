@@ -1,0 +1,130 @@
+# PKGBUILD — build xtgeoip as an Arch Linux package.
+#
+# NOT BUILT. Written 2026-10-02 against Arch's makepkg.conf and pacman source
+# as of that date, and never run through makepkg: there was no Arch system to
+# run it on. Read contrib/README.md's status table before relying on it. The
+# Debian recipe in contrib/debian/ is the one that has been built end to end.
+#
+# Not in the AUR, and the Maintainer line below is a placeholder. Whoever
+# submits it owns that line; it is not upstream.
+#
+# Maintainer: xtgeoip packaging <packaging@example.invalid>
+#
+# pkgver and sha256sums pin the latest *published* release, not the tree this
+# file is in. They cannot do otherwise: this file ships inside the tarball it
+# downloads, so it cannot carry that tarball's checksum. After each release a
+# follow-up commit moves them to it, and until then this file builds the
+# previous release.
+#
+# The install step reads docs/generated/install-manifest.tsv, the one
+# declaration of what the package ships (docs/design/packaging.md §6.3), rather
+# than listing files here.
+
+pkgname=xtgeoip
+pkgver=0.4.3
+pkgrel=1
+pkgdesc='GeoLite2 database builder for the xt_geoip iptables match'
+arch=('x86_64')
+url='https://github.com/HomerSlated/xtgeoip'
+license=('MIT')
+depends=('glibc' 'gcc-libs')
+makedepends=('cargo')
+# Optional rather than required, deliberately. xtgeoip writes the database
+# files whether or not the match is installed; xtables-addons is what reads
+# them. On Arch it is AUR-only, as two packages that conflict with each other
+# and share no `provides`, and pacman has no "either of" dependency. A hard
+# depends on either would shut out users of the other, which for the non-DKMS
+# one means everyone not on the stock `linux` kernel.
+optdepends=('xtables-addons: the xt_geoip match, built for the linux kernel'
+            'xtables-addons-dkms: the xt_geoip match, via DKMS for any kernel')
+# The operator's rotation policy. /etc/xtgeoip.conf is deliberately absent:
+# the package does not ship it (§2), so there is nothing for pacman to keep.
+backup=('etc/logrotate.d/xtgeoip')
+# Stated rather than inherited from the builder's makepkg.conf:
+#   strip     performs the manifest's `strip` transform.
+#   zipman    performs its `gzip` transform, as `gzip -9 -n -f`
+#             (libmakepkg/tidy/50-zipman.sh), so no timestamp is embedded.
+#   emptydirs keeps /var/lib/xt_geoip, which the manifest declares and which
+#             is empty in the package.
+#   !lto      Arch's default LTOFLAGS=-flto=auto reaches aws-lc-sys's C code
+#             through CFLAGS, and the result does not link: with Arch's exact
+#             CFLAGS plus -flto=auto the release build failed here with
+#             `rust-lld: error: undefined symbol: aws_lc_0_45_0_RSA_free`, and
+#             the same flags without it linked (2026-10-02, GCC 13; Arch ships
+#             GCC 15). The Rust package guidelines prescribe !lto for mixed
+#             Rust/C builds. Rust's own optimisation is unaffected.
+options=('strip' 'zipman' 'emptydirs' '!lto')
+
+_url="https://github.com/HomerSlated/xtgeoip/releases/download/v$pkgver"
+# SHA256SUMS is renamed per version so that a shared SRCDEST cannot hand one
+# release's checksum file to another. makepkg pairs a signature with the file
+# whose local name is its own minus `.asc`, so the two names must match.
+source=("$_url/$pkgname-$pkgver.tar.gz"
+        "$pkgname-$pkgver-SHA256SUMS::$_url/SHA256SUMS"
+        "$pkgname-$pkgver-SHA256SUMS.asc::$_url/SHA256SUMS.asc")
+sha256sums=('4b30e8975625b5e19f9bb585fdd4cb6eec1968f1b90ba4c0d65664b5bb510769'
+            'f9b27c12750386c6a7edbb15821cac0b367d35fbb84db2f9f2def7f6f81d75e3'
+            'SKIP')
+# The release key's primary fingerprint. It signs with a subkey, and makepkg
+# compares the primary's (VALIDSIG field 10). The key is not on a keyserver:
+# import docs/release_public.asc from the repository, and check that it shows
+# this fingerprint, before the first build.
+validpgpkeys=('01282FB9C23478CF97A8D9041727776DA3AF9DF9')
+
+prepare() {
+	# The signature covers SHA256SUMS, not the tarball. This line ties the two
+	# together, so the tarball is vouched for by the release key as well as by
+	# the pinned sha256sums above. prepare() starts in $srcdir, where the
+	# tarball sits under the name the checksum file gives it.
+	sha256sum -c --strict "$pkgname-$pkgver-SHA256SUMS"
+
+	cd "$pkgname-$pkgver"
+	# --locked is load-bearing: six credential-path crates are exact-pinned,
+	# because an encrypted blob in /etc/xtgeoip.conf outlives any build, and a
+	# fresh resolve would change its format without any test noticing.
+	# No RUSTUP_TOOLCHAIN: the tarball has a rust-toolchain.toml, which the
+	# guidelines accept in its place. Arch's `rust` package ignores it.
+	cargo fetch --locked --target host-tuple
+}
+
+build() {
+	cd "$pkgname-$pkgver"
+	export CARGO_TARGET_DIR=target
+	cargo build --frozen --release
+}
+
+check() {
+	cd "$pkgname-$pkgver"
+	export CARGO_TARGET_DIR=target
+	# The hermetic suite: no root, no network. xtgeoip-tests, the integration
+	# suite, needs root, openssl(1) and a passphrase typed at a terminal.
+	cargo test --frozen
+}
+
+package() {
+	cd "$pkgname-$pkgver"
+	[[ -n $pkgdir ]] || return 1
+
+	local manifest=docs/generated/install-manifest.tsv
+	local kind src transform dest mode
+	# Both `case`s end in `*)` on purpose: a kind or transform added to
+	# install.yaml later must fail the build, not vanish from the package.
+	while IFS=$'\t' read -r kind src transform dest mode; do
+		case "$transform" in
+			none|-) ;;
+			strip) ;;                    # options=(strip)
+			gzip) dest="${dest%.gz}" ;;  # options=(zipman) compresses it
+			*) error "$manifest: unknown transform '$transform'"; return 1 ;;
+		esac
+		case "$kind" in
+			dir) install -d -m "$mode" -- "$pkgdir$dest" || return 1 ;;
+			file) install -D -m "$mode" -- "$src" "$pkgdir$dest" || return 1 ;;
+			*) error "$manifest: unknown kind '$kind'"; return 1 ;;
+		esac
+	done < <(sed -e '/^#/d' -e '/^$/d' "$manifest")
+
+	# Not in the manifest, because where a licence goes is per-format: Debian
+	# reads debian/copyright and flags this very file as redundant. Arch wants
+	# the MIT text here, since each MIT instance carries its own copyright line.
+	install -D -m 0644 -- LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

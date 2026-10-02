@@ -178,7 +178,9 @@ port, `fetch::tests` went from 9 failed in 98.8 s to 55 passed in 0.95 s. It
 touches the signed `src/fetch.rs`, which has a STALE row. The integration
 suite drives the release binary and is not covered by this.
 
-**Still to write**: seven recipes. `PKGBUILD` next.
+**Still to write**: six recipes. `PKGBUILD` is written but not built (no Arch
+system here; see `contrib/README.md`), and after each release its `pkgver` and
+`sha256sums` move to the new tarball in a follow-up commit.
 
 Recipes build from a git tag, since `publish = false`. `v0.4.2` is the first
 to carry a recipe; `v0.4.3` is the first with a published release (source

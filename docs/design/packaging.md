@@ -319,7 +319,8 @@ a `conf_delete` mode that is now `conf --default`. Nothing read it, so nothing
 broke.
 
 Its three siblings — `docs/xtgeoip-usage.md`, `docs/xtgeoip-usage.yaml` and
-`docs/spec/cli-prose.md` — are kept *and* shipped, and the reason is worth
+`docs/spec/cli-prose.md`, which became the root `README.md` on 2026-10-02 — are
+kept *and* shipped, and the reason is worth
 recording, because a reference check says to drop them too. Nothing in the
 repository reads any of the three either. But
 `docs/design/spec-driven-validator.md` credits `xtgeoip-usage.yaml` with

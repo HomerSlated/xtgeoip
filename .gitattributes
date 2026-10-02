@@ -53,8 +53,9 @@ extra/ export-ignore
 /.gitignore       export-ignore
 /.gitattributes   export-ignore
 
-# Deliberately NOT listed here: docs/xtgeoip-usage.{md,yaml} and
-# docs/spec/cli-prose.md. Nothing in the repository reads them, so a reference
-# check says to drop them, and that check asks the wrong question — they are
-# the hand-written oracles that caught the `run -b -p` defect in 62e554a, and
-# their value is exactly that nothing derives from them. They ship. See §4.
+# Deliberately NOT listed here: docs/xtgeoip-usage.{md,yaml}, and README.md,
+# which until 2026-10-02 was docs/spec/cli-prose.md. Nothing in the repository
+# reads them as input, so a reference check says to drop them, and that check
+# asks the wrong question — they are the hand-written oracles that caught the
+# `run -b -p` defect in 62e554a, and their value is exactly that nothing
+# derives from them. They ship. See §4.

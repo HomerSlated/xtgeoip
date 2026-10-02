@@ -1,28 +1,14 @@
 # xtgeoip
 
-`xtgeoip` is a Rust-based tool for managing GeoIP-based filtering on Linux systems. It automates the creation and maintenance of binary GeoIP databases compatible with the `xt_geoip` kernel module, enabling network administrators to block or allow traffic by country with high performance and precision.
+xtgeoip is a Rust reimplementation of the Perl program xt_geoip_build_maxmind (Jan Engelhardt, Philip Prindeville), but with many enhancements.
 
-## Background
+## GeoIP Filtering Preamble
 
-This project was inspired by [`xt_geoip_build_maxmind`](https://manpages.debian.org/unstable/xtables-addons-common/xt_geoip_build_maxmind.1.en.html) (Jan Engelhardt, 2008–2011 & Philip Prindeville, 2018), which is now part of Debian's `xtables-addons-common`. While that tool is written in Perl, `xtgeoip` reimplements the functionality in Rust, offering modern safety, concurrency, and performance improvements.
+Public facing servers are exposed to a massive volume of constant scanning and hacking attempts. The sheer scale of these attacks makes it impractical to manage without some form of automated filtering. Analysis of this traffic typically reveals that a disproportionately large amount of it originates from certain countries.
 
-## GeoIP Filtering and Linux xtables
+Although it might seem unfair to block an entire country, given the scale of the problem posed by that country, the alternative would require an ongoing expenditure of resources that is untenable and simply not justifiable. This sledgehammer approach may not completely eliminate the problem, but experience shows that it reduces it to negligible levels.
 
-GeoIP filtering allows network administrators to restrict access based on the geographical origin of IP addresses. On Linux, this is typically implemented using the `xt_geoip` kernel module in conjunction with `iptables` or `nftables`. For example, traffic from specific countries can be blocked or allowed by referencing the precompiled GeoIP database.
-
-For users of `ufw` (Uncomplicated Firewall), `xtgeoip` can be integrated to provide country-based rules by generating the necessary `iptables` or `nftables` commands.
-
-### Note on Ethics and Usage
-
-Blocking entire countries is a contentious practice and should be considered carefully. While unfortunate, in some cases it has become necessary for public-facing servers to reduce large-scale attacks or abuse. Administrators should use these tools responsibly and remain mindful of the broader implications of country-based filtering.
-
-## Features
-
-- **Legacy mode support**: Compatible with older workflows.
-- **Accurate ISO-based classification**: Correctly separates American Samoa (`AS`) from Asia and places continent-only ranges into `O1`.
-- **Flexible backup and delete commands**: Ensures safe management of GeoIP binary data.
-- **Context-aware error handling**: Detects missing version or manifest files and provides actionable messages.
-- **Multiple operation modes**: Including `backup`, `delete`, `run`, and planned future modes like `fetch only` and `build only`.
+GeoIP filtering is achieved using the firewall, which on Linux is iptables (or its modern replacement nftables). Once the appropriate data files have been created, and the xt_geoip kernel module has been installed and loaded, it's then simply a case of creating a firewall rule that targets "--src-cc XX" for logging or filtering, where "XX" is a valid ISO 3166-1 country code (e.g. US), or comma separated list of them, corresponding to the data files. This will then log and/or filter all traffic from that country (or countries), at least as defined by MaxMind.
 
 ## Speed Comparison
 **High-performance Rust implementation**: Significantly faster than the Perl version.
@@ -37,25 +23,133 @@ $ time sudo xtgeoip run
 Executed in    1.84 secs
 ```
 
-## Optimisations and Coding Decisions
+## Features
 
-- Efficient glob-based file collection for `.iv4` and `.iv6` data files.
-- Verification of manifest checksums to prevent database corruption.
-- Force mode for safe operations when version or manifest files are missing.
-- Minimal filesystem overhead during tarball creation.
+xtgeoip can:
 
-## Roadmap
+- Download the latest GeoLite2 databases from MaxMind (e.g. GeoLite2-Country-CSV_${date}.zip), and its associated sha256 checksum file (e.g. GeoLite2-Country-CSV_${date}.zip.sha256), and store in /var/lib/xt_geoip/.
+- Prune older GeoLite2 databases from /var/lib/xt_geoip/ to save disk space, keeping only the latest "n" versions (configurable, default: 3).
+- Verify the integrity of the downloaded zip file using the corresponding sha256 checksum.
+- Unzip the downloaded zip file and extract the relevant CSV files to a temporary directory.
+- Convert the CSV data into the binary format supported by the xt_geoip Linux kernel module, one data file per country, then store them in /usr/share/xt_geoip/. The files are named according to the country code (e.g. US, CN, etc.) and the IP version (e.g. iv4, iv6), e.g. US.iv4, US.iv6, CN.iv4, CN.iv6, etc.
+- Create a Blake3 checksum of the generated binary files, which will be used as a manifest for backup and housekeeping purposes.
+- Back up the binary files to a tarball in /var/lib/xt_geoip/, for future reference and potential rollback.
+- Prune older binary tarballs from /var/lib/xt_geoip/ to save disk space, keeping only the latest n versions (configurable, default: 3).
+- Delete the current binary files in /usr/share/xt_geoip/, to ensure no orphaned files are left behind. This also removes any metadata files created by xtgeoip (typically a file called "version" and the Blake3 manifest file).
 
-Future enhancements may include:
+## Force Flag
 
-- Dedicated `fetch only` mode to download GeoIP data without processing. (DONE)
-- `build only` mode for rapid binary database construction. (DONE)
+Two operations support the "force" flag: backup and clean.
 
-## Status
+Normally, backup requires a minimum of 3 files in /usr/share/xt_geoip/: the "version" file, the Blake3 manifest file, and at least one iv4/iv6 binary file, the latter of which must also be named in the manifest, and pass checksum verification. However, typically you would expect to see hundreds of iv4/iv6 files. When backup runs, all files named in the manifest must exist in /usr/share/xt_geoip/, and pass checksum verification, otherwise the backup will not run, and the program will exit with an error. However, the force flag allows you to bypass these checks, and run the backup even if the version file or manifest is missing, or if some of the iv4/iv6 files are missing or fail checksum verification. This can be useful in certain scenarios, such as when you want to create a backup of the current state of /usr/share/xt_geoip/, even if it's in a broken state.
 
-This software is considered **beta quality**, though it is fully functional. Feedback, bug reports, contributions, and packaging efforts are highly welcome.
+Similarly, the clean operation normally requires that the version file and manifest file be present in /usr/share/xt_geoip/, which it then uses to delete only those files that were originally created by xtgeoip, as named in the manifest. However, as with backup, the force flag allows you to bypass these checks, and any file matching the pattern *.iv4 or *.iv6 in /usr/share/xt_geoip/ will be deleted, along with any metadata files created by xtgeoip (e.g. the version file and manifest).
 
-## License
+## Order of Operations vs Order of Flags
 
-This project is licensed under the [MIT License](LICENSE).
+Certain flags can be combined, such as -b (backup) and -c (clean). In this case, the order of operations is always to back up first, then clean, as the reverse would fail (you've just deleted the files you wanted to back up), and the order of the flags given is ignored (i.e. xtgeoip -b -c == xtgeoip -c -b). Generally, the order of subcommands and flags is always ignored, and the order of execution is fixed, based on the most logical order of operations requested.
+
+## Context of Flags
+
+Some flags are only relevant in certain contexts. For example, the -f (force) flag is only relevant in the context of backup and clean, and will raise an error if used in the context of fetch (downloading cannot be forced, as it either succeeds or fails). If force is used in combination with both backup and clean, it will raise an error and exit, as the request is ambiguous (do you want to force backup, or force clean, or both?). In order to avoid surprising the user with unexpected results, the intent must be explicit. Note that if you need to force both, you will therefore need to run the program twice, once with "-b -f", then again with "-c -f".
+
+Similarly, the -p (prune) flag is only relevant in the contexts of fetch and backup. In the case of backup, it will prune older bin tarballs from /var/lib/xt_geoip/, while in the case of fetch, it will prune older CSV zip files from /var/lib/xt_geoip/. The prune target is therefore determined by context: backup implies bin archives; fetch implies CSV archives. This extends to compound operations: `run -p` prunes CSV archives (after the implicit fetch, before build); `build -b -p` prunes bin archives (after backup, before build). Using -p without a fetch or backup context will raise an error and exit (e.g. `build -p` without -b). As with the force flag, if prune is used in a context where both fetch and backup are active, it will raise an error and exit for the same reason of ambiguity (ambiguous prune target).
+
+## Legacy Mode
+
+A "legacy" mode is provided, which produces output files identical to the original Perl implementation.
+
+*WARNING*: Be aware that the original implementation incorrectly assigns some IP ranges to the wrong country.
+
+For example, it assigns IP ranges with the AS (Asia) continent code, which is not a valid ISO 3166 country, to the country code "AS", and worse, it's an actual collision with the real country code for American Samoa, meaning that a large number of Asian IP ranges are incorrectly assigned to American Samoa.
+
+Additionally, the original implementation bundles all EU (Europe) continent IP ranges into the "EU" pseudo country code, which is not a valid ISO 3166 country code. These are ranges without a designated country code, but which are nonetheless within the EU. The correct, ISO compliant way to handle these ranges is to assign them to the country code "O1" ("O" as in "Other"), which is the reserved country code for "other countries".
+
+## Configuration
+
+xtgeoip reads its configuration from /etc/xtgeoip.conf (TOML). A documented example is installed at /usr/share/xt_geoip/xtgeoip.conf.example, and `xtgeoip conf -d` prints it.
+
+To download the GeoLite2 databases you need a MaxMind account (https://www.maxmind.com/en/geolite2/signup) and a license key, which you create from the account dashboard. Then run:
+
+```
+sudo xtgeoip conf -c
+```
+
+If /etc/xtgeoip.conf does not exist yet, this offers to create it from the example. It then asks for your account ID, your license key and a passphrase, encrypts the account ID and license key under that passphrase, and writes them into /etc/xtgeoip.conf as `[maxmind.credentials]`. The credentials are never stored in plaintext, so do not add `account_id` or `license_key` to the file by hand.
+
+The passphrase is stored nowhere, so `fetch` and `run` ask for it each time they contact MaxMind, and cannot run unattended (for example from cron). `build` works from the archived copy and needs no passphrase.
+
+`xtgeoip conf -s` shows the active configuration, and `xtgeoip conf -e` opens it in `$EDITOR` (vi if unset). The remaining settings (the archive and output directories, how many archives to keep, the log file, and the number of worker threads) are documented in the example file and in xtgeoip(1).
+
+Note that there are both free and paid tiers of MaxMind accounts, and the free tier allows you to download the GeoLite2 databases, which are sufficient for use with xtgeoip. The paid tier allows you to download the larger and more accurate GeoIP2 databases, but these have not been tested with xtgeoip.
+
+## Running xtgeoip
+
+```
+Commands (only one of): build
+                        Optional flags: -b, -c, -f, -p
+                        Create ip4/ip6 data files from a stored copy of the database
+
+                        fetch
+                        Optional flags: -p
+                        Download the latest database
+
+                        run
+                        Optional flags: -b, -c, -f, -l, -p
+                        Fetch then build
+
+                        conf
+                        Mandatory flags (only one of): -c, -d, -e, -s, -h
+                        
+flags:                  -b|--backup
+                        Backup ip4/ip6 data files listed in manifest
+                        Optional commands: build, run
+
+                        -c|--clean
+                        Delete ip4/ip6 data files listed in manifest
+                        With the conf command: -c|--set-credentials
+                        Prompt for and encrypt MaxMind credentials
+
+                        -d|--default
+                        Show the default config
+                        Requires the conf command
+
+                        -e|--edit
+                        Edit the current config
+                        Requires the conf command
+
+                        -f|--force
+                        Force backup or clean
+                        Requires the -b or -c flag, but not both in a single invocation (ambiguous)
+
+                        -h|--help
+                        Show help
+
+                        -l|--legacy
+                        Produce legacy (incorrect) data files, for comparison
+
+                        -p|--prune
+                        Delete older binary backups or CSV databases, but not both in a single invocation (ambiguous)
+                        Requires the -b flag or fetch command, but not both in a single invocation (ambiguous)
+
+                        -s|--show
+                        Show the current config
+                        Requires the conf command
+
+                        -V|--version
+```
+
+
+## The xt_geoip Kernel Module
+
+To use the xt_geoip firewall kernel module, you need to load the kernel module and ensure it is loaded at boot time. You can do this by running the following commands:
+
+sudo modprobe xt_geoip
+echo "xt_geoip" | sudo tee /etc/modules-load.d/xt_geoip.conf
+
+The module is available as part of the xtables-addons package. If this package is not available for your distro, a simple dkms source package is included in the extra/dkms directory of the git repository (https://github.com/HomerSlated/xtgeoip/tree/main/extra/dkms). It is not part of the release tarball. Please read the included install instructions for further information.
+
+## Firewall Utilization
+
+An example firewall config has been included in the extra/ufw directory of the git repository (https://github.com/HomerSlated/xtgeoip/tree/main/extra/ufw). It is not part of the release tarball. Please read the instructions in that directory for further information.
 

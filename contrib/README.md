@@ -125,7 +125,7 @@ and an uncompressed man page. Both work; both will be flagged in review.
 | Format | State |
 |---|---|
 | deb | `debian/`, written 2026-09-22, first tagged in `v0.4.2`. Built end to end on 2026-09-29, both with the network and offline from a vendored component tarball. |
-| pacman | next |
+| pacman | `arch/PKGBUILD`, written 2026-10-02. **Not built**: no Arch system was available. Its shell logic was exercised outside makepkg against the v0.4.3 release (signature, checksum, manifest loop, both `*)` arms), which is not a build. Pins v0.4.3. |
 | rpm, xbps, ebuild, apk, nix, SlackBuild | not started |
 
 `debian/README.source` is the one to read before writing another: it is where
@@ -154,3 +154,19 @@ remaining seven will each have to answer:
    has a trap in the Debian case, and possibly others: vendored crates ship
    `Cargo.toml.orig`, and anything that tidies `*.orig` away (as `dh_clean`
    does by default) breaks their checksums.
+
+The PKGBUILD added three more, none of which Debian raised:
+
+5. **A distribution's default C flags can break the link.** Arch builds with
+   `-flto=auto`, which reaches `aws-lc-sys` through `CFLAGS` and leaves objects
+   `rust-lld` cannot resolve; the PKGBUILD sets `!lto`. Any format whose build
+   flags turn on GCC LTO needs the same check.
+6. **The runtime dependency may not be one package.** On Arch, xtables-addons
+   is AUR-only, as two conflicting packages with no shared `provides`, so it
+   is an `optdepends` naming both. "Depend on xtables-addons" is a goal; each
+   format has to find out what it can actually express.
+7. **A recipe inside the tarball cannot pin the tarball.** Formats that carry
+   source checksums (PKGBUILD, APKBUILD, ebuild Manifest, SlackBuild .info)
+   pin the latest published release and are moved forward after each one.
+   Debian does not have the problem: `debian/` states no hash, and the one in
+   the `.dsc` is written by `dpkg-source` at build time.
