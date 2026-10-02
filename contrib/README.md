@@ -42,7 +42,7 @@ sed -e '/^#/d' -e '/^$/d' docs/generated/install-manifest.tsv \
 done
 ```
 
-Three details that are not incidental:
+Four details that are not incidental:
 
 - **`--` before the operands.** GNU `install` permutes options among operands,
   so a `source` beginning with `-` is read as a flag: `install -D -m 0755
@@ -57,6 +57,17 @@ Three details that are not incidental:
   too — see `tests::install_manifest_transforms_are_known`.
 - **`IFS="$(printf '\t')"`, not `IFS=$'\t'`.** The latter is a bashism, and
   `debian/rules` and most `%install` scripts run under `sh`.
+- **Quote every expansion of `src` and `dest`.** `xtgeoip-docgen` checks their
+  *shape* (a relative `source` that climbs no `..` and does not start with
+  `-`; an absolute `dest` that climbs no `..`; no control characters in
+  either) but not their *characters*. Spaces, glob characters, `$(...)`,
+  backslashes and `~` all pass, and are inert today only because the loop
+  above quotes `"$src"` and `"$DESTDIR$dest"`. That is a property of the
+  recipe, not of the manifest. A recipe that word-splits a field, passes it
+  through `eval`, or writes it into a context with its own expansion rules —
+  an unquoted Makefile line, or an rpm `%files` list, which treats `*` as a
+  glob — has to supply that safety itself. Both recipes here quote; the PKGBUILD
+  uses bash, so it reads with `IFS=$'\t'`, which is fine there.
 
 ## The two transforms are yours to perform
 

@@ -6,9 +6,11 @@ Open work only. Everything closed up to 2026-09-05 is archived in
 close here move to the end of `DONE.md`, under *Closed after the archive*;
 there is no `TODO_tldr.md` any more.
 
-Opened 2026-09-06. What is here now: two open items, the informational
-findings from two guardian audits, one policy question, and the three lists
-that are normative rather than historical.
+Opened 2026-09-06, brought up to date 2026-10-02. What is here now: the open
+packaging work (six recipes unwritten, the PKGBUILD unbuilt), one wording
+correction waiting for its file to change, the informational findings from two
+guardian audits, one policy question, and the three lists that are normative
+rather than historical.
 
 ---
 
@@ -42,11 +44,12 @@ constraints before implementation begins.
 
 ### Guardian re-signing
 
-**The queue is empty as of 2026-09-13T13:42Z.** All four signed files —
-`src/fetch.rs`, `src/conf.rs`, `src/config.rs`, `src/secrets.rs` — verify GOOD.
-Two audits that day (`guardian_report_20260913_132722.md` and its addendum
-`…_134248.md`) cleared five rows, including the 2026-09-12 comment-only row
-that had never been annotated.
+**The queue is empty as of 2026-10-01T04:10Z**, across 36 rows, and all
+seventeen signed source files verify GOOD. The last run
+(`guardian_report_20261001_034655.md`) re-signed `src/fetch.rs` and
+`src/bin/xtgeoip-docgen.rs` after two test-only changes, and raised one
+MEDIUM in a dependency, RUSTSEC-2026-0285 in `rustls`, closed by the 0.4.2
+lockfile bump.
 
 One wording correction is owed to `src/conf.rs`, deliberately **not** made:
 `set_credentials`'s comment says that once the config is 0600 "only root can
@@ -175,12 +178,26 @@ reqwest honours the environment for the 127.0.0.1 stub too. `build_client` now
 adds `no_proxy()` under `#[cfg(test)]` only, so the shipped binary still
 honours an operator's proxy. With all six proxy variables pointed at a closed
 port, `fetch::tests` went from 9 failed in 98.8 s to 55 passed in 0.95 s. It
-touches the signed `src/fetch.rs`, which has a STALE row. The integration
-suite drives the release binary and is not covered by this.
+touched the signed `src/fetch.rs`, re-audited and re-signed 2026-10-01. The
+integration suite drives the release binary and is not covered by this.
 
-**Still to write**: six recipes. `PKGBUILD` is written but not built (no Arch
-system here; see `contrib/README.md`), and after each release its `pkgver` and
-`sha256sums` move to the new tarball in a follow-up commit.
+**Still open:**
+
+- **Six recipes unwritten**: rpm, xbps, ebuild, apk, nix, SlackBuild.
+  `contrib/README.md` lists the seven findings the first two produced.
+- **`contrib/arch/PKGBUILD` is not built** — there is no Arch system here. Its
+  shell logic was exercised outside makepkg against the v0.4.3 release, which
+  is not a build. A real one would also settle `!lto` under Arch's GCC 15 (the
+  failure was measured on GCC 13) and run `namcap`.
+- **After every release**, the PKGBUILD's `pkgver` and `sha256sums` move to the
+  new tarball in a follow-up commit. They cannot move before it: the file ships
+  inside the tarball it pins.
+- **sid's lintian 2.141 has not been run.** `Standards-Version: 4.7.4` rests on
+  the upgrading checklist and a lintian that knows Policy only to 4.6.2.
+- **README's usage block has no drift check.** Since 2026-10-02 it is the
+  verbatim output of `xtgeoip --help` and `xtgeoip conf -h`, and nothing
+  compares it with the program: the next change to the help text in
+  `src/cli.rs` leaves it behind. A docgen test could diff the two.
 
 Recipes build from a git tag, since `publish = false`. `v0.4.2` is the first
 to carry a recipe; `v0.4.3` is the first with a published release (source
@@ -371,8 +388,8 @@ findings.
   - `plain_relative` bounds shape, not character class. Spaces, globs,
     `$(...)`, backslashes and `~` still pass, and are inert only because the
     documented consumer quotes its expansions. That is a dependency on the
-    recipe, not a property of the manifest, and it should be stated in
-    `contrib/README.md` when the first recipe is written
+    recipe, not a property of the manifest. **Now stated**, as the fourth of
+    `contrib/README.md`'s loop details (2026-10-02)
 - **The tab assertion cannot detect decay of its own fixture.** A `\t`
   reflowed to a bare `t` by `format_strings` leaves seven tabs — still not
   four, still the same error message, still green. No test can close this;
