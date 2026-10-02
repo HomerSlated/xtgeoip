@@ -137,22 +137,32 @@ and an uncompressed man page. Both work; both will be flagged in review.
 |---|---|
 | deb | `debian/`, written 2026-09-22, first tagged in `v0.4.2`. Built end to end on 2026-09-29, both with the network and offline from a vendored component tarball. |
 | pacman | `arch/PKGBUILD`, written 2026-10-02. **Not built**: no Arch system was available. Its shell logic was exercised outside makepkg against the v0.4.3 release (signature, checksum, manifest loop, both `*)` arms), which is not a build. Pins v0.4.3. |
-| rpm, xbps, ebuild, apk, nix, SlackBuild | not started |
+| rpm | `rpm/xtgeoip.spec`, written 2026-10-02. **Not built**: no RPM system was available. Its `%install` scriptlet was run under `sh` against the v0.4.3 release (every manifest row, the generated `%files` list, both `*)` arms, and the refusal of a space or glob in `dest`), which is not a build. Distribution-neutral; `Version` tracks `Cargo.toml`. |
+| xbps | `void/srcpkgs/xtgeoip/template`, written and built 2026-10-02 on Void x86_64 (glibc) by a delegated session: `xbps-src -Q pkg` passed with 292 tests, `xlint` clean, the binary stripped, the manifest's 9 files plus the licence. Not installed, so the `make_dirs` trigger was not exercised. Pins v0.4.3. |
+| ebuild, apk, nix, SlackBuild | not started |
 
 `debian/README.source` is the one to read before writing another: it is where
-what this recipe cost gets written down. Four things it surfaced that the
-remaining seven will each have to answer:
+what this recipe cost gets written down. Four things it surfaced that every
+other format has to answer:
 
 1. **The two transforms may already be someone else's job.** Debian's
    `dh_strip` and `dh_compress` do exactly what `strip` and `gzip` name, so
    `debian/rules` performs neither — it rewrites the man page's `dest` to drop
    `.gz` and lets `dh_compress` put it back at `-9n`. The manifest declares an
-   *end state*; each format reaches it by its own road. Expect the same of rpm.
+   *end state*; each format reaches it by its own road. rpm's `brp-strip` and
+   `brp-compress` and xbps-src's strip hook are the same again, with one
+   exception: Void ships man pages uncompressed and gunzips any it finds, so
+   there the `gzip` end state is overridden, not reached.
 2. **Not `dh --buildsystem=cargo`.** It builds against Debian's own crate
    registry, which re-resolves — the exact thing `--locked` is there to stop.
-   Every format with a native Rust helper (`dh-cargo`, `%cargo_build`,
-   `cargo.eclass`) needs the same question asked and probably answered the same
-   way.
+   Every format with a native Rust helper needs the same question asked, and
+   the answers so far differ. Fedora's `%cargo_prep` is worse than `dh-cargo`:
+   without a vendor directory it runs `rm -f Cargo.lock` before building
+   against Fedora's packaged crates, and `%cargo_build` never passes
+   `--locked`, so the spec calls cargo itself. Void's `build_style=cargo` is
+   the exception that is safe: it runs `cargo auditable build --release
+   --locked` against crates.io, so the template keeps it and replaces only
+   its `do_install`, which would install every binary target.
 3. **`-dbgsym` is empty as configured.** `Cargo.toml` sets no
    `[profile.release]`, so Cargo's release default gives no debug info and
    there is nothing for `dh_strip` to extract. The "do not pre-strip" rule in
@@ -170,8 +180,10 @@ The PKGBUILD added three more, none of which Debian raised:
 
 5. **A distribution's default C flags can break the link.** Arch builds with
    `-flto=auto`, which reaches `aws-lc-sys` through `CFLAGS` and leaves objects
-   `rust-lld` cannot resolve; the PKGBUILD sets `!lto`. Any format whose build
-   flags turn on GCC LTO needs the same check.
+   `rust-lld` cannot resolve; the PKGBUILD sets `!lto`. The detail that
+   matters is fat versus slim objects: Fedora's `-flto=auto -ffat-lto-objects`
+   keeps machine code beside the LTO bytecode, and the same experiment linked
+   (GCC 13, 2026-10-02). Void's defaults enable no LTO at all.
 6. **The runtime dependency may not be one package.** On Arch, xtables-addons
    is AUR-only, as two conflicting packages with no shared `provides`, so it
    is an `optdepends` naming both. "Depend on xtables-addons" is a goal; each
@@ -180,4 +192,28 @@ The PKGBUILD added three more, none of which Debian raised:
    source checksums (PKGBUILD, APKBUILD, ebuild Manifest, SlackBuild .info)
    pin the latest published release and are moved forward after each one.
    Debian does not have the problem: `debian/` states no hash, and the one in
-   the `.dsc` is written by `dpkg-source` at build time.
+   the `.dsc` is written by `dpkg-source` at build time, and rpm keeps its
+   checksums in the packager's `sources` file, so the spec's `Version` can
+   track `Cargo.toml`.
+
+The rpm spec and the Void template added four more:
+
+8. **Another package may own the output directory.** openSUSE's
+   `xtables-geoip` ships prebuilt DB-IP data into `/usr/share/xt_geoip`,
+   xtgeoip's default `output_dir`, and owns it; each would overwrite the
+   other's database. The spec declares `Conflicts: xtables-geoip`. Check each
+   distribution for a data package of its own.
+9. **An empty directory may not survive packaging.** xbps-src deletes empty
+   directories from a package, so `/var/lib/xt_geoip` comes from `make_dirs`
+   at install time instead, and the template fails the build if the manifest
+   and `make_dirs` disagree. That line is the one restatement in any recipe
+   here, and it is guarded.
+10. **The distribution may link a -sys crate against its own library.**
+    Void's Rust helper exports `ZSTD_SYS_USE_PKG_CONFIG=1`, so the package
+    links the system `libzstd` and needs `pkg-config` and `libzstd-devel` to
+    build. The Debian package links no libzstd (its dependencies are libc,
+    libgcc and xtables-addons-common), so there the bundled copy is used.
+11. **The binary may not be where the manifest says.** Void's cargo style
+    always passes `--target`, so the release binary is under
+    `target/<triple>/release/`, and the template rewrites that one source
+    path.

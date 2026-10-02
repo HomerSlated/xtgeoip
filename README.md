@@ -182,6 +182,10 @@ echo "xt_geoip" | sudo tee /etc/modules-load.d/xt_geoip.conf
 
 The module is available as part of the xtables-addons package. If this package is not available for your distro, a simple dkms source package is included in the extra/dkms directory of the git repository (https://github.com/HomerSlated/xtgeoip/tree/main/extra/dkms). It is not part of the release tarball. Please read the included install instructions for further information.
 
+The match has two halves, and both are needed. The kernel module (xt_geoip) filters the packets, and the userspace library (libxt_geoip.so, loaded by iptables) reads the data files. The dkms package in extra/dkms builds only the kernel module, so on its own `iptables -m geoip` fails with "Couldn't load match `geoip'". The library comes from xtables-addons (on Debian and Ubuntu, xtables-addons-common).
+
+The library reads the data files from /usr/share/xt_geoip. That path is compiled into it (`GEOIP_DB_DIR` in xtables-addons' extensions/libxt_geoip.c), so leave xtgeoip's `output_dir` at its default unless your library was built with a different one. The library reads the files only when a rule using `-m geoip` is inserted, and passes the ranges to the kernel module, which never opens them itself. A rebuilt database therefore takes effect only when you reload the rules that use it, for example with `sudo ufw reload` or by re-running your iptables-restore.
+
 ## Firewall Utilization
 
 An example firewall config has been included in the extra/ufw directory of the git repository (https://github.com/HomerSlated/xtgeoip/tree/main/extra/ufw). It is not part of the release tarball. Please read the instructions in that directory for further information.

@@ -183,15 +183,28 @@ integration suite drives the release binary and is not covered by this.
 
 **Still open:**
 
-- **Six recipes unwritten**: rpm, xbps, ebuild, apk, nix, SlackBuild.
-  `contrib/README.md` lists the seven findings the first two produced.
+- **Four recipes unwritten**: ebuild, apk, nix, SlackBuild.
+  `contrib/README.md` lists the eleven findings the first four produced.
+- **`contrib/rpm/xtgeoip.spec` is not built** — no RPM system here. Its
+  `%install` was run under `sh` outside rpmbuild, which is not a build. A real
+  one would settle `openpgpverify` on Fedora, the empty-debuginfo question
+  (the spec sets `CARGO_PROFILE_RELEASE_DEBUG=2`), whether the completion
+  directories are owned by another package, and `rpmlint`. openSUSE files docs
+  under `/usr/share/doc/packages/`, which the manifest's paths do not follow.
+- **`contrib/void/` is built but not installed.** Built on Void x86_64 glibc
+  on 2026-10-02 by a delegated session; the `make_dirs` trigger and
+  `conf_files` handling on upgrade were not exercised, and musl was not
+  tried.
 - **`contrib/arch/PKGBUILD` is not built** — there is no Arch system here. Its
   shell logic was exercised outside makepkg against the v0.4.3 release, which
   is not a build. A real one would also settle `!lto` under Arch's GCC 15 (the
   failure was measured on GCC 13) and run `namcap`.
-- **After every release**, the PKGBUILD's `pkgver` and `sha256sums` move to the
-  new tarball in a follow-up commit. They cannot move before it: the file ships
-  inside the tarball it pins.
+- **After every release**, the PKGBUILD's `pkgver` and `sha256sums` and the
+  Void template's `version` and `checksum` move to the new tarball in a
+  follow-up commit. They cannot move before it: each file ships inside the
+  tarball it pins. The rpm spec's `Version` and `%changelog` move *with* the
+  release instead, and nothing checks them against `Cargo.toml` yet, as
+  `debian_changelog_version_matches_crate` does for Debian.
 - **sid's lintian 2.141 has not been run.** `Standards-Version: 4.7.4` rests on
   the upgrading checklist and a lintian that knows Policy only to 4.6.2.
 - **README's usage block has no drift check.** Since 2026-10-02 it is the

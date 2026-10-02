@@ -1,0 +1,88 @@
+# Template file for 'xtgeoip'
+#
+# Not in void-packages; the maintainer line is a placeholder for whoever
+# submits it. version and checksum pin the latest *published* release: this
+# file ships inside the tarball it downloads, so it cannot carry that
+# tarball's checksum, and is moved forward after each release.
+#
+# xbps-src checks the checksum below and nothing else. The release's
+# SHA256SUMS is signed by 01282FB9C23478CF97A8D9041727776DA3AF9DF9
+# (docs/release_public.asc); verify it by hand when moving the pin.
+pkgname=xtgeoip
+version=0.4.3
+revision=1
+# The cargo style's do_build is `cargo auditable build --release --locked
+# --target ${RUST_TARGET}`, fetching from crates.io into /host/cargo: it
+# resolves nothing, which is what the six exact-pinned credential crates
+# need. Its do_install is replaced below.
+build_style=cargo
+# Void's rust build helper exports ZSTD_SYS_USE_PKG_CONFIG=1, so zstd-sys
+# links the system libzstd rather than compiling its bundled copy. Without
+# these two the build stops in zstd-sys's build script. The C compiler that
+# aws-lc-sys needs is already in the build chroot; cmake is not needed.
+hostmakedepends="pkg-config"
+makedepends="libzstd-devel"
+# No xtables-addons here: Void does not package it, so there is nothing to
+# name. The database files are written regardless; the xt_geoip match that
+# reads them is the operator's to provide.
+short_desc="GeoLite2 database builder for the xt_geoip iptables match"
+maintainer="xtgeoip packaging <packaging@example.invalid>"
+license="MIT"
+homepage="https://github.com/HomerSlated/xtgeoip"
+distfiles="https://github.com/HomerSlated/xtgeoip/releases/download/v${version}/xtgeoip-${version}.tar.gz"
+checksum=4b30e8975625b5e19f9bb585fdd4cb6eec1968f1b90ba4c0d65664b5bb510769
+# The operator's rotation policy. /etc/xtgeoip.conf is deliberately not
+# shipped: the program creates it and rewrites it in place.
+conf_files="/etc/logrotate.d/xtgeoip"
+# xbps-src deletes empty directories from a package (post-install hook
+# 03-remove-empty-dirs), so a directory that ships empty has to be created
+# at install time instead. do_install checks this against the manifest.
+make_dirs="/var/lib/xt_geoip 0755 root root"
+
+# Every file and directory comes from docs/generated/install-manifest.tsv,
+# not from a list here. Three rewrites are local to this recipe:
+#   strip  nothing to do: hook 06-strip-and-debug-pkgs strips every ELF.
+#   gzip   the .gz is dropped: Void ships man pages uncompressed, and hook
+#          00-uncompress-manpages would gunzip one anyway.
+#   target/release  becomes target/${RUST_TARGET}/release, because the
+#          cargo style always builds with --target.
+# Both `case`s end in `*)` so that a kind or transform added to the manifest
+# later fails the build instead of vanishing from the package.
+do_install() {
+	local manifest=docs/generated/install-manifest.tsv
+	local kind src transform dest mode
+
+	while IFS=$'\t' read -r kind src transform dest mode; do
+		case "$transform" in
+			none|-) ;;
+			strip) ;;
+			gzip) dest="${dest%.gz}" ;;
+			*) msg_error "$manifest: unknown transform '$transform'\n" ;;
+		esac
+		case "$src" in
+			target/release/*) src="target/${RUST_TARGET}/release/${src#target/release/}" ;;
+		esac
+		case "$kind" in
+			file) install -D -m "$mode" -- "$src" "${DESTDIR}${dest}" ;;
+			dir)
+				if [[ $'\n'"$make_dirs"$'\n' == *$'\n'"$dest $mode root root"$'\n'* ]]; then
+					continue
+				fi
+				install -d -m "$mode" -- "${DESTDIR}${dest}"
+				;;
+			*) msg_error "$manifest: unknown kind '$kind'\n" ;;
+		esac
+	done < <(sed -e '/^#/d' -e '/^$/d' "$manifest")
+
+	# A directory still empty here would be removed with only a warning.
+	while IFS=$'\t' read -r kind src transform dest mode; do
+		if [ "$kind" = dir ] && [ -d "${DESTDIR}${dest}" ] &&
+		   [ -z "$(find "${DESTDIR}${dest}" -mindepth 1 -print -quit)" ]; then
+			msg_error "$manifest: '$dest' ships empty; add it to make_dirs\n"
+		fi
+	done < <(sed -e '/^#/d' -e '/^$/d' "$manifest")
+
+	# Not in the manifest: where a licence goes is per-format, and Void
+	# requires the MIT text under /usr/share/licenses.
+	vlicense LICENSE
+}
