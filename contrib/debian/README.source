@@ -19,14 +19,25 @@ undeliverable placeholder. Replace it before uploading anywhere.
 Rolling the orig tarball
 ------------------------
 
-Build from `v0.4.2` or later. It is the first tag that carries this recipe;
-`contrib/README.md` explains why none of the three before it should be used.
+Build from `v0.4.2` or later, the first tag that carries this recipe. The
+commands below use `v0.4.3`, the first tag with a published release.
 
-    git archive --prefix=xtgeoip-0.4.2/ -o ../xtgeoip_0.4.2.orig.tar.gz v0.4.2
-    tar xf ../xtgeoip_0.4.2.orig.tar.gz
-    cd xtgeoip-0.4.2
+    git archive --prefix=xtgeoip-0.4.3/ -o ../xtgeoip_0.4.3.orig.tar.gz v0.4.3
+    tar xf ../xtgeoip_0.4.3.orig.tar.gz
+    cd xtgeoip-0.4.3
     cp -r contrib/debian debian
     dpkg-buildpackage -us -uc
+
+Or take the tarball from the GitHub release, which is this same `git archive`
+output, and verify it before renaming it to the orig name:
+
+    gpg --verify SHA256SUMS.asc SHA256SUMS
+    sha256sum -c SHA256SUMS
+    mv xtgeoip-0.4.3.tar.gz xtgeoip_0.4.3.orig.tar.gz
+
+The release key is `01282FB9C23478CF97A8D9041727776DA3AF9DF9`; its public
+half is `docs/release_public.asc`. Check the fingerprint against a second source
+rather than trusting a key file that arrived with the release.
 
 Use `git archive`, not `tar czf`. `export-ignore` in `.gitattributes` is an
 attribute `git archive` consults and nothing else does; a tarball rolled by
@@ -53,10 +64,10 @@ of them come from Debian. Two ways to feed the build:
     the dependencies into a second orig tarball, a `3.0 (quilt)` component
     named `vendor`, before building:
 
-        cd xtgeoip-0.4.2
+        cd xtgeoip-0.4.3
         cargo vendor --locked vendor
         tar --sort=name --owner=0 --group=0 --numeric-owner \
-            -czf ../xtgeoip_0.4.2.orig-vendor.tar.gz vendor
+            -czf ../xtgeoip_0.4.3.orig-vendor.tar.gz vendor
         dpkg-buildpackage -us -uc
 
     `dpkg-source` records both tarballs in the `.dsc` and unpacks the second
@@ -116,8 +127,7 @@ A proxy in the build environment does not affect it. The tests that talk to
 an HTTP stub on 127.0.0.1 build their client with proxies disabled, in test
 builds only, so the installed binary still honours `http_proxy` and friends.
 Checked on 2026-09-30 by running `cargo test` with every proxy variable pointed
-at a closed port. `v0.4.1` predates this: there, nine stub tests fail under
-`http_proxy` or `ALL_PROXY` without `NO_PROXY=127.0.0.1`.
+at a closed port.
 
 The suite also writes nothing into the source tree, which matters more here
 than it looks: under `3.0 (quilt)` anything a test left behind would surface on

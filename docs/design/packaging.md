@@ -3,9 +3,10 @@
 Status: **analysis, with §6 settled and the first recipe written**. Written
 2026-09-13; §6's four decisions taken 2026-09-19, and §4's exclusions extended
 2026-09-20. `contrib/debian/` landed 2026-09-22, built against the derived
-install manifest; the other seven of §5 do not exist yet. `v0.4.2` is the tag
-recipes build from — §4 explains why neither of the first two tags can be, and
-`contrib/README.md` why `v0.4.1` is superseded. §2's decision is load-bearing
+install manifest; the other seven of §5 do not exist yet. `v0.4.2` is the
+first tag recipes can build from and `v0.4.3` the first with a published
+release; the three tags before them were deleted on 2026-10-02, and
+`contrib/README.md` says why. §2's decision is load-bearing
 and was settled before the recipe was written, which is why `debian/` ships no
 `/etc/xtgeoip.conf`.
 
@@ -192,13 +193,14 @@ costs in review.
 **307 crates in `Cargo.lock`.** Debian and Fedora policy prefers dependencies
 packaged separately; in practice, for a leaf application, vendoring is
 tolerated. `cargo vendor` expands to about 300 MB, 50 MB gzipped (measured
-2026-09-29; an earlier figure here said 185 MB). Ship a vendored source
-tarball alongside the plain one (§4) so a packager can choose.
+2026-09-29; an earlier figure here said 185 MB). A packager who needs the
+crates offline vendors them from the tag's lockfile; upstream ships no
+vendored tarball (§4).
 
 The 307th is `clap_complete`, added 2026-09-19 for §6.1. It is used only by
 docgen, but it sits in `[dependencies]` rather than `[dev-dependencies]`
 because dev-dependencies are not visible to `[[bin]]` targets — so it enters
-the lockfile and the vendored tarball even though the shipped `xtgeoip` binary
+the lockfile, and so any vendored tree, even though the shipped `xtgeoip` binary
 never links it. The alternative, an optional feature gating the generator,
 would buy one crate at the cost of a non-default build step in CI and in every
 contributor's workflow. Noted rather than fixed.
@@ -207,10 +209,8 @@ contributor's workflow. Noted rather than fixed.
 target exists so the binaries can share code, and publishing it would both
 expose an API this project does not support and make some ecosystems generate
 a `librust-xtgeoip-dev`. Consequence: every recipe builds from a git tag or a
-release asset — and the tag has to be one cut after `.gitattributes` landed.
-`v0.3.0` was tagged on 2026-09-19 but is not usable: `export-ignore` is read
-from the tree being archived, so `git archive v0.3.0` still carries the GPL-2
-xtables-addons tarball. `Cargo.toml` is at 0.4.0 for a tag that can be.
+release asset — and the tag has to be one cut after `.gitattributes` landed,
+because `export-ignore` is read from the tree being archived.
 
 **Do not set `strip = true` in `Cargo.toml`.** Debian and Fedora strip
 binaries themselves and extract `-dbgsym` / `-debuginfo` packages from what
@@ -244,23 +244,53 @@ convenience.
 The assets are therefore source only:
 
 ```
-xtgeoip-0.3.0.tar.gz              (source, self-published)
-xtgeoip-0.3.0-vendored.tar.gz     (source + cargo vendor, for distro builds)
+xtgeoip-<version>.tar.gz          (source, self-published)
 SHA256SUMS
 SHA256SUMS.asc                    (optional; see below)
 ```
+
+**No vendored tarball** (decided 2026-10-02). An earlier draft of this list
+had `xtgeoip-<version>-vendored.tar.gz`, source plus `cargo vendor`, for
+offline distribution builds. It was written before any recipe existed, and the
+first one disagreed with it:
+
+- It adds nothing a packager cannot reproduce exactly. `Cargo.lock` records
+  a SHA-256 for every crate, `cargo vendor --locked` against the tag rebuilds
+  the same tree, and cargo refuses a vendored crate whose checksum differs from
+  the lockfile's. Hosting our copy carries no extra guarantee.
+- No recipe consumes it. The Debian recipe has the packager vendor into a
+  `3.0 (quilt)` component tarball that unpacks to `vendor/`, a shape a single
+  combined archive does not have. Arch, Gentoo, Nix and Alpine fetch locked
+  crates with their own mechanisms.
+- It costs about 50 MB per release against a source tarball of about 370 KB,
+  and makes upstream the redistributor of all 306 crates. It also freezes
+  them: a crate that gets an advisory after the release (as `rustls` did
+  before 0.4.2) stays published under this project's name, with no way to
+  amend it.
+
+What it would buy is resilience against crates.io losing a crate, and yanked
+versions stay downloadable to any lockfile that pins them. If a recipe turns up
+that genuinely cannot fetch, revisit this then.
 
 **Publish your own source tarball.** GitHub's auto-generated "Source code
 (tar.gz)" is produced on demand, and its checksum has not historically been
 stable across server-side changes to archive generation. Any recipe that
 verifies a hash against it is taking a dependency on that stability. Ours costs
-423 KB.
+about 367 KB at 0.4.3.
 
 **Signing.** A signed `SHA256SUMS` is natural for a project that already
 signs its own source files. Use a **separate release key** — the guardian
 signing key attests that a file passed an audit, which is a different claim
 from "this is the artefact we published", and one key making both claims makes
 neither checkable.
+
+The release key exists as of 2026-10-02:
+`01282FB9C23478CF97A8D9041727776DA3AF9DF9`, "Haze N Sparkle Software
+Releases". Its Ed25519 primary key can only certify and expires in three
+years; signing is done by a one-year Ed25519 subkey, so a leaked subkey is
+revoked and replaced without changing the fingerprint downstream recipes pin.
+The public half is `docs/release_public.asc`. Releases from `v0.4.3` sign
+`SHA256SUMS`; tags are not signed.
 
 **Exclude `extra/` from the source tarball.** `git archive HEAD` currently
 includes seven files under `extra/`, among them `extra/dkms/xt-geoip-3.30.tar.gz`
@@ -312,6 +342,16 @@ What is fixed is the rule set, and the way to check it is to look:
 git archive HEAD --format=tar | tar -t | grep -v '/$'
 ```
 
+**Exclude the Git and GitHub plumbing** (decided 2026-10-02). `.github/`,
+`.gitignore` and `.gitattributes` serve this repository, not a build from its
+source, and nothing in `src/`, `build.rs`, `Cargo.toml` or
+`contrib/debian/rules` reads them: three files, 8,259 bytes. `.gitattributes`
+excludes itself without losing its effect, because `git archive` reads
+attributes from the tree being archived, not from what it writes. First in
+effect at `v0.4.3`: 84 files, counting `docs/release_public.asc`, added in
+the same release. (No byte count here: this file is inside the tarball it would
+be measuring.)
+
 **Build the source tarball with `git archive`, and nothing else.** That is not
 a style preference: `export-ignore` is an attribute `git archive` consults, so
 a tarball rolled with `tar czf` over a working tree — or assembled by a CI job
@@ -319,8 +359,8 @@ that copies files — silently reincludes everything the attribute was added to
 keep out. The exclusion is a property of the command, not of the release.
 
 Two consequences follow. The attribute is read from *the tree being archived*,
-so it is not retroactive: `git archive v0.3.0` still contains `extra/`, because
-that tag predates the file. And the failure mode is silent in both directions —
+so it is not retroactive: `git archive` of any commit that predates the file
+still contains `extra/`. And the failure mode is silent in both directions —
 no error, no diff, just a tarball with the wrong contents — so the release
 procedure should end with `git archive HEAD | tar -t` and an actual look at the
 list, not with an assumption that the attribute did its job.

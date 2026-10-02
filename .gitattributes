@@ -7,9 +7,10 @@
 # Two properties to know before trusting it:
 #
 #   * Attributes are read from the tree being archived, so this is NOT
-#     retroactive. `git archive v0.3.0` still carries everything, because that
-#     tag's tree has no .gitattributes. Only tags cut after this commit are
-#     covered, which matters because §3 tells recipes to build from a tag.
+#     retroactive. `git archive` of a commit older than this file still carries
+#     everything, because that tree has no .gitattributes. Only tags cut after
+#     it are covered, which matters because §3 tells recipes to build from a
+#     tag.
 #   * It binds `git archive` and nothing else. A tarball rolled with `tar czf`
 #     over a working tree ignores every line here, which is why §4 pins the
 #     release tarball to `git archive`.
@@ -41,6 +42,16 @@ extra/ export-ignore
 /DONE_tldr.md     export-ignore
 /TODO.md          export-ignore
 /CLAUDE.md        export-ignore
+
+# Git and GitHub plumbing. CI configuration and the ignore list serve this
+# repository, not a build from its source; nothing in src/, build.rs,
+# Cargo.toml or contrib/debian/rules reads them (checked 2026-10-02). This
+# file can exclude itself: `git archive` reads attributes from the tree being
+# archived, not from the files it emits, so the rule still applies to the
+# entry that carries it.
+/.github          export-ignore
+/.gitignore       export-ignore
+/.gitattributes   export-ignore
 
 # Deliberately NOT listed here: docs/xtgeoip-usage.{md,yaml} and
 # docs/spec/cli-prose.md. Nothing in the repository reads them, so a reference

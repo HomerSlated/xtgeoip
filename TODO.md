@@ -180,17 +180,16 @@ suite drives the release binary and is not covered by this.
 
 **Still to write**: seven recipes. `PKGBUILD` next.
 
-Recipes build from a git tag, since `publish = false`, and the first two tags
-are both unusable — each for a reason invisible from the tag itself. `v0.3.0`
-predates `.gitattributes`, and `export-ignore` is read from the tree being
-archived, so `git archive v0.3.0` still carries the GPL-2 xtables-addons
-tarball regardless of what `.gitattributes` says today. `v0.4.0` was cut at
-`cdba118` on 2026-09-20, hours before the emitter audit, so its
-`xtgeoip-docgen` still interpolates `install.yaml` into the manifest with no
-validation — the H-1 finding, in the packaging path itself. Both tags stand
-where they are. `v0.4.1` was the recipe target until `v0.4.2`, the first tag
-to carry a recipe, which also moves `rustls` past RUSTSEC-2026-0285;
-annotations at `private/TAG_MSG_v0.4.1` and `private/TAG_MSG_v0.4.2`.
+Recipes build from a git tag, since `publish = false`. `v0.4.2` is the first
+to carry a recipe; `v0.4.3` is the first with a published release (source
+tarball plus `SHA256SUMS` signed by the release key) and the first whose
+tarball leaves out `.github/`, `.gitignore` and `.gitattributes`. Annotations
+at `private/TAG_MSG_v0.4.2` and `private/TAG_MSG_v0.4.3`.
+The three before it were deleted from the remote and locally on 2026-10-02,
+each unsuitable for a recipe: `v0.3.0` predated `.gitattributes`, `v0.4.0` the
+emitter audit's H-1 fix, and `v0.4.1` every recipe and the RUSTSEC-2026-0285
+`rustls` bump. Never reuse those names: a clone made before the deletion still
+holds the old tags, and `git fetch` would not replace them.
 
 Still true as of 2026-09-22: no `rpm/` and no `*.spec`.
 
@@ -354,7 +353,7 @@ Deliberate omissions, kept so the next audit does not re-file them as new
 findings.
 
 - **Three INFORMATIONAL notes from `guardian_report_20260920_185130.md`**, left
-  open at the `v0.4.1` tag because all three are text or test-quality and the
+  open at the 0.4.1 release because all three are text or test-quality and the
   audit chain had converged — that round found nothing above INFORMATIONAL
   after three consecutive rounds that each found something real. Worth doing,
   not worth another round before the tag:

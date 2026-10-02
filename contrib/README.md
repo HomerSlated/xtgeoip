@@ -104,23 +104,16 @@ and an uncompressed man page. Both work; both will be flagged in review.
   extension and is a hard dependency, while the kernel module is a separate
   `xtables-addons-dkms` (or `-source`) and is a `Recommends`. Verified against
   the archive on 2026-09-22, not assumed.
-- Build from **`v0.4.2` or later**, the first tag that carries a recipe. The
-  three earlier tags are all unsuitable, for unrelated reasons, and none of
-  them announces it:
-  - `v0.3.0` predates `.gitattributes`. `export-ignore` is read from the tree
-    being archived, so `git archive v0.3.0` still carries
-    `extra/dkms/xt-geoip-3.30.tar.gz` — third-party GPL-2 source inside a
-    release whose root `LICENSE` is MIT.
-  - `v0.4.0` predates the emitter audit of 2026-09-20. Its `xtgeoip-docgen`
-    writes `install-manifest.tsv` without validating the fields it
-    interpolates, which is the finding that put a forged row — and therefore
-    an arbitrary `install` line — into the manifest a recipe consumes. Since
-    this file is that recipe's instructions, building from that tag defeats
-    the point of reading it.
-  - `v0.4.1` predates every recipe, so its tarball has no `contrib/debian/`.
-    Its `Cargo.lock` pins `rustls` 0.23.43, which RUSTSEC-2026-0285 affects
-    (fixed in 0.23.45). Because recipes build `--locked`, that is the TLS
-    library every package built from it would ship.
+- Build from **`v0.4.2` or later**, the first tag that carries a recipe.
+  Nothing older exists: `v0.3.0`, `v0.4.0` and `v0.4.1` were deleted on
+  2026-10-02, each unsuitable for a recipe. A clone made before then may
+  still hold them, because `git fetch` does not remove tags deleted upstream.
+  Do not build from any of them.
+
+  From `v0.4.3` each GitHub release carries `xtgeoip-<version>.tar.gz`, which
+  is `git archive` of the tag, and a `SHA256SUMS` signed by the release key
+  `01282FB9C23478CF97A8D9041727776DA3AF9DF9` (public half in
+  `docs/release_public.asc`).
 
   `publish = false`, so there is no crates.io tarball either way.
 - Roll the tarball with `git archive`, not `tar czf`. `export-ignore` is an
@@ -131,7 +124,7 @@ and an uncompressed man page. Both work; both will be flagged in review.
 
 | Format | State |
 |---|---|
-| deb | `debian/`, written 2026-09-22 against `v0.4.1`, first tagged in `v0.4.2`. Built end to end on 2026-09-29, both with the network and offline from a vendored component tarball. |
+| deb | `debian/`, written 2026-09-22, first tagged in `v0.4.2`. Built end to end on 2026-09-29, both with the network and offline from a vendored component tarball. |
 | pacman | next |
 | rpm, xbps, ebuild, apk, nix, SlackBuild | not started |
 
