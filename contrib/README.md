@@ -139,7 +139,8 @@ and an uncompressed man page. Both work; both will be flagged in review.
 | pacman | `arch/PKGBUILD`, written 2026-10-02. **Not built**: no Arch system was available. Its shell logic was exercised outside makepkg against the v0.4.3 release (signature, checksum, manifest loop, both `*)` arms), which is not a build. Pins v0.4.3. |
 | rpm | `rpm/xtgeoip.spec`, written 2026-10-02. **Not built**: no RPM system was available. Its `%install` scriptlet was run under `sh` against the v0.4.3 release (every manifest row, the generated `%files` list, both `*)` arms, and the refusal of a space or glob in `dest`), which is not a build. Distribution-neutral; `Version` tracks `Cargo.toml`. |
 | xbps | `void/srcpkgs/xtgeoip/template`, written and built 2026-10-02 on Void x86_64 (glibc) by a delegated session: `xbps-src -Q pkg` passed with 292 tests, `xlint` clean, the binary stripped, the manifest's 9 files plus the licence. Not installed, so the `make_dirs` trigger was not exercised. Pins v0.4.3. |
-| ebuild, apk, nix, SlackBuild | not started |
+| ebuild | `gentoo/net-firewall/xtgeoip/xtgeoip-0.4.3.ebuild`, written 2026-10-02. **Not built**: no Gentoo system was available. Its `src_install` was run with Portage's install helpers stubbed against the v0.4.3 release (every manifest row, both `*)` arms), which is not a build. No Manifest is kept; `LICENSE` lists only MIT, not the crates' licences. Pins v0.4.3. |
+| apk, nix, SlackBuild | not started |
 
 `debian/README.source` is the one to read before writing another: it is where
 what this recipe cost gets written down. Four things it surfaced that every
@@ -159,7 +160,11 @@ other format has to answer:
    the answers so far differ. Fedora's `%cargo_prep` is worse than `dh-cargo`:
    without a vendor directory it runs `rm -f Cargo.lock` before building
    against Fedora's packaged crates, and `%cargo_build` never passes
-   `--locked`, so the spec calls cargo itself. Void's `build_style=cargo` is
+   `--locked`, so the spec calls cargo itself. Gentoo's `cargo_src_compile`
+   does not pass `--locked` either, but it passes its arguments on, so the
+   ebuild calls `cargo_src_compile --locked`; it builds from a vendor
+   directory of exactly the crates listed in `CRATES`, generated from
+   `Cargo.lock`. Void's `build_style=cargo` is
    the exception that is safe: it runs `cargo auditable build --release
    --locked` against crates.io, so the template keeps it and replaces only
    its `do_install`, which would install every binary target.
@@ -183,11 +188,13 @@ The PKGBUILD added three more, none of which Debian raised:
    `rust-lld` cannot resolve; the PKGBUILD sets `!lto`. The detail that
    matters is fat versus slim objects: Fedora's `-flto=auto -ffat-lto-objects`
    keeps machine code beside the LTO bytecode, and the same experiment linked
-   (GCC 13, 2026-10-02). Void's defaults enable no LTO at all.
+   (GCC 13, 2026-10-02). Void's defaults enable no LTO at all, and Gentoo's
+   `cargo.eclass` runs `filter-lto` on every Rust build for this reason.
 6. **The runtime dependency may not be one package.** On Arch, xtables-addons
    is AUR-only, as two conflicting packages with no shared `provides`, so it
    is an `optdepends` naming both. "Depend on xtables-addons" is a goal; each
-   format has to find out what it can actually express.
+   format has to find out what it can actually express. Gentoo can say
+   exactly what is needed: `net-firewall/xtables-addons[xtables_addons_geoip]`.
 7. **A recipe inside the tarball cannot pin the tarball.** Formats that carry
    source checksums (PKGBUILD, APKBUILD, ebuild Manifest, SlackBuild .info)
    pin the latest published release and are moved forward after each one.
@@ -207,7 +214,8 @@ The rpm spec and the Void template added four more:
    directories from a package, so `/var/lib/xt_geoip` comes from `make_dirs`
    at install time instead, and the template fails the build if the manifest
    and `make_dirs` disagree. That line is the one restatement in any recipe
-   here, and it is guarded.
+   here, and it is guarded. Gentoo leaves empty directories undefined too;
+   the ebuild turns every `dir` row into `keepdir`.
 10. **The distribution may link a -sys crate against its own library.**
     Void's Rust helper exports `ZSTD_SYS_USE_PKG_CONFIG=1`, so the package
     links the system `libzstd` and needs `pkg-config` and `libzstd-devel` to
@@ -216,4 +224,6 @@ The rpm spec and the Void template added four more:
 11. **The binary may not be where the manifest says.** Void's cargo style
     always passes `--target`, so the release binary is under
     `target/<triple>/release/`, and the template rewrites that one source
-    path.
+    path. Gentoo's eclass does the same when it needs to and says where with
+    `cargo_target_dir`. Gentoo also puts docs under `/usr/share/doc/${PF}`,
+    so the ebuild rewrites that prefix as well.

@@ -183,8 +183,12 @@ integration suite drives the release binary and is not covered by this.
 
 **Still open:**
 
-- **Four recipes unwritten**: ebuild, apk, nix, SlackBuild.
-  `contrib/README.md` lists the eleven findings the first four produced.
+- **Three recipes unwritten**: apk, nix, SlackBuild.
+  `contrib/README.md` lists the eleven findings the first five produced.
+- **The ebuild is not built** — no Gentoo system here. Its `src_install` ran
+  with Portage's helpers stubbed, which is not a build. Owed before it could
+  go to an overlay: a `Manifest` (`ebuild ... manifest`), the crates' licences
+  in `LICENSE` (pycargoebuild), and a real build.
 - **`contrib/rpm/xtgeoip.spec` is not built** — no RPM system here. Its
   `%install` was run under `sh` outside rpmbuild, which is not a build. A real
   one would settle `openpgpverify` on Fedora, the empty-debuginfo question
@@ -199,11 +203,12 @@ integration suite drives the release binary and is not covered by this.
   shell logic was exercised outside makepkg against the v0.4.3 release, which
   is not a build. A real one would also settle `!lto` under Arch's GCC 15 (the
   failure was measured on GCC 13) and run `namcap`.
-- **After every release**, the PKGBUILD's `pkgver` and `sha256sums` and the
-  Void template's `version` and `checksum` move to the new tarball in a
-  follow-up commit. They cannot move before it: each file ships inside the
-  tarball it pins. The rpm spec's `Version` and `%changelog` move *with* the
-  release instead, and nothing checks them against `Cargo.toml` yet, as
+- **After every release**, the PKGBUILD's `pkgver` and `sha256sums` and the Void
+  template's `version` and `checksum` move to the new tarball in a follow-up
+  commit, and the ebuild is renamed with its `CRATES` regenerated from the new
+  `Cargo.lock`. They cannot move before it: each file ships inside the tarball
+  it pins. The rpm spec's `Version` and `%changelog` move *with* the release
+  instead, and nothing checks them against `Cargo.toml` yet, as
   `debian_changelog_version_matches_crate` does for Debian.
 - **sid's lintian 2.141 has not been run.** `Standards-Version: 4.7.4` rests on
   the upgrading checklist and a lintian that knows Policy only to 4.6.2.
