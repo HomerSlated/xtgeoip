@@ -169,6 +169,10 @@ jobs:
           echo xtgeoip > "$repo/profiles/repo_name"
           printf 'masters = gentoo\nthin-manifests = true\n' > "$repo/metadata/layout.conf"
           cp -r contrib/gentoo/net-firewall "$repo/"
+          # Portage reads its shipped default as well as /etc/portage, so the
+          # overlay's file alone was enough for it. pkgcheck reads only
+          # /etc/portage, and found no `gentoo` repository (run 37235252391).
+          cp /usr/share/portage/config/repos.conf /etc/portage/repos.conf/gentoo.conf
           printf '[xtgeoip]\nlocation = %s\n' "$repo" > /etc/portage/repos.conf/xtgeoip.conf
       # Downloads the tarball and every crate in CRATES, and records their
       # hashes. The Manifest is the first of the three things the ebuild owes;
@@ -226,13 +230,17 @@ jobs:
           FEATURES="$FEATURES noclean" ebuild "$(ls xtgeoip-*.ebuild)" qmerge
           xtgeoip --version
           xtgeoip --help > /dev/null
-      # Reports; does not fail the job, and neither does failing to install
-      # it. A missing metadata.xml is expected.
+      # A report: what pkgcheck finds does not change its exit status, and a
+      # missing metadata.xml is expected. If it cannot be installed or cannot
+      # run, the step shows as failed and the job carries on. The first
+      # version hid both behind `|| true`, and a pkgcheck that never ran
+      # looked the same as one with nothing to say.
       - name: pkgcheck
+        continue-on-error: true
         run: |
-          emerge --quiet --getbinpkg --oneshot dev-util/pkgcheck || exit 0
+          emerge --quiet --getbinpkg --oneshot dev-util/pkgcheck
           cd /var/db/repos/xtgeoip
-          pkgcheck scan net-firewall/xtgeoip || true
+          pkgcheck scan net-firewall/xtgeoip
       - uses: actions/upload-artifact@v4
         if: always()
         with:

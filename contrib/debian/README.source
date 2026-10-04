@@ -104,8 +104,13 @@ existing blob undecryptable. That is also why this recipe does not use
 that file, which is what you want on a build machine. If you test-build with a
 rustup toolchain in the source directory it will honour the pin and fetch
 1.98.0 — expected, not a fault of this recipe. `Build-Depends` asks for
-`rustc (>= 1.85)` because the crate is edition 2024; that is the edition's
-floor, not a tested MSRV, and upstream declares none.
+`rustc (>= 1.89)` because that is the highest `rust-version` any locked crate
+declares (aes 0.9.3, through zip), and cargo refuses to build a crate with an
+older compiler than it declares. It is not a tested MSRV, and upstream
+declares none. Until 2026-10-04 this said 1.85, edition 2024's floor, which a
+1.85 compiler would have disproved at the first `cargo build`; Portage's QA
+check found it. `contrib/README.md`, finding 12, has the command that
+recomputes it.
 
 That floor is met by Debian unstable, which the changelog targets (rustc
 1.95.0 in sid per sources.debian.org, 2026-09-29), and not by Ubuntu 24.04.

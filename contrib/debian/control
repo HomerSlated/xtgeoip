@@ -26,7 +26,7 @@ Maintainer: xtgeoip packaging <packaging@example.invalid>
 Build-Depends:
  debhelper-compat (= 13),
  cargo,
- rustc (>= 1.85),
+ rustc (>= 1.89),
 Standards-Version: 4.7.4
 Homepage: https://github.com/HomerSlated/xtgeoip
 Vcs-Git: https://github.com/HomerSlated/xtgeoip.git

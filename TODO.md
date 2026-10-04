@@ -7,7 +7,7 @@ close here move to the end of `DONE.md`, under *Closed after the archive*;
 there is no `TODO_tldr.md` any more.
 
 Opened 2026-09-06, brought up to date 2026-10-04. What is here now: the open
-packaging work (three recipes unwritten, the ebuild unbuilt), one wording
+packaging work (three recipes unwritten, every written one built), one wording
 correction waiting for its file to change, the informational findings from two
 guardian audits, one policy question, and the three lists that are normative
 rather than historical.
@@ -185,10 +185,20 @@ integration suite drives the release binary and is not covered by this.
 
 - **Three recipes unwritten**: apk, nix, SlackBuild.
   `contrib/README.md` lists the eleven findings the first five produced.
-- **The ebuild is not built** — no Gentoo system here. Its `src_install` ran
-  with Portage's helpers stubbed, which is not a build. Owed before it could
-  go to an overlay: a `Manifest` (`ebuild ... manifest`), the crates' licences
-  in `LICENSE` (pycargoebuild), and a real build.
+- **The ebuild is built and merged, in a container.** `packaging.yml` run
+  37235252391 (2026-10-04); `contrib/README.md`'s status table says what it
+  proved. The Manifest it generated is in `private/gh-runs/37235252391/`, and
+  is not kept in the tree. Owed before it could go to an overlay:
+  - the crates' licences in `LICENSE` (pycargoebuild);
+  - `pkgcheck`, which did not start in that run;
+  - Portage's QA notice asking for a crate tarball in place of 306 `CRATES`,
+    which somebody would have to host (upstream ships none: packaging.md §4);
+  - `RDEPEND`, which `ebuild` does not resolve.
+- **Nothing checks the compiler floor the recipes state.** It is 1.89, from
+  the lockfile (`contrib/README.md`, finding 12), in `debian/control`, the rpm
+  spec and the ebuild. A lockfile change can raise it and no test would say.
+  `Cargo.toml` declares no `rust-version`; declaring one would let cargo
+  enforce it, and is a decision about upstream, not about packaging.
 - **`contrib/rpm/xtgeoip.spec` is built but not installed.** Fedora Copr
   build 11073816 (`hazensparkle/xtgeoip`, 2026-10-04) succeeded for
   `fedora-44-x86_64` and `opensuse-tumbleweed-x86_64`; `contrib/README.md`'s

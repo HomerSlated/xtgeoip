@@ -1,9 +1,13 @@
 # xtgeoip-0.4.3.ebuild — build xtgeoip as a Gentoo package.
 #
-# NOT BUILT. Written 2026-10-02 from cargo.eclass (gentoo.git master), the
-# devmanual and the net-firewall/xtables-addons ebuild, and never run through
-# Portage: there was no Gentoo system to run it on. Read contrib/README.md's
-# status table before relying on it.
+# Written 2026-10-02 from cargo.eclass (gentoo.git master), the devmanual and
+# the net-firewall/xtables-addons ebuild. Built 2026-10-04 in a gentoo/stage3
+# container by .github/workflows/packaging.yml (run 37235252391, at commit
+# a45ef3f): `ebuild ... manifest`, then `clean test install` and `qmerge`,
+# with rust-bin 1.97.1. Since then RUST_MIN_VER is 1.89.0, as that build's QA
+# notice asked. `ebuild` resolves no dependencies, so RDEPEND was not
+# exercised, and pkgcheck did not run. Read contrib/README.md's status table
+# before relying on it.
 #
 # Not in ::gentoo or any overlay. Copy it into an overlay as
 # net-firewall/xtgeoip/ and run `ebuild xtgeoip-0.4.3.ebuild manifest` there;
@@ -331,8 +335,13 @@ CRATES="
 	zstd@0.13.3
 "
 
-# edition 2024 sets the floor; upstream declares no tested MSRV.
-RUST_MIN_VER="1.85.0"
+# The floor is the highest `rust-version` any locked crate declares, which at
+# v0.4.3 is 1.89 (aes 0.9.3, through zip). Not edition 2024's 1.85: cargo
+# refuses to build a crate with an older compiler than it declares. Upstream
+# declares no MSRV of its own. Recompute after a lockfile change:
+#   cargo metadata --format-version 1 --locked | jq -r \
+#     '[.packages[].rust_version | select(.)] | max_by(split(".") | map(tonumber))'
+RUST_MIN_VER="1.89.0"
 
 inherit cargo
 

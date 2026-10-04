@@ -5,8 +5,9 @@
 # openSUSE's package archives. Built 2026-10-04 on Fedora Copr (build
 # 11073816 of hazensparkle/xtgeoip) for fedora-44-x86_64 and
 # opensuse-tumbleweed-x86_64, as it stood at commit e5f35a4. Since then:
-# comments, the changelog wording, and the `license` arm in %%install, which
-# no row of v0.4.3's manifest reaches. That build took the default path, with
+# comments, the changelog wording, the `license` arm in %%install, which no
+# row of v0.4.3's manifest reaches, and the rust floor, 1.85 then and 1.89
+# now (both chroots had 1.98.1). That build took the default path, with
 # network access. NOT BUILT: `--with vendor`. NOT DONE: an
 # install, an upgrade, rpmlint. Read contrib/README.md's status table before
 # relying on it.
@@ -61,9 +62,14 @@ Source10:       %{name}-%{version}-vendor.tar.xz
 
 %{?rust_arches:ExclusiveArch: %{rust_arches}}
 
-# edition 2024 sets the floor; upstream declares no tested MSRV.
+# The floor is the highest `rust-version` any locked crate declares, which at
+# v0.4.3 is 1.89 (aes 0.9.3, through zip). Not edition 2024's 1.85: cargo
+# refuses to build a crate with an older compiler than it declares. Upstream
+# declares no MSRV of its own. Recompute after a lockfile change:
+#   cargo metadata --format-version 1 --locked | jq -r \
+#     '[.packages[].rust_version | select(.)] | max_by(split(".") | map(tonumber))'
 BuildRequires:  cargo
-BuildRequires:  rust >= 1.85
+BuildRequires:  rust >= 1.89
 # aws-lc-sys compiles C. Not cmake: it takes its pregenerated-source cc path.
 BuildRequires:  gcc
 %if 0%{?fedora}
