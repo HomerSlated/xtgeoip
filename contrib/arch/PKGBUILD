@@ -1,9 +1,11 @@
 # PKGBUILD — build xtgeoip as an Arch Linux package.
 #
-# NOT BUILT. Written 2026-10-02 against Arch's makepkg.conf and pacman source
-# as of that date, and never run through makepkg: there was no Arch system to
-# run it on. Read contrib/README.md's status table before relying on it. The
-# Debian recipe in contrib/debian/ is the one that has been built end to end.
+# Written 2026-10-02 against Arch's makepkg.conf and pacman source as of that
+# date. Built 2026-10-04 in an archlinux:base-devel container by
+# .github/workflows/packaging.yml (run 37231823079, at commit 46eb0e7):
+# makepkg, namcap, and `pacman -U`. Since then `depends` names libgcc, as
+# namcap asked, and package() has a `license` arm that no row of v0.4.3's
+# manifest reaches. Read contrib/README.md's status table before relying on it.
 #
 # Not in the AUR, and the Maintainer line below is a placeholder. Whoever
 # submits it owns that line; it is not upstream.
@@ -27,7 +29,10 @@ pkgdesc='GeoLite2 database builder for the xt_geoip iptables match'
 arch=('x86_64')
 url='https://github.com/HomerSlated/xtgeoip'
 license=('MIT')
-depends=('glibc' 'gcc-libs')
+# libgcc, not gcc-libs: Arch split that package, and the binary needs only
+# libgcc_s.so.1. namcap 3.6.0 reported gcc-libs as "may not be needed" and
+# libgcc as "detected and implicitly satisfied".
+depends=('glibc' 'libgcc')
 makedepends=('cargo')
 # Optional rather than required, deliberately. xtgeoip writes the database
 # files whether or not the match is installed; xtables-addons is what reads
@@ -50,9 +55,11 @@ backup=('etc/logrotate.d/xtgeoip')
 #             through CFLAGS, and the result does not link: with Arch's exact
 #             CFLAGS plus -flto=auto the release build failed here with
 #             `rust-lld: error: undefined symbol: aws_lc_0_45_0_RSA_free`, and
-#             the same flags without it linked (2026-10-02, GCC 13; Arch ships
-#             GCC 15). The Rust package guidelines prescribe !lto for mixed
-#             Rust/C builds. Rust's own optimisation is unaffected.
+#             the same flags without it linked (2026-10-02, GCC 13, not on
+#             Arch). On Arch itself, with GCC 16.2.1, the build with !lto
+#             linked (2026-10-04); without it has not been tried there. The
+#             Rust package guidelines prescribe !lto for mixed Rust/C builds.
+#             Rust's own optimisation is unaffected.
 options=('strip' 'zipman' 'emptydirs' '!lto')
 
 _url="https://github.com/HomerSlated/xtgeoip/releases/download/v$pkgver"

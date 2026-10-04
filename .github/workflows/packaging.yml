@@ -26,6 +26,10 @@ on:
         type: choice
         options: [arch, gentoo, both]
         default: arch
+      lto:
+        description: "Arch: build without !lto, to see whether it is still needed"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -57,6 +61,15 @@ jobs:
           install -d -o build -g build /home/build/pkg
           install -m 0644 -o build -g build contrib/arch/PKGBUILD /home/build/pkg/
           install -m 0644 -o build -g build docs/release_public.asc /home/build/
+      # An experiment, not a build to keep: the PKGBUILD sets !lto because
+      # Arch's -flto=auto broke the link through aws-lc-sys, measured off
+      # Arch with an older GCC. This asks Arch's own compiler.
+      - name: Remove !lto (experiment)
+        if: inputs.lto
+        run: |
+          sed -i "s/ '!lto')$/)/" /home/build/pkg/PKGBUILD
+          grep -n '^options=' /home/build/pkg/PKGBUILD
+          ! grep -q "^options=.*'!lto'" /home/build/pkg/PKGBUILD
       # What the PKGBUILD tells a user to do: the key is not on a keyserver.
       - name: Import the release key and check its fingerprint
         run: |
@@ -105,8 +118,13 @@ jobs:
           echo "$rows manifest rows present at their modes"
           [ -f "$root/usr/share/licenses/xtgeoip/LICENSE" ]
           gzip -t "$root/usr/share/man/man1/xtgeoip.1.gz"
+      # The image's pacman.conf has NoExtract lines for usr/share/doc and
+      # usr/share/man, to keep it small. With them, the install below skips
+      # the README and the man page and `pacman -Qkk` reports both missing,
+      # which is the image and not the package (run 37231823079).
       - name: Install it and run it
         run: |
+          sed -i '/^NoExtract/d' /etc/pacman.conf
           pacman -U --noconfirm "$(ls /home/build/pkg/xtgeoip-[0-9]*.pkg.tar.zst)"
           xtgeoip --version
           xtgeoip --help > /dev/null
