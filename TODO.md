@@ -229,10 +229,12 @@ integration suite drives the release binary and is not covered by this.
   `license` row with no path (packaging.md §6.3), and every recipe has an arm
   for it. Owed after v0.4.4: a rebuild of each recipe that has been built, to
   see one copy, and lintian without `extra-license-file`.
-- **`contrib/void/` is built but not installed.** Built on Void x86_64 glibc
-  on 2026-10-02 by a delegated session; the `make_dirs` trigger and
-  `conf_files` handling on upgrade were not exercised, and musl was not
-  tried.
+- **`contrib/void/` is built, installed and run.** Built on Void x86_64 glibc
+  on 2026-10-02 by a delegated session, installed there the next day, and
+  run; `contrib/README.md`'s status table has the detail, which is that
+  session's report and was not seen from here. Still not exercised: the
+  `make_dirs` trigger (not confirmed either way), `conf_files` handling on
+  upgrade, and musl.
 - **`contrib/arch/PKGBUILD` is built and installed, in a container.**
   `packaging.yml` run 37234035970 (2026-10-04) passed every step;
   `contrib/README.md`'s status table says what it proved. `!lto` is settled:
