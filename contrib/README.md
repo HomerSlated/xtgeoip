@@ -160,11 +160,22 @@ other format has to answer:
    the answers so far differ. Fedora's `%cargo_prep` is worse than `dh-cargo`:
    without a vendor directory it runs `rm -f Cargo.lock` before building
    against Fedora's packaged crates, and `%cargo_build` never passes
-   `--locked`, so the spec calls cargo itself. Gentoo's `cargo_src_compile`
-   does not pass `--locked` either, but it passes its arguments on, so the
-   ebuild calls `cargo_src_compile --locked`; it builds from a vendor
-   directory of exactly the crates listed in `CRATES`, generated from
-   `Cargo.lock`. Void's `build_style=cargo` is
+   `--locked`, so the spec calls cargo itself. openSUSE's
+   [Rust packaging page](https://en.opensuse.org/openSUSE:Packaging_Rust_Software)
+   (read 2026-10-04) reaches the same verdict from the other side: a spec
+   meant for Fedora too should avoid Fedora's macros, and `cargo_prep`
+   "especially is known to break vendoring". openSUSE's own route has the
+   fault in a different place. Its vendor tarball comes from the
+   `cargo_vendor` source service, which defaults to `update=true` and
+   `respect-lockfile=false` and ships the resulting `Cargo.lock` inside the
+   tarball; that page's example sets `update` to `true` and offers `false`
+   only as a cure for dependency conflicts. A build there needs both
+   parameters reversed, or a tarball rolled by hand with `cargo vendor
+   --locked`, which is what the spec's `--with vendor` expects. Gentoo's
+   `cargo_src_compile` does not pass `--locked` either, but it passes its
+   arguments on, so the ebuild calls `cargo_src_compile --locked`; it builds
+   from a vendor directory of exactly the crates listed in `CRATES`,
+   generated from `Cargo.lock`. Void's `build_style=cargo` is
    the exception that is safe: it runs `cargo auditable build --release
    --locked` against crates.io, so the template keeps it and replaces only
    its `do_install`, which would install every binary target.
