@@ -287,8 +287,11 @@ The first Portage build added one more, and it was wrong in three recipes:
     with `--locked`: Rust 1.88.0 is refused before anything compiles
     (`aes@0.9.3 requires rustc 1.89`), and 1.89.0 builds and passes every
     test. So the number in a recipe is a courtesy to the packager, not the
-    enforcement, and 1.89 is the floor and not merely a floor. Recompute it
-    whenever `Cargo.lock` changes:
+    enforcement, and 1.89 is the floor and not merely a floor. `Cargo.toml`
+    now declares it as `rust-version`, so that the floor is decided there
+    and not by the lockfile, and
+    `tests::recipes_state_the_declared_compiler_floor` fails if one of the
+    three recipes says otherwise. Recompute it whenever `Cargo.lock` changes:
 
     ```sh
     cargo metadata --format-version 1 --locked | jq -r \

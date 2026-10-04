@@ -2650,6 +2650,58 @@ mod tests {
         );
     }
 
+    /// Three recipes restate `rust-version`, and each must say what
+    /// `Cargo.toml` says.
+    ///
+    /// Debian's `Build-Depends`, the rpm spec's `BuildRequires` and the
+    /// ebuild's `RUST_MIN_VER` each name the oldest compiler the package
+    /// builds with. Until `Cargo.toml` declared one there was nothing to
+    /// compare them with, and all three said 1.85 while the lockfile required
+    /// 1.89; Portage's QA check found it, not anything here.
+    ///
+    /// Cargo enforces the real floor whatever a recipe says, so a stale
+    /// number breaks no build. It tells a packager that a compiler will do
+    /// when it will not. The PKGBUILD and the Void template state no floor
+    /// and are not checked.
+    #[test]
+    fn recipes_state_the_declared_compiler_floor() {
+        let floor = env!("CARGO_PKG_RUST_VERSION");
+        assert!(!floor.is_empty(), "Cargo.toml declares no rust-version");
+
+        let ebuild = std::fs::read_dir("contrib/gentoo/net-firewall/xtgeoip")
+            .expect("the ebuild directory is missing")
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .find(|p| p.extension().is_some_and(|x| x == "ebuild"))
+            .expect("no ebuild found");
+
+        // Each needle is the whole restatement, closing delimiter included,
+        // so that `1.89` cannot be satisfied by `1.890` or by a comment that
+        // merely mentions the number.
+        let restatements = [
+            (
+                std::path::PathBuf::from("contrib/debian/control"),
+                format!(" rustc (>= {floor}),"),
+            ),
+            (
+                std::path::PathBuf::from("contrib/rpm/xtgeoip.spec"),
+                format!("BuildRequires:  rust >= {floor}\n"),
+            ),
+            (ebuild, format!("RUST_MIN_VER=\"{floor}.0\"\n")),
+        ];
+        for (recipe, needle) in &restatements {
+            let text = std::fs::read_to_string(recipe)
+                .unwrap_or_else(|e| panic!("{}: {e}", recipe.display()));
+            assert!(
+                text.contains(needle.as_str()),
+                "{} does not state the compiler floor as {:?}; Cargo.toml's \
+                 rust-version is {floor}, so move both",
+                recipe.display(),
+                needle.trim()
+            );
+        }
+    }
+
     fn example(valid: bool) -> Example {
         Example {
             case_id: Some("X-001".into()),

@@ -2,6 +2,18 @@
 name = "xtgeoip"
 version = "0.4.3"
 edition = "2024"
+# The oldest compiler this builds with, measured on 2026-10-04: 1.89.0 builds
+# and passes every test, and 1.88.0 is refused. It is not the edition's floor
+# (1.85) but the highest rust-version any locked crate declares, aes 0.9.3
+# through zip. Cargo would refuse an older compiler without this line; it is
+# declared so that the floor is decided here and not by whatever the lockfile
+# last pulled in. With edition 2024's resolver, `cargo update` now prefers
+# dependency versions that still build on it, which can hold one back from a
+# release that needs a newer compiler: raising this is then a decision, made
+# here, and contrib/'s three recipes that restate it are moved in the same
+# commit (tests::recipes_state_the_declared_compiler_floor). Not the
+# development toolchain, which rust-toolchain.toml pins separately.
+rust-version = "1.89"
 authors = ["Homer at hazensparkle.co.uk"]
 repository = "https://github.com/HomerSlated/xtgeoip"
 license = "MIT"

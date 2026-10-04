@@ -194,15 +194,18 @@ integration suite drives the release binary and is not covered by this.
   - Portage's QA notice asking for a crate tarball in place of 306 `CRATES`,
     which somebody would have to host (upstream ships none: packaging.md §4);
   - `RDEPEND`, which `ebuild` does not resolve.
-- **Nothing checks the compiler floor the recipes state.** It is 1.89, from
-  the lockfile (`contrib/README.md`, finding 12), in `debian/control`, the rpm
-  spec and the ebuild. Cargo enforces the real floor itself, so a stale
-  number in a recipe misleads a packager and breaks nothing. But a lockfile
-  change can raise the floor and no test would say. `Cargo.toml` declares no
-  `rust-version`. Declaring one would fix the floor in place (edition 2024's
-  resolver then prefers dependency versions that still build on it) and give
-  a test something to compare the recipes with; it can also hold a dependency
-  back from a release that needs a newer compiler. Undecided.
+- **Nothing builds on the declared compiler floor.** `Cargo.toml` declares
+  `rust-version = "1.89"` since 2026-10-04, measured that day by hand (1.89.0
+  builds and passes every test; 1.88.0 is refused), and
+  `tests::recipes_state_the_declared_compiler_floor` ties `debian/control`,
+  the rpm spec and the ebuild to it. What keeps the declaration true
+  afterwards is indirect: clippy's `incompatible_msrv` for this crate's own
+  code, and the resolver for dependencies, which prefers versions that build
+  on 1.89 at `cargo update`. Neither is a build. A CI job running
+  `cargo +1.89.0 check --locked` would be, at the cost of a second toolchain
+  in CI. Also: the resolver can now hold a dependency back from a release
+  that needs a newer compiler, a security fix included; raising
+  `rust-version` to take it is a decision to make then.
 - **`contrib/rpm/xtgeoip.spec` is built but not installed.** Fedora Copr
   build 11073816 (`hazensparkle/xtgeoip`, 2026-10-04) succeeded for
   `fedora-44-x86_64` and `opensuse-tumbleweed-x86_64`; `contrib/README.md`'s

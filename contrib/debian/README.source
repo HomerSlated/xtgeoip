@@ -106,8 +106,10 @@ rustup toolchain in the source directory it will honour the pin and fetch
 1.98.0 — expected, not a fault of this recipe. `Build-Depends` asks for
 `rustc (>= 1.89)` because that is the highest `rust-version` any locked crate
 declares (aes 0.9.3, through zip), and cargo refuses to build a crate with an
-older compiler than it declares. It is not a tested MSRV, and upstream
-declares none. Until 2026-10-04 this said 1.85, edition 2024's floor, which a
+older compiler than it declares. It is measured: 1.89.0 builds and passes
+every test, and 1.88.0 is refused. From v0.4.4 upstream declares it as
+`rust-version` in `Cargo.toml`, and a test fails if `debian/control`
+disagrees. Until 2026-10-04 this said 1.85, edition 2024's floor, which a
 1.85 compiler would have disproved at the first `cargo build`; Portage's QA
 check found it. `contrib/README.md`, finding 12, has the command that
 recomputes it.

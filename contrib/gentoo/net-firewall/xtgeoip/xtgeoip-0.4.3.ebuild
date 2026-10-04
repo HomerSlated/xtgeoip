@@ -337,7 +337,8 @@ CRATES="
 # The floor is the highest `rust-version` any locked crate declares, which at
 # v0.4.3 is 1.89 (aes 0.9.3, through zip). Not edition 2024's 1.85: cargo
 # refuses to build a crate with an older compiler than it declares. Upstream
-# declares no MSRV of its own. Recompute after a lockfile change:
+# declares the same number as `rust-version` in Cargo.toml from v0.4.4, and a
+# test there fails if this line disagrees. Recompute after a lockfile change:
 #   cargo metadata --format-version 1 --locked | jq -r \
 #     '[.packages[].rust_version | select(.)] | max_by(split(".") | map(tonumber))'
 RUST_MIN_VER="1.89.0"
