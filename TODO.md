@@ -186,19 +186,23 @@ integration suite drives the release binary and is not covered by this.
 - **Three recipes unwritten**: apk, nix, SlackBuild.
   `contrib/README.md` lists the eleven findings the first five produced.
 - **The ebuild is built and merged, in a container.** `packaging.yml` run
-  37235252391 (2026-10-04); `contrib/README.md`'s status table says what it
-  proved. The Manifest it generated is in `private/gh-runs/37235252391/`, and
+  37240800966 (2026-10-04); `contrib/README.md`'s status table says what it
+  proved. The Manifest it generated is in `private/gh-runs/37240800966/`, and
   is not kept in the tree. Owed before it could go to an overlay:
   - the crates' licences in `LICENSE` (pycargoebuild);
-  - `pkgcheck`, which did not start in that run;
+  - a `metadata.xml`, which is all `pkgcheck scan` asked for;
   - Portage's QA notice asking for a crate tarball in place of 306 `CRATES`,
     which somebody would have to host (upstream ships none: packaging.md §4);
   - `RDEPEND`, which `ebuild` does not resolve.
 - **Nothing checks the compiler floor the recipes state.** It is 1.89, from
   the lockfile (`contrib/README.md`, finding 12), in `debian/control`, the rpm
-  spec and the ebuild. A lockfile change can raise it and no test would say.
-  `Cargo.toml` declares no `rust-version`; declaring one would let cargo
-  enforce it, and is a decision about upstream, not about packaging.
+  spec and the ebuild. Cargo enforces the real floor itself, so a stale
+  number in a recipe misleads a packager and breaks nothing. But a lockfile
+  change can raise the floor and no test would say. `Cargo.toml` declares no
+  `rust-version`. Declaring one would fix the floor in place (edition 2024's
+  resolver then prefers dependency versions that still build on it) and give
+  a test something to compare the recipes with; it can also hold a dependency
+  back from a release that needs a newer compiler. Undecided.
 - **`contrib/rpm/xtgeoip.spec` is built but not installed.** Fedora Copr
   build 11073816 (`hazensparkle/xtgeoip`, 2026-10-04) succeeded for
   `fedora-44-x86_64` and `opensuse-tumbleweed-x86_64`; `contrib/README.md`'s

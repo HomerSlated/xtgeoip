@@ -2,12 +2,11 @@
 #
 # Written 2026-10-02 from cargo.eclass (gentoo.git master), the devmanual and
 # the net-firewall/xtables-addons ebuild. Built 2026-10-04 in a gentoo/stage3
-# container by .github/workflows/packaging.yml (run 37235252391, at commit
-# a45ef3f): `ebuild ... manifest`, then `clean test install` and `qmerge`,
-# with rust-bin 1.97.1. Since then RUST_MIN_VER is 1.89.0, as that build's QA
-# notice asked. `ebuild` resolves no dependencies, so RDEPEND was not
-# exercised, and pkgcheck did not run. Read contrib/README.md's status table
-# before relying on it.
+# container by .github/workflows/packaging.yml (run 37240800966, at commit
+# 9cd7980): `ebuild ... manifest`, then `clean test install`, `qmerge` and
+# `pkgcheck scan`, with rust-bin 1.97.1. Only comments have changed since.
+# `ebuild` resolves no dependencies, so RDEPEND was not exercised. Read
+# contrib/README.md's status table before relying on it.
 #
 # Not in ::gentoo or any overlay. Copy it into an overlay as
 # net-firewall/xtgeoip/ and run `ebuild xtgeoip-0.4.3.ebuild manifest` there;
