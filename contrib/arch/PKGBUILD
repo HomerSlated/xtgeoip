@@ -119,12 +119,13 @@ package() {
 		case "$kind" in
 			dir) install -d -m "$mode" -- "$pkgdir$dest" || return 1 ;;
 			file) install -D -m "$mode" -- "$src" "$pkgdir$dest" || return 1 ;;
+			license) ;;                  # installed below, where Arch wants it
 			*) error "$manifest: unknown kind '$kind'"; return 1 ;;
 		esac
 	done < <(sed -e '/^#/d' -e '/^$/d' "$manifest")
 
-	# Not in the manifest, because where a licence goes is per-format: Debian
-	# reads debian/copyright and flags this very file as redundant. Arch wants
-	# the MIT text here, since each MIT instance carries its own copyright line.
+	# The manifest's `license` row names this file and no path, because where
+	# a licence goes is per-format. Arch wants the MIT text here, since each
+	# MIT instance carries its own copyright line.
 	install -D -m 0644 -- LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

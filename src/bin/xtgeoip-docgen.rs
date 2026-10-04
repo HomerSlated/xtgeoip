@@ -159,12 +159,14 @@ fn render_outputs(
 /// The install set, declared in `docs/spec/install.yaml`.
 ///
 /// One declaration, so the nine files and two directories are not restated
-/// once per recipe format. See `docs/design/packaging.md` §6.3.
+/// once per recipe format. See `docs/design/packaging.md` §6.3. Eight of the
+/// nine are `files`; the ninth is the licence, which has no path of its own.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct InstallSpec {
     version: u32,
     files: Vec<InstallFile>,
+    licenses: Vec<InstallLicense>,
     directories: Vec<InstallDir>,
 }
 
@@ -185,6 +187,18 @@ struct InstallFile {
     summary: String,
 }
 
+/// A licence text the package must carry. No `dest` and no `mode`: where a
+/// licence goes, and whether it is a file at all, is each format's own rule.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InstallLicense {
+    source: String,
+    /// As for a file. A licence is `tracked` today; nothing requires it.
+    producer: String,
+    #[allow(dead_code)]
+    summary: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct InstallDir {
@@ -194,7 +208,7 @@ struct InstallDir {
     summary: String,
 }
 
-const INSTALL_SCHEMA_VERSION: u32 = 1;
+const INSTALL_SCHEMA_VERSION: u32 = 2;
 const PRODUCERS: [&str; 3] = ["tracked", "generated", "build"];
 const TRANSFORMS: [&str; 3] = ["none", "gzip", "strip"];
 
@@ -215,6 +229,11 @@ fn validate_install(install: &InstallSpec) -> anyhow::Result<()> {
     }
     if install.files.is_empty() {
         anyhow::bail!("install.yaml declares no files");
+    }
+    // MIT requires the text to accompany every copy. An empty list would let
+    // every recipe's `license` arm go unreached, and a package ship without.
+    if install.licenses.is_empty() {
+        anyhow::bail!("install.yaml declares no licence");
     }
 
     let well_formed_mode = |m: &str| {
@@ -335,6 +354,18 @@ fn validate_install(install: &InstallSpec) -> anyhow::Result<()> {
             anyhow::bail!("{}: mode {:?} is not octal 0nnn", f.source, f.mode);
         }
     }
+    for l in &install.licenses {
+        no_control("licence source", &l.source)?;
+        plain_relative("licence source", &l.source)?;
+        no_control("licence producer", &l.producer)?;
+        if !PRODUCERS.contains(&l.producer.as_str()) {
+            anyhow::bail!(
+                "{}: unknown producer {:?} (expected one of {PRODUCERS:?})",
+                l.source,
+                l.producer
+            );
+        }
+    }
     for d in &install.directories {
         no_control("directory dest", &d.dest)?;
         no_control("directory mode", &d.mode)?;
@@ -377,13 +408,22 @@ fn generate_install_manifest(install: &InstallSpec) -> anyhow::Result<String> {
     // value can satisfy every semantic rule it enforces and still carry a
     // delimiter. Both layers must hold independently, and this one is now
     // genuinely independent rather than nominally so.
-    let mut rows: Vec<String> =
-        Vec::with_capacity(install.files.len() + install.directories.len());
+    let mut rows: Vec<String> = Vec::with_capacity(
+        install.files.len()
+            + install.licenses.len()
+            + install.directories.len(),
+    );
     for f in &install.files {
         rows.push(format!(
             "file\t{}\t{}\t{}\t{}",
             f.source, f.transform, f.dest, f.mode
         ));
+    }
+    // Three `-` fields, so the row is still five wide and a recipe's
+    // `read -r kind src transform dest mode` needs no second shape. The `-`
+    // in `dest` and `mode` is the point: the format decides both.
+    for l in &install.licenses {
+        rows.push(format!("license\t{}\t-\t-\t-", l.source));
     }
     for d in &install.directories {
         rows.push(format!("dir\t-\t-\t{}\t{}", d.dest, d.mode));
@@ -2234,6 +2274,11 @@ mod tests {
                 mode: "0755".to_string(),
                 summary: "The program.".to_string(),
             }],
+            licenses: vec![InstallLicense {
+                source: "LICENSE".to_string(),
+                producer: "tracked".to_string(),
+                summary: "MIT.".to_string(),
+            }],
             directories: vec![],
         };
 
@@ -2329,6 +2374,43 @@ mod tests {
             err.to_string().contains("tab-separated fields"),
             "refused for the wrong reason: {err}"
         );
+
+        // A licence's `source` is the same operand in the same loop, and is
+        // written into the same line. Both layers again, with the same
+        // carriers, so that the second list cannot be the unguarded one.
+        let licensed = |source: &str| {
+            let mut spec = sound(benign);
+            spec.licenses[0].source = source.to_string();
+            spec
+        };
+        for bad in [forged.as_str(), row.as_str(), "-t/etc", "/etc/shadow", ""]
+        {
+            assert!(
+                validate_install(&licensed(bad)).is_err(),
+                "licence source {bad:?} must be refused"
+            );
+        }
+        let err = generate_install_manifest(&licensed(&forged))
+            .expect_err("the emitter must refuse a forged licence row");
+        assert!(
+            err.to_string().contains("line break"),
+            "refused for the wrong reason: {err}"
+        );
+        let err = generate_install_manifest(&licensed(&row))
+            .expect_err("a tab in a licence source must be refused");
+        assert!(
+            err.to_string().contains("tab-separated fields"),
+            "refused for the wrong reason: {err}"
+        );
+
+        // And the list may not be empty: every recipe's `license` arm would
+        // go unreached, and a package would ship without the text.
+        let mut bare = sound(benign);
+        bare.licenses.clear();
+        assert!(
+            validate_install(&bare).is_err(),
+            "an install set with no licence must be refused"
+        );
     }
 
     /// Every source the install set declares must actually be there.
@@ -2379,11 +2461,30 @@ mod tests {
             }
         }
 
+        for l in &install.licenses {
+            assert_eq!(l.producer, "tracked", "{}: not tracked", l.source);
+            assert!(
+                std::path::Path::new(&l.source).exists(),
+                "licence {} is declared but is not on disk",
+                l.source
+            );
+        }
+
+        // Nine in all: eight at paths the manifest names, and the licence,
+        // which each format places itself.
         assert_eq!(
-            install.files.len(),
+            install.files.len() + install.licenses.len(),
             9,
-            "packaging.md §1 counts nine files; install.yaml declares {}",
-            install.files.len()
+            "packaging.md §1 counts nine files; install.yaml declares {} \
+             files and {} licences",
+            install.files.len(),
+            install.licenses.len()
+        );
+        assert_eq!(
+            install.licenses.len(),
+            1,
+            "packaging.md §1 counts one licence; install.yaml declares {}",
+            install.licenses.len()
         );
         assert_eq!(
             install.directories.len(),
@@ -2441,6 +2542,81 @@ mod tests {
                 kind != "dir" || transform == "-",
                 "a directory row carries transform {transform:?}, not `-`"
             );
+
+            // The same reminder for `kind`, which this test did not check
+            // until `license` became the third.
+            assert!(
+                matches!(kind, "file" | "dir" | "license"),
+                "{kind:?} is not an arm of the recipes' case statement; teach \
+                 every recipe in contrib/ about it before declaring it here"
+            );
+            if kind == "license" {
+                assert_eq!(
+                    (transform, dest, row[4]),
+                    ("-", "-", "-"),
+                    "a licence row states a transform, dest or mode; each \
+                     format decides those, and a recipe would start to trust \
+                     whatever is written here"
+                );
+            }
+        }
+    }
+
+    /// Every recipe has an arm for every kind the manifest uses.
+    ///
+    /// The `*)` arm makes a missing one fail the build, but only when
+    /// somebody runs that recipe, and most of them cannot be run here. This
+    /// fails at `cargo test` instead. It is why `license` could be added as a
+    /// kind at all: a recipe has to say what it does with the licence, even
+    /// where that is nothing, and one that says nothing is caught here.
+    ///
+    /// It checks that the arm exists, not what it does. `contrib/README.md`
+    /// is on the list for its reference loop, which the next recipe is copied
+    /// from.
+    #[test]
+    fn every_recipe_has_an_arm_for_every_kind() {
+        let tsv =
+            std::fs::read_to_string("docs/generated/install-manifest.tsv")
+                .expect("manifest missing");
+        let kinds: std::collections::BTreeSet<&str> = tsv
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+            .filter_map(|l| l.split('\t').next())
+            .collect();
+        assert!(kinds.contains("license"), "no licence row: {kinds:?}");
+
+        let mut recipes: Vec<std::path::PathBuf> = [
+            "contrib/README.md",
+            "contrib/debian/rules",
+            "contrib/rpm/xtgeoip.spec",
+            "contrib/arch/PKGBUILD",
+            "contrib/void/srcpkgs/xtgeoip/template",
+        ]
+        .iter()
+        .map(std::path::PathBuf::from)
+        .collect();
+        // The ebuild's name carries the version, so it is found, not named.
+        let ebuilds: Vec<_> =
+            std::fs::read_dir("contrib/gentoo/net-firewall/xtgeoip")
+                .expect("the ebuild directory is missing")
+                .filter_map(Result::ok)
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|x| x == "ebuild"))
+                .collect();
+        assert!(!ebuilds.is_empty(), "no ebuild found");
+        recipes.extend(ebuilds);
+
+        for recipe in &recipes {
+            let text = std::fs::read_to_string(recipe)
+                .unwrap_or_else(|e| panic!("{}: {e}", recipe.display()));
+            for kind in &kinds {
+                assert!(
+                    text.contains(&format!("{kind})")),
+                    "{} has no `{kind})` arm; its loop would stop the build \
+                     at the first {kind} row",
+                    recipe.display()
+                );
+            }
         }
     }
 

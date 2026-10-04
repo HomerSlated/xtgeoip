@@ -19,6 +19,7 @@ The manifest is tab-separated, one entry per line, comments begin with `#`:
 ```
 kind    source                                 transform  dest                          mode
 file    target/release/xtgeoip                 strip      /usr/bin/xtgeoip              0755
+license LICENSE                                -          -                             -
 dir     -                                      -          /var/lib/xt_geoip             0755
 ```
 
@@ -37,6 +38,7 @@ sed -e '/^#/d' -e '/^$/d' docs/generated/install-manifest.tsv \
     case "$kind" in
         dir)  install -d -m "$mode" -- "$DESTDIR$dest" ;;
         file) install -D -m "$mode" -- "$src" "$DESTDIR$dest" ;;
+        license) ;;                     # your format's rule — see below
         *) echo "unknown kind '$kind'" >&2; exit 1 ;;
     esac
 done
@@ -54,7 +56,9 @@ Four details that are not incidental:
   `install.yaml` later is skipped in silence and the package is quietly missing
   a file. That is the failure this whole convention exists to prevent, arriving
   through the recipe instead of around it. The build fails on an unknown value
-  too — see `tests::install_manifest_transforms_are_known`.
+  too — see `tests::install_manifest_transforms_are_known` — and
+  `tests::every_recipe_has_an_arm_for_every_kind` fails if a recipe here
+  lacks an arm for a kind the manifest uses.
 - **`IFS="$(printf '\t')"`, not `IFS=$'\t'`.** The latter is a bashism, and
   `debian/rules` and most `%install` scripts run under `sh`.
 - **Quote every expansion of `src` and `dest`.** `xtgeoip-docgen` checks their
@@ -82,6 +86,27 @@ the form they ship:
 
 A loop that ignores the `transform` column will install an unstripped binary
 and an uncompressed man page. Both work; both will be flagged in review.
+
+## The licence has no path
+
+A `license` row names a file and nothing else; its `transform`, `dest` and
+`mode` are all `-`. No two formats agree on where a licence goes, or on
+whether it is a file at all, so the manifest does not pretend to know:
+
+| Format | Where the licence comes from |
+|---|---|
+| deb | `debian/copyright`, installed by `dh_installdocs` |
+| rpm | `%license LICENSE` → `/usr/share/licenses/xtgeoip/` |
+| pacman | `install` into `/usr/share/licenses/xtgeoip/` |
+| xbps | `vlicense LICENSE` |
+| ebuild | `LICENSE="MIT"`; no file is installed |
+
+The row exists so that your recipe has to answer the question. MIT requires
+the text to accompany every copy, and your loop's `*)` arm will stop the build
+until it has a `license)` arm. In all five recipes here that arm does nothing
+and the format's own mechanism, outside the loop, installs the file. Until
+v0.4.4 the licence was an ordinary `file` row at `/usr/share/doc/xtgeoip/`,
+and every package built from it carried the text twice or was flagged for it.
 
 ## What not to package
 
@@ -141,6 +166,10 @@ and an uncompressed man page. Both work; both will be flagged in review.
 | xbps | `void/srcpkgs/xtgeoip/template`, written and built 2026-10-02 on Void x86_64 (glibc) by a delegated session: `xbps-src -Q pkg` passed with 292 tests, `xlint` clean, the binary stripped, the manifest's 9 files plus the licence. Not installed, so the `make_dirs` trigger was not exercised. Pins v0.4.3. |
 | ebuild | `gentoo/net-firewall/xtgeoip/xtgeoip-0.4.3.ebuild`, written 2026-10-02. **Not built**: no Gentoo system was available. Its `src_install` was run with Portage's install helpers stubbed against the v0.4.3 release (every manifest row, both `*)` arms), which is not a build. No Manifest is kept; `LICENSE` lists only MIT, not the crates' licences. Pins v0.4.3. |
 | apk, nix, SlackBuild | not started |
+
+Every recipe gained a `license)` arm on 2026-10-04, after each build recorded
+above. The builds do not cover it: they read v0.4.3's manifest, which has no
+`license` row, so the arm was never reached.
 
 `debian/README.source` is the one to read before writing another: it is where
 what this recipe cost gets written down. Four things it surfaced that every

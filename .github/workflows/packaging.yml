@@ -95,6 +95,8 @@ jobs:
             case "$kind" in
               file) [ -f "$root$dest" ] || { echo "missing file $dest"; exit 1; } ;;
               dir) [ -d "$root$dest" ] || { echo "missing dir $dest"; exit 1; } ;;
+              # No path in the manifest. Arch's is checked after the loop.
+              license) continue ;;
               *) echo "unknown kind $kind"; exit 1 ;;
             esac
             got=$(stat -c '%a' "$root$dest")
@@ -191,6 +193,8 @@ jobs:
               dir)
                 found=$image$dest
                 [ -d "$found" ] || { echo "missing dir $dest"; exit 1; } ;;
+              # Gentoo installs no licence file.
+              license) continue ;;
               *) echo "unknown kind $kind"; exit 1 ;;
             esac
             got=$(stat -c '%a' "$found")

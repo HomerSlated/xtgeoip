@@ -149,11 +149,12 @@ Measured with lintian 2.117.0ubuntu1.5 (Ubuntu 24.04) on 2026-09-30:
 under both the `debian` and the `ubuntu` profile. Every tag it still reports is
 expected, and each is listed here so that nobody chases it:
 
-  * `extra-license-file` (I). `/usr/share/doc/xtgeoip/LICENSE` duplicates
-    `debian/copyright`. It is here because the install set is declared once,
-    in `docs/spec/install.yaml`, and this recipe consumes that declaration
-    rather than curating it. Dropping the entry here is exactly the per-format
-    divergence §6.3 exists to prevent.
+  * `extra-license-file` (I). `/usr/share/doc/xtgeoip/LICENSE` duplicated
+    `debian/copyright`, because the manifest declared it as a file at that
+    path and this recipe installs what the manifest declares. Reported by
+    that run, and expected to be gone from a build of v0.4.4 or later: the
+    licence is now a `license` row with no path, for which `rules` installs
+    nothing. Not re-measured; lintian has not been run since the change.
   * `initial-upload-closes-no-bugs` (W). There is no ITP to close; see the top
     of this file.
   * `override_dh_auto_test-does-not-check-DEB_BUILD_OPTIONS` (I). A false

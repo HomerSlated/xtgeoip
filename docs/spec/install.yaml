@@ -6,6 +6,9 @@
 # Nine files across eight recipe formats would otherwise be 72 restatements
 # that nothing verifies. Rationale: `docs/design/packaging.md` §6.3.
 #
+# Eight of the nine are under `files:`, each with the path it installs to. The
+# ninth is the licence, under `licenses:`, with no path: see there.
+#
 # Pinned to reality by `tests::install_set_sources_exist`, which checks that
 # every declared source is either a tracked file that exists or a documented
 # producer's output. It deliberately does NOT assert byte sizes: §1 of the
@@ -17,7 +20,8 @@
 # hold — `conf/etc/logrotate.d/xtgeoip` is whatever the author's umask made
 # it, and that is not a packaging fact.
 
-version: 1
+# 2: the licence left `files:` for `licenses:` (v0.4.4).
+version: 2
 
 # Where each source comes from:
 #   tracked    a file committed in this repository
@@ -69,13 +73,6 @@ files:
     mode: "0644"
     summary: The only thing this package puts under /etc.
 
-  - source: LICENSE
-    producer: tracked
-    transform: none
-    dest: /usr/share/doc/xtgeoip/LICENSE
-    mode: "0644"
-    summary: MIT.
-
   - source: README.md
     producer: tracked
     transform: none
@@ -110,6 +107,23 @@ files:
     dest: /usr/share/fish/vendor_completions.d/xtgeoip.fish
     mode: "0644"
     summary: fish completion.
+
+# Licence texts the package must carry, with no `dest` and no `mode`, because
+# no two formats agree on either. Debian restates the text in
+# `debian/copyright`; rpm, Arch and Void each have their own directory under
+# /usr/share/licenses; Gentoo names the licence in `LICENSE=` and installs no
+# file. Until v0.4.4 this was a `files:` entry at /usr/share/doc/xtgeoip/, the
+# one place none of them wanted it: lintian called it `extra-license-file`, and
+# the rpm, Arch and Void packages shipped the text twice.
+#
+# It is declared at all so that it cannot be forgotten. Each entry becomes a
+# `license` row in the manifest, and every recipe's loop ends in an arm that
+# fails the build on a kind it does not know. A new recipe therefore has to say
+# what it does with the licence, even where the answer is "nothing, here".
+licenses:
+  - source: LICENSE
+    producer: tracked
+    summary: MIT. The copyright line is this project's own, so the text ships.
 
 # The code does not need these to exist — `fetch` and `build` both
 # `create_dir_all` on demand, and `check_plan_writable` probes the nearest

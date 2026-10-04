@@ -52,7 +52,7 @@ Measurements are from the 0.3.0 release build on 2026-09-13, x86-64, glibc.
 | `xtgeoip.1.gz` | `/usr/share/man/man1/` | 0644 root:root | 6,453 |
 | `xtgeoip.conf.example` | `/usr/share/xt_geoip/` | 0644 root:root | 621 |
 | logrotate fragment | `/etc/logrotate.d/xtgeoip` | 0644 root:root | 118 |
-| `LICENSE` | `/usr/share/doc/xtgeoip/` | 0644 root:root | 1,066 |
+| `LICENSE` | the format's own licence location (§6.3) | 0644 root:root | 1,066 |
 | `README.md` | `/usr/share/doc/xtgeoip/` | 0644 root:root | 3,235 |
 | — | `/var/lib/xt_geoip/` | 0755 root:root | dir |
 | — | `/usr/share/xt_geoip/` | 0755 root:root | dir |
@@ -593,6 +593,31 @@ can restore it), and that directory rows carry `-`. Mutation-confirmed on all
 four claims. One restatement survived and is pinned too:
 `debian/changelog`'s version, which cannot be generated, is checked against
 `CARGO_PKG_VERSION` by `tests::debian_changelog_version_matches_crate`.
+
+**The licence is the one entry with no path** (2026-10-04, effective from
+v0.4.4). It was a `files:` entry at `/usr/share/doc/xtgeoip/LICENSE`, and
+three real builds showed that to be the one place no format wanted it: lintian
+tagged it `extra-license-file` beside `debian/copyright`; the Fedora,
+Tumbleweed and Arch packages each carried the text twice, there and under
+`/usr/share/licenses/xtgeoip/`; and Gentoo's devmanual says not to install it
+at all. The fix was not to delete the row. MIT requires the text to accompany
+every copy, so it is the one file a new recipe must not be able to forget, and
+a deleted row is forgotten in silence.
+
+So `install.yaml` now has a `licenses:` list, whose entries carry a source and
+no `dest` or `mode`, and the manifest gains a third kind:
+`license<TAB>LICENSE<TAB>-<TAB>-<TAB>-`. Every recipe's `case "$kind"` already
+ended in a `*)` arm that fails the build, so each one had to gain a `license)`
+arm, and with it a statement of where that format's licence comes from:
+`debian/copyright`, `%license`, `/usr/share/licenses`, `vlicense`, `LICENSE=`.
+In all five the arm installs nothing and the format's existing mechanism stays
+where it was, which is what let every recipe take the arm in one commit: a
+recipe pinned to v0.4.3 reads a manifest with no such row and never reaches
+it. `tests::every_recipe_has_an_arm_for_every_kind` checks that each recipe in
+`contrib/` has an arm for each kind the manifest uses, so the reminder no
+longer waits for somebody to run a recipe nobody here can run.
+`tests::install_manifest_transforms_are_known` now also refuses an unknown
+kind, and a licence row that states a transform, dest or mode.
 
 `tests::install_set_sources_exist` pins the declaration to reality, and is
 mutation-confirmed on both of its claims: pointing a `tracked` source at a

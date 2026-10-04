@@ -70,6 +70,7 @@ do_install() {
 				fi
 				install -d -m "$mode" -- "${DESTDIR}${dest}"
 				;;
+			license) ;; # vlicense, below
 			*) msg_error "$manifest: unknown kind '$kind'\n" ;;
 		esac
 	done < <(sed -e '/^#/d' -e '/^$/d' "$manifest")
@@ -82,7 +83,8 @@ do_install() {
 		fi
 	done < <(sed -e '/^#/d' -e '/^$/d' "$manifest")
 
-	# Not in the manifest: where a licence goes is per-format, and Void
-	# requires the MIT text under /usr/share/licenses.
+	# The manifest's `license` row names this file and no path: where a
+	# licence goes is per-format, and Void requires the MIT text under
+	# /usr/share/licenses.
 	vlicense LICENSE
 }

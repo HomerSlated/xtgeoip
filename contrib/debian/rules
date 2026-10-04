@@ -78,6 +78,10 @@ override_dh_auto_test:
 #     `gzip -9` here would embed a timestamp and lose reproducibility.
 #   * The `strip` transform is a no-op, because dh_strip does it.
 #
+# A `license` row installs nothing: debian/copyright carries the licence, and
+# dh_installdocs puts it at /usr/share/doc/xtgeoip/copyright. A second copy
+# beside it is what lintian calls `extra-license-file`.
+#
 # Both `case` statements have a `*)` arm on purpose. Without one, a transform or
 # kind added to install.yaml later would be skipped in silence, producing a
 # package missing a file — which is the failure §6.3 exists to prevent, arriving
@@ -95,6 +99,7 @@ override_dh_auto_install:
 	    case "$$kind" in \
 	      dir)  install -d -m "$$mode" -- "$(DESTDIR)$$dest" ;; \
 	      file) install -D -m "$$mode" -- "$$src" "$(DESTDIR)$$dest" ;; \
+	      license) ;; \
 	      *) echo "$(MANIFEST): unknown kind '$$kind'" >&2; exit 1 ;; \
 	    esac; \
 	  done

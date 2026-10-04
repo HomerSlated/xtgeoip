@@ -4,9 +4,10 @@
 # redhat-rpm-config, rpm's own brp-compress and macros.in, and Fedora's and
 # openSUSE's package archives. Built 2026-10-04 on Fedora Copr (build
 # 11073816 of hazensparkle/xtgeoip) for fedora-44-x86_64 and
-# opensuse-tumbleweed-x86_64, as it stood at commit e5f35a4; only comments
-# and the changelog wording have changed since. That build took the default
-# path, with network access. NOT BUILT: `--with vendor`. NOT DONE: an
+# opensuse-tumbleweed-x86_64, as it stood at commit e5f35a4. Since then:
+# comments, the changelog wording, and the `license` arm in %%install, which
+# no row of v0.4.3's manifest reaches. That build took the default path, with
+# network access. NOT BUILT: `--with vendor`. NOT DONE: an
 # install, an upgrade, rpmlint. Read contrib/README.md's status table before
 # relying on it.
 #
@@ -173,13 +174,15 @@ while IFS="$(printf '\t')" read -r kind src transform dest mode; do
 			   echo "%%dir $d" >> "$filelist" ;;
 			esac ;;
 		esac ;;
+	# %%license, below %%files, installs it where rpm wants it.
+	license) ;;
 	*) echo "$manifest: unknown kind '$kind'" >&2; exit 1 ;;
 	esac
 done < manifest.rows
 
 %files -f %{name}.files
-# Not in the manifest: where a licence goes is per-format. rpm installs this to
-# %%{_datadir}/licenses/%%{name}; Debian reads debian/copyright instead.
+# The manifest's `license` row names this file and no path: where a licence
+# goes is per-format. rpm installs it to %%{_datadir}/licenses/%%{name}.
 %license LICENSE
 
 %changelog

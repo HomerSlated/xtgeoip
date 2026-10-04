@@ -5,10 +5,10 @@ file	target/release/xtgeoip	strip	/usr/bin/xtgeoip	0755
 file	docs/generated/xtgeoip.1	gzip	/usr/share/man/man1/xtgeoip.1.gz	0644
 file	conf/usr/share/xt_geoip/xtgeoip.conf.example	none	/usr/share/xt_geoip/xtgeoip.conf.example	0644
 file	conf/etc/logrotate.d/xtgeoip	none	/etc/logrotate.d/xtgeoip	0644
-file	LICENSE	none	/usr/share/doc/xtgeoip/LICENSE	0644
 file	README.md	none	/usr/share/doc/xtgeoip/README.md	0644
 file	docs/generated/completions/xtgeoip.bash	none	/usr/share/bash-completion/completions/xtgeoip	0644
 file	docs/generated/completions/_xtgeoip	none	/usr/share/zsh/site-functions/_xtgeoip	0644
 file	docs/generated/completions/xtgeoip.fish	none	/usr/share/fish/vendor_completions.d/xtgeoip.fish	0644
+license	LICENSE	-	-	-
 dir	-	-	/var/lib/xt_geoip	0755
 dir	-	-	/usr/share/xt_geoip	0755

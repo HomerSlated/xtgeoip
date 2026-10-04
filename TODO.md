@@ -206,13 +206,12 @@ integration suite drives the release binary and is not covered by this.
     `/usr/share/doc/xtgeoip`, as the manifest says.
   The logs are kept in `private/copr/11073816/`. Copr deletes a build 14 days
   after a newer one of the same package replaces it.
-- **`LICENSE` ships twice wherever a format has its own licence directory.**
-  Both rpm packages carry it at `/usr/share/doc/xtgeoip/LICENSE`, from the
-  manifest's row, and at `/usr/share/licenses/xtgeoip/LICENSE`, from
-  `%license`; the PKGBUILD installs both too, and lintian already called the
-  doc copy redundant on Debian. The row is in `install.yaml`, so the question
-  is whether it belongs in the manifest at all, and the answer changes every
-  recipe. Not one to patch in the spec alone.
+- **`LICENSE` ships twice in every package built from v0.4.3**, once at
+  `/usr/share/doc/xtgeoip/LICENSE` and once where the format wants it. Fixed
+  in the tree on 2026-10-04 and effective from v0.4.4: the licence is a
+  `license` row with no path (packaging.md §6.3), and every recipe has an arm
+  for it. Owed after v0.4.4: a rebuild of each recipe that has been built, to
+  see one copy, and lintian without `extra-license-file`.
 - **`contrib/void/` is built but not installed.** Built on Void x86_64 glibc
   on 2026-10-02 by a delegated session; the `make_dirs` trigger and
   `conf_files` handling on upgrade were not exercised, and musl was not

@@ -415,6 +415,10 @@ src_install() {
 				keepdir "${dest}"
 				fperms "${mode}" "${dest}"
 				;;
+			# LICENSE= above names it, and the text is in the repository's
+			# licenses/ directory. The devmanual: "There is no need for
+			# dodoc COPYING!"
+			license) ;;
 			*) die "${manifest}: unknown kind '${kind}'" ;;
 		esac
 	done < <(sed -e '/^#/d' -e '/^$/d' "${manifest}" || die)
