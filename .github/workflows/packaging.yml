@@ -1,0 +1,220 @@
+name: packaging
+
+# Test builds of the recipes in contrib/ that nobody here has a machine for.
+#
+# Manual only, and deliberately not part of CI. rust.yml explains why every job
+# there reads nothing but the repository. The jobs here read the outside world:
+# a distribution's container image, its package repository, the published
+# release and crates.io. Run twice on one commit they can give two answers, so
+# they cannot gate a push, and scripts/sync.py asks for rust.yml's run by name
+# so that a run of this workflow is never mistaken for it.
+#
+#   gh workflow run packaging.yml -f recipe=arch
+#
+# Each recipe pins the latest *published* release, so these build that
+# release's tarball with the recipe from the commit the run was started on.
+#
+# A green run means what its steps did, and no more. Read the log before
+# changing contrib/README.md's status table, and keep the log: GitHub deletes
+# it and the artifacts after the retention period.
+
+on:
+  workflow_dispatch:
+    inputs:
+      recipe:
+        description: Which recipe to build
+        type: choice
+        options: [arch, gentoo, both]
+        default: arch
+
+permissions:
+  contents: read
+
+# Stated, so that every step runs under `bash -eo pipefail`: the checks below
+# use process substitution, and a container job otherwise takes whatever shell
+# it finds.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  arch:
+    if: inputs.recipe == 'arch' || inputs.recipe == 'both'
+    runs-on: ubuntu-latest
+    # A fresh base-devel container stands in for Arch's clean chroot. devtools,
+    # which makes the real one, needs systemd-nspawn.
+    container: archlinux:base-devel
+    steps:
+      # `rust` provides `cargo`, the PKGBUILD's one makedepends. Installed here
+      # because makepkg -s would need sudo for the build user.
+      - name: Install the build tools
+        run: pacman -Syu --noconfirm --needed git rust namcap
+      - uses: actions/checkout@v4
+      # makepkg refuses to run as root.
+      - name: Create the build user
+        run: |
+          useradd -m build
+          install -d -o build -g build /home/build/pkg
+          install -m 0644 -o build -g build contrib/arch/PKGBUILD /home/build/pkg/
+          install -m 0644 -o build -g build docs/release_public.asc /home/build/
+      # What the PKGBUILD tells a user to do: the key is not on a keyserver.
+      - name: Import the release key and check its fingerprint
+        run: |
+          want=$(sed -n "s/^validpgpkeys=('\([0-9A-F]\{40\}\)')$/\1/p" contrib/arch/PKGBUILD)
+          got=$(gpg --batch --show-keys --with-colons docs/release_public.asc |
+            awk -F: '$1 == "fpr" && !seen++ { print $10 }')
+          echo "PKGBUILD: $want"
+          echo "key file: $got"
+          [ -n "$want" ] && [ "$want" = "$got" ]
+          runuser -l build -c 'gpg --batch --import ~/release_public.asc'
+      - name: makepkg
+        run: runuser -l build -c 'cd ~/pkg && makepkg --noconfirm --log'
+      - name: namcap
+        run: |
+          cd /home/build/pkg
+          namcap PKGBUILD
+          namcap "$(ls xtgeoip-[0-9]*.pkg.tar.zst)"
+      - name: Show the package
+        run: |
+          cd /home/build/pkg
+          pkg=$(ls xtgeoip-[0-9]*.pkg.tar.zst)
+          pacman -Qip "$pkg"
+          bsdtar -tvf "$pkg"
+      # The manifest is the release's, from the unpacked tarball. The only
+      # rewrite on Arch is none: zipman leaves the man page at its .gz name.
+      - name: Check the package against the manifest
+        run: |
+          cd /home/build/pkg
+          pkg=$(ls xtgeoip-[0-9]*.pkg.tar.zst)
+          root=$(mktemp -d)
+          bsdtar -xpf "$pkg" -C "$root"
+          manifest=$(ls src/xtgeoip-*/docs/generated/install-manifest.tsv)
+          rows=0
+          while IFS=$'\t' read -r kind src transform dest mode; do
+            rows=$((rows + 1))
+            case "$kind" in
+              file) [ -f "$root$dest" ] || { echo "missing file $dest"; exit 1; } ;;
+              dir) [ -d "$root$dest" ] || { echo "missing dir $dest"; exit 1; } ;;
+              *) echo "unknown kind $kind"; exit 1 ;;
+            esac
+            got=$(stat -c '%a' "$root$dest")
+            [ "0$got" = "$mode" ] || { echo "$dest is 0$got, not $mode"; exit 1; }
+          done < <(sed -e '/^#/d' -e '/^$/d' "$manifest")
+          echo "$rows manifest rows present at their modes"
+          [ -f "$root/usr/share/licenses/xtgeoip/LICENSE" ]
+          gzip -t "$root/usr/share/man/man1/xtgeoip.1.gz"
+      - name: Install it and run it
+        run: |
+          pacman -U --noconfirm "$(ls /home/build/pkg/xtgeoip-[0-9]*.pkg.tar.zst)"
+          xtgeoip --version
+          xtgeoip --help > /dev/null
+          pacman -Qkk xtgeoip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arch
+          path: |
+            /home/build/pkg/*.pkg.tar.zst
+            /home/build/pkg/*.log
+
+  gentoo:
+    if: inputs.recipe == 'gentoo' || inputs.recipe == 'both'
+    runs-on: ubuntu-latest
+    container:
+      image: gentoo/stage3
+      # Portage's sandbox traces statically linked programs.
+      options: --cap-add=SYS_PTRACE
+    env:
+      # The namespace sandboxes need privileges an unprivileged container does
+      # not have. The file-access sandbox stays on. Losing network-sandbox
+      # costs little here: cargo.eclass configures cargo offline regardless,
+      # so a crate missing from CRATES still fails the build.
+      FEATURES: -ipc-sandbox -network-sandbox -pid-sandbox -mount-sandbox
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch the Gentoo repository
+        run: emerge-webrsync --quiet
+      # `ebuild` resolves no dependencies, so the toolchain is installed by
+      # hand. rust-bin, not rust: compiling the compiler takes hours.
+      - name: Install Rust
+        run: |
+          getuto
+          emerge --quiet --getbinpkg --oneshot dev-lang/rust-bin
+      # contrib/gentoo holds the ebuild alone; an overlay also needs a name
+      # and a master.
+      - name: Make an overlay holding the ebuild
+        run: |
+          repo=/var/db/repos/xtgeoip
+          mkdir -p "$repo/profiles" "$repo/metadata" /etc/portage/repos.conf
+          echo xtgeoip > "$repo/profiles/repo_name"
+          printf 'masters = gentoo\nthin-manifests = true\n' > "$repo/metadata/layout.conf"
+          cp -r contrib/gentoo/net-firewall "$repo/"
+          printf '[xtgeoip]\nlocation = %s\n' "$repo" > /etc/portage/repos.conf/xtgeoip.conf
+      # Downloads the tarball and every crate in CRATES, and records their
+      # hashes. The Manifest is the first of the three things the ebuild owes;
+      # thin, as overlays keep it: distfiles only. It leaves as an artifact and
+      # is not committed (the ebuild's header says why).
+      - name: Generate the Manifest
+        run: |
+          cd /var/db/repos/xtgeoip/net-firewall/xtgeoip
+          ebuild "$(ls xtgeoip-*.ebuild)" manifest
+          wc -l Manifest
+      # `ebuild` runs the phases without resolving RDEPEND, which names
+      # xtables-addons, a kernel module that needs kernel sources to build.
+      - name: Build, test and install into the image directory
+        run: |
+          cd /var/db/repos/xtgeoip/net-firewall/xtgeoip
+          FEATURES="$FEATURES test" ebuild "$(ls xtgeoip-*.ebuild)" clean test install
+      # The ebuild's rewrites: the doc directory carries the version, the man
+      # page loses .gz and Portage compresses it its own way, and each
+      # directory holds a .keep file. Hence the globs.
+      - name: Check the image against the manifest
+        run: |
+          work=$(ls -d "$(portageq envvar PORTAGE_TMPDIR)"/portage/net-firewall/xtgeoip-*)
+          image=$work/image
+          pf=$(basename "$work")
+          (cd "$image" && find . -printf '%M %u:%g %8s %p\n' | sort -k4)
+          manifest=$(ls "$work"/work/xtgeoip-*/docs/generated/install-manifest.tsv)
+          rows=0
+          while IFS=$'\t' read -r kind src transform dest mode; do
+            rows=$((rows + 1))
+            case "$dest" in
+              /usr/share/doc/xtgeoip/*) dest="/usr/share/doc/$pf/${dest#/usr/share/doc/xtgeoip/}" ;;
+            esac
+            case "$transform" in
+              gzip) dest="${dest%.gz}" ;;
+            esac
+            case "$kind" in
+              file)
+                found=$(ls "$image$dest"* 2>/dev/null | head -n 1) || true
+                [ -n "$found" ] || { echo "missing file $dest"; exit 1; } ;;
+              dir)
+                found=$image$dest
+                [ -d "$found" ] || { echo "missing dir $dest"; exit 1; } ;;
+              *) echo "unknown kind $kind"; exit 1 ;;
+            esac
+            got=$(stat -c '%a' "$found")
+            [ "0$got" = "$mode" ] || { echo "$found is 0$got, not $mode"; exit 1; }
+          done < <(sed -e '/^#/d' -e '/^$/d' "$manifest")
+          echo "$rows manifest rows present at their modes"
+      # noclean keeps the build directory, and with it the log, past the merge.
+      - name: Merge it and run it
+        run: |
+          cd /var/db/repos/xtgeoip/net-firewall/xtgeoip
+          FEATURES="$FEATURES noclean" ebuild "$(ls xtgeoip-*.ebuild)" qmerge
+          xtgeoip --version
+          xtgeoip --help > /dev/null
+      # Reports; does not fail the job, and neither does failing to install
+      # it. A missing metadata.xml is expected.
+      - name: pkgcheck
+        run: |
+          emerge --quiet --getbinpkg --oneshot dev-util/pkgcheck || exit 0
+          cd /var/db/repos/xtgeoip
+          pkgcheck scan net-firewall/xtgeoip || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gentoo
+          path: |
+            /var/db/repos/xtgeoip/net-firewall/xtgeoip/Manifest
+            /var/tmp/portage/net-firewall/xtgeoip-*/temp/build.log
