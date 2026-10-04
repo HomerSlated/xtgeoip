@@ -161,7 +161,7 @@ and every package built from it carried the text twice or was flagged for it.
 | Format | State |
 |---|---|
 | deb | `debian/`, written 2026-09-22, first tagged in `v0.4.2`. Built end to end on 2026-09-29, both with the network and offline from a vendored component tarball. |
-| pacman | `arch/PKGBUILD`, written 2026-10-02 and built 2026-10-04 in an `archlinux:base-devel` container by `.github/workflows/packaging.yml` (run 37231823079, at commit 46eb0e7), with rustc 1.99.0, GCC 16.2.1 and makepkg 7.1.0. makepkg passed both checksums and the release key's signature on `SHA256SUMS`, built with `--frozen`, and passed 292 tests; the package holds the manifest's 11 rows at their modes plus the licence; `pacman -U` installed it and `xtgeoip --version` ran. namcap 3.6.0 gave four warnings: the empty `/var/lib/xt_geoip` (intended), an unused `ld-linux` reference, and two that said `depends` should name `libgcc` rather than `gcc-libs`, which it now does. That run is marked failed for its last step, `pacman -Qkk`, which tripped on the container image's `NoExtract` rules and not on the package. **Not done**: a build since the `depends` change, a build without `!lto`, an upgrade. Pins v0.4.3. |
+| pacman | `arch/PKGBUILD`, written 2026-10-02 and built 2026-10-04 in an `archlinux:base-devel` container by `.github/workflows/packaging.yml` (run 37234035970, at commit 2b6bd68), with rustc 1.99.0, GCC 16.2.1 and makepkg 7.1.0. makepkg passed both checksums and the release key's signature on `SHA256SUMS`, built with `--frozen`, and passed 292 tests; the package holds the manifest's 11 rows at their modes plus the licence; `pacman -U` installed it, `xtgeoip --version` ran, and `pacman -Qkk` found no altered file. namcap 3.6.0 gave two warnings, both left alone: the empty `/var/lib/xt_geoip`, which is intended, and an unused `ld-linux` reference. An earlier run (37231823079) is why `depends` names `libgcc` and not `gcc-libs`. A third (37234046715) built the same PKGBUILD without `!lto` and failed at the link, so `!lto` is measured on Arch and not inherited. **Not done**: an upgrade. Pins v0.4.3. |
 | rpm | `rpm/xtgeoip.spec`, written 2026-10-02 and built 2026-10-04 on Fedora Copr (build 11073816 of `hazensparkle/xtgeoip`) for `fedora-44-x86_64` and `opensuse-tumbleweed-x86_64`, both with rustc 1.98.1 and GCC 16. On each: `cargo build --release --locked` with network access, 292 tests passed, and the package holds the manifest's 11 rows at their modes plus the licence, with the logrotate file `%config(noreplace)`, the man page gzipped by `brp-compress`, `Conflicts: xtables-geoip`, `Recommends: xtables-addons`, and a 20 MB debuginfo package. On Fedora `%openpgpverify` checked the release key's signature (1 of 1 valid); on Tumbleweed only the checksum ran, as designed. **Not built**: `--with vendor`. Not installed, and `rpmlint` not run. Distribution-neutral; `Version` tracks `Cargo.toml`. |
 | xbps | `void/srcpkgs/xtgeoip/template`, written and built 2026-10-02 on Void x86_64 (glibc) by a delegated session: `xbps-src -Q pkg` passed with 292 tests, `xlint` clean, the binary stripped, the manifest's 9 files plus the licence. Not installed, so the `make_dirs` trigger was not exercised. Pins v0.4.3. |
 | ebuild | `gentoo/net-firewall/xtgeoip/xtgeoip-0.4.3.ebuild`, written 2026-10-02. **Not built**: no Gentoo system was available. Its `src_install` was run with Portage's install helpers stubbed against the v0.4.3 release (every manifest row, both `*)` arms), which is not a build. No Manifest is kept; `LICENSE` lists only MIT, not the crates' licences. Pins v0.4.3. |
@@ -224,8 +224,11 @@ other format has to answer:
 The PKGBUILD added three more, none of which Debian raised:
 
 5. **A distribution's default C flags can break the link.** Arch builds with
-   `-flto=auto`, which reaches `aws-lc-sys` through `CFLAGS` and leaves objects
-   `rust-lld` cannot resolve; the PKGBUILD sets `!lto`. The detail that
+   `-flto=auto`, which reaches `aws-lc-sys` and `zstd-sys` through `CFLAGS`
+   and leaves objects the linker cannot resolve; the PKGBUILD sets `!lto`.
+   Measured on Arch itself on 2026-10-04 (GCC 16.2.1), as two builds that
+   differ only in that option: one links, the other fails on undefined
+   `ZSTD_*` and `aws_lc_*` symbols. The detail that
    matters is fat versus slim objects: Fedora's `-flto=auto -ffat-lto-objects`
    keeps machine code beside the LTO bytecode, and the same experiment linked
    (GCC 13, 2026-10-02), as did the real build on Fedora 44 (GCC 16,

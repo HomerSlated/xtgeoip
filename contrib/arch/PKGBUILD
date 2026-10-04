@@ -2,10 +2,11 @@
 #
 # Written 2026-10-02 against Arch's makepkg.conf and pacman source as of that
 # date. Built 2026-10-04 in an archlinux:base-devel container by
-# .github/workflows/packaging.yml (run 37231823079, at commit 46eb0e7):
-# makepkg, namcap, and `pacman -U`. Since then `depends` names libgcc, as
-# namcap asked, and package() has a `license` arm that no row of v0.4.3's
-# manifest reaches. Read contrib/README.md's status table before relying on it.
+# .github/workflows/packaging.yml (run 37234035970, at commit 2b6bd68):
+# makepkg, namcap, `pacman -U` and `pacman -Qkk`, all passing. Only comments
+# have changed since. package() has a `license` arm that no row of v0.4.3's
+# manifest reaches, so that build did not exercise it. Read
+# contrib/README.md's status table before relying on it.
 #
 # Not in the AUR, and the Maintainer line below is a placeholder. Whoever
 # submits it owns that line; it is not upstream.
@@ -51,13 +52,13 @@ backup=('etc/logrotate.d/xtgeoip')
 #             (libmakepkg/tidy/50-zipman.sh), so no timestamp is embedded.
 #   emptydirs keeps /var/lib/xt_geoip, which the manifest declares and which
 #             is empty in the package.
-#   !lto      Arch's default LTOFLAGS=-flto=auto reaches aws-lc-sys's C code
-#             through CFLAGS, and the result does not link: with Arch's exact
-#             CFLAGS plus -flto=auto the release build failed here with
-#             `rust-lld: error: undefined symbol: aws_lc_0_45_0_RSA_free`, and
-#             the same flags without it linked (2026-10-02, GCC 13, not on
-#             Arch). On Arch itself, with GCC 16.2.1, the build with !lto
-#             linked (2026-10-04); without it has not been tried there. The
+#   !lto      Arch's default LTOFLAGS=-flto=auto reaches the C code of
+#             aws-lc-sys and zstd-sys through CFLAGS, and the result does not
+#             link. Measured on Arch with GCC 16.2.1 on 2026-10-04, as two
+#             builds differing only in this option: with !lto it linked (run
+#             37234035970); without it the link failed (run 37234046715) on
+#             `ld.lld: error: undefined symbol: ZSTD_decompressStream`,
+#             `aws_lc_0_45_0_EVP_PKEY_free` and more than twenty others. The
 #             Rust package guidelines prescribe !lto for mixed Rust/C builds.
 #             Rust's own optimisation is unaffected.
 options=('strip' 'zipman' 'emptydirs' '!lto')

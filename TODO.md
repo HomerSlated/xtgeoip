@@ -217,12 +217,11 @@ integration suite drives the release binary and is not covered by this.
   `conf_files` handling on upgrade were not exercised, and musl was not
   tried.
 - **`contrib/arch/PKGBUILD` is built and installed, in a container.**
-  `packaging.yml` run 37231823079 (2026-10-04); `contrib/README.md`'s status
-  table says what it proved. Still owed: a run since `depends` changed to
-  `libgcc`; whether `!lto` is still needed under Arch's GCC 16 (the failure
-  was measured on GCC 13, off Arch; `packaging.yml` has an `lto` input that
-  builds without it); an upgrade, for `backup=`. The logs and both packages
-  are in `private/gh-runs/37231823079/`.
+  `packaging.yml` run 37234035970 (2026-10-04) passed every step;
+  `contrib/README.md`'s status table says what it proved. `!lto` is settled:
+  run 37234046715 built without it and failed at the link. Still owed: an
+  upgrade, for `backup=`. The logs and packages of all three runs are in
+  `private/gh-runs/`.
 - **After every release**, the PKGBUILD's `pkgver` and `sha256sums` and the Void
   template's `version` and `checksum` move to the new tarball in a follow-up
   commit, and the ebuild is renamed with its `CRATES` regenerated from the new
