@@ -6,11 +6,11 @@ Open work only. Everything closed up to 2026-09-05 is archived in
 close here move to the end of `DONE.md`, under *Closed after the archive*;
 there is no `TODO_tldr.md` any more.
 
-Opened 2026-09-06, brought up to date 2026-10-02. What is here now: the open
-packaging work (six recipes unwritten, the PKGBUILD unbuilt), one wording
-correction waiting for its file to change, the informational findings from two
-guardian audits, one policy question, and the three lists that are normative
-rather than historical.
+Opened 2026-09-06, brought up to date 2026-10-04. What is here now: the open
+packaging work (three recipes unwritten, the PKGBUILD and ebuild unbuilt), one
+wording correction waiting for its file to change, the informational findings
+from two guardian audits, one policy question, and the three lists that are
+normative rather than historical.
 
 ---
 
@@ -189,12 +189,30 @@ integration suite drives the release binary and is not covered by this.
   with Portage's helpers stubbed, which is not a build. Owed before it could
   go to an overlay: a `Manifest` (`ebuild ... manifest`), the crates' licences
   in `LICENSE` (pycargoebuild), and a real build.
-- **`contrib/rpm/xtgeoip.spec` is not built** — no RPM system here. Its
-  `%install` was run under `sh` outside rpmbuild, which is not a build. A real
-  one would settle `openpgpverify` on Fedora, the empty-debuginfo question
-  (the spec sets `CARGO_PROFILE_RELEASE_DEBUG=2`), whether the completion
-  directories are owned by another package, and `rpmlint`. openSUSE files docs
-  under `/usr/share/doc/packages/`, which the manifest's paths do not follow.
+- **`contrib/rpm/xtgeoip.spec` is built but not installed.** Fedora Copr
+  build 11073816 (`hazensparkle/xtgeoip`, 2026-10-04) succeeded for
+  `fedora-44-x86_64` and `opensuse-tumbleweed-x86_64`; `contrib/README.md`'s
+  status table says what that proved. Still owed:
+  - `--with vendor`, the offline path. Copr built with network access.
+  - An install and an upgrade: `%config(noreplace)` on the logrotate file,
+    and `Conflicts: xtables-geoip` against the real package on openSUSE.
+  - `rpmlint`, and whether the three completion directories are owned by a
+    package xtgeoip does not require.
+  - openSUSE's LTO. Copr's Tumbleweed chroot exported no `-flto` in
+    `CFLAGS`; the openSUSE Build Service's own configuration may, and slim
+    LTO objects are what broke the Arch link. Not tested.
+  - A decision the Tumbleweed package makes visible: openSUSE files docs
+    under `/usr/share/doc/packages/`, and the package has them in
+    `/usr/share/doc/xtgeoip`, as the manifest says.
+  The logs are kept in `private/copr/11073816/`. Copr deletes a build 14 days
+  after a newer one of the same package replaces it.
+- **`LICENSE` ships twice wherever a format has its own licence directory.**
+  Both rpm packages carry it at `/usr/share/doc/xtgeoip/LICENSE`, from the
+  manifest's row, and at `/usr/share/licenses/xtgeoip/LICENSE`, from
+  `%license`; the PKGBUILD installs both too, and lintian already called the
+  doc copy redundant on Debian. The row is in `install.yaml`, so the question
+  is whether it belongs in the manifest at all, and the answer changes every
+  recipe. Not one to patch in the spec alone.
 - **`contrib/void/` is built but not installed.** Built on Void x86_64 glibc
   on 2026-10-02 by a delegated session; the `make_dirs` trigger and
   `conf_files` handling on upgrade were not exercised, and musl was not
@@ -227,8 +245,6 @@ each unsuitable for a recipe: `v0.3.0` predated `.gitattributes`, `v0.4.0` the
 emitter audit's H-1 fix, and `v0.4.1` every recipe and the RUSTSEC-2026-0285
 `rustls` bump. Never reuse those names: a clone made before the deletion still
 holds the old tags, and `git fetch` would not replace them.
-
-Still true as of 2026-09-22: no `rpm/` and no `*.spec`.
 
 ---
 

@@ -1,9 +1,13 @@
 # xtgeoip.spec — build xtgeoip as an RPM.
 #
-# NOT BUILT. Written 2026-10-02 from Fedora's cargo-rpm-macros 28.5 and
+# Written 2026-10-02 from Fedora's cargo-rpm-macros 28.5 and
 # redhat-rpm-config, rpm's own brp-compress and macros.in, and Fedora's and
-# openSUSE's package archives, and never run through rpmbuild: there was no
-# RPM system to run it on. Read contrib/README.md's status table before
+# openSUSE's package archives. Built 2026-10-04 on Fedora Copr (build
+# 11073816 of hazensparkle/xtgeoip) for fedora-44-x86_64 and
+# opensuse-tumbleweed-x86_64, as it stood at commit e5f35a4; only comments
+# and the changelog wording have changed since. That build took the default
+# path, with network access. NOT BUILT: `--with vendor`. NOT DONE: an
+# install, an upgrade, rpmlint. Read contrib/README.md's status table before
 # relying on it.
 #
 # Distribution-neutral on purpose: Fedora, openSUSE and RHEL each have their
@@ -180,4 +184,4 @@ done < manifest.rows
 
 %changelog
 * Fri Oct 02 2026 xtgeoip packaging <packaging@example.invalid> - 0.4.3-1
-- Initial packaging, from contrib/rpm in the upstream tree. Not built.
+- Initial packaging, from contrib/rpm in the upstream tree.

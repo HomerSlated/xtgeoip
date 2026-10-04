@@ -137,7 +137,7 @@ and an uncompressed man page. Both work; both will be flagged in review.
 |---|---|
 | deb | `debian/`, written 2026-09-22, first tagged in `v0.4.2`. Built end to end on 2026-09-29, both with the network and offline from a vendored component tarball. |
 | pacman | `arch/PKGBUILD`, written 2026-10-02. **Not built**: no Arch system was available. Its shell logic was exercised outside makepkg against the v0.4.3 release (signature, checksum, manifest loop, both `*)` arms), which is not a build. Pins v0.4.3. |
-| rpm | `rpm/xtgeoip.spec`, written 2026-10-02. **Not built**: no RPM system was available. Its `%install` scriptlet was run under `sh` against the v0.4.3 release (every manifest row, the generated `%files` list, both `*)` arms, and the refusal of a space or glob in `dest`), which is not a build. Distribution-neutral; `Version` tracks `Cargo.toml`. |
+| rpm | `rpm/xtgeoip.spec`, written 2026-10-02 and built 2026-10-04 on Fedora Copr (build 11073816 of `hazensparkle/xtgeoip`) for `fedora-44-x86_64` and `opensuse-tumbleweed-x86_64`, both with rustc 1.98.1 and GCC 16. On each: `cargo build --release --locked` with network access, 292 tests passed, and the package holds the manifest's 11 rows at their modes plus the licence, with the logrotate file `%config(noreplace)`, the man page gzipped by `brp-compress`, `Conflicts: xtables-geoip`, `Recommends: xtables-addons`, and a 20 MB debuginfo package. On Fedora `%openpgpverify` checked the release key's signature (1 of 1 valid); on Tumbleweed only the checksum ran, as designed. **Not built**: `--with vendor`. Not installed, and `rpmlint` not run. Distribution-neutral; `Version` tracks `Cargo.toml`. |
 | xbps | `void/srcpkgs/xtgeoip/template`, written and built 2026-10-02 on Void x86_64 (glibc) by a delegated session: `xbps-src -Q pkg` passed with 292 tests, `xlint` clean, the binary stripped, the manifest's 9 files plus the licence. Not installed, so the `make_dirs` trigger was not exercised. Pins v0.4.3. |
 | ebuild | `gentoo/net-firewall/xtgeoip/xtgeoip-0.4.3.ebuild`, written 2026-10-02. **Not built**: no Gentoo system was available. Its `src_install` was run with Portage's install helpers stubbed against the v0.4.3 release (every manifest row, both `*)` arms), which is not a build. No Manifest is kept; `LICENSE` lists only MIT, not the crates' licences. Pins v0.4.3. |
 | apk, nix, SlackBuild | not started |
@@ -199,7 +199,10 @@ The PKGBUILD added three more, none of which Debian raised:
    `rust-lld` cannot resolve; the PKGBUILD sets `!lto`. The detail that
    matters is fat versus slim objects: Fedora's `-flto=auto -ffat-lto-objects`
    keeps machine code beside the LTO bytecode, and the same experiment linked
-   (GCC 13, 2026-10-02). Void's defaults enable no LTO at all, and Gentoo's
+   (GCC 13, 2026-10-02), as did the real build on Fedora 44 (GCC 16,
+   2026-10-04). Copr's Tumbleweed chroot exported no `-flto`, which says
+   nothing about the openSUSE Build Service's own flags. Void's defaults
+   enable no LTO at all, and Gentoo's
    `cargo.eclass` runs `filter-lto` on every Rust build for this reason.
 6. **The runtime dependency may not be one package.** On Arch, xtables-addons
    is AUR-only, as two conflicting packages with no shared `provides`, so it
