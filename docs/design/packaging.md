@@ -4,10 +4,10 @@ Status: **analysis, with §6 settled and the first recipe written**. Written
 2026-09-13; §6's four decisions taken 2026-09-19, and §4's exclusions extended
 2026-09-20. `contrib/debian/` landed 2026-09-22, built against the derived
 install manifest; of the other seven of §5, four have been written since and
-`contrib/README.md` has their state. `v0.4.2` is the
-first tag recipes can build from, `v0.4.3` the first with a published
-release, and `v0.4.4` the first whose manifest gives the licence a row of its
-own (§6.3); the three tags before them were deleted on 2026-10-02, and
+`contrib/README.md` has their state. `v0.4.3` is the
+first tag recipes can build from and the first with a published release, and
+`v0.4.4` the first whose manifest gives the licence a row of its own (§6.3);
+the four tags before them were deleted on 2026-10-02, and
 `contrib/README.md` says why. §2's decision is load-bearing
 and was settled before the recipe was written, which is why `debian/` ships no
 `/etc/xtgeoip.conf`.

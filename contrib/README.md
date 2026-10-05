@@ -115,9 +115,13 @@ The row exists so that your recipe has to answer the question. MIT requires
 the text to accompany every copy, and your loop's `*)` arm will stop the build
 until it has a `license)` arm, given the `set -e` above. In all five recipes
 here that arm does nothing and the format's own mechanism, outside the loop,
-installs the file. Until
-v0.4.4 the licence was an ordinary `file` row at `/usr/share/doc/xtgeoip/`,
-and every package built from it carried the text twice or was flagged for it.
+supplies the licence. Until v0.4.4 the licence was an ordinary `file` row at
+`/usr/share/doc/xtgeoip/`, the one place no format wanted it. The rpm, pacman
+and xbps packages carried the text twice, there and where the format puts it;
+lintian flagged the Debian one for it; and the Gentoo package had it once,
+there, where Gentoo wants no licence file at all. From v0.4.4 a Gentoo
+package installs none: `LICENSE="MIT"` names the text in the Gentoo
+repository.
 
 ## What not to package
 
@@ -151,11 +155,12 @@ and every package built from it carried the text twice or was flagged for it.
   extension and is a hard dependency, while the kernel module is a separate
   `xtables-addons-dkms` (or `-source`) and is a `Recommends`. Verified against
   the archive on 2026-09-22, not assumed.
-- Build from **`v0.4.2` or later**, the first tag that carries a recipe.
+- Build from **`v0.4.3` or later**, the first tag with a published release.
   Nothing older exists: `v0.3.0`, `v0.4.0` and `v0.4.1` were deleted on
-  2026-10-02, each unsuitable for a recipe. A clone made before then may
-  still hold them, because `git fetch` does not remove tags deleted upstream.
-  Do not build from any of them.
+  2026-10-02, each unsuitable for a recipe, and `v0.4.2`, which had a recipe
+  and no release, was removed from GitHub later the same day. A clone made
+  before then may still hold them, because `git fetch` does not remove tags
+  deleted upstream. Do not build from any of them.
 
   From `v0.4.3` each GitHub release carries `xtgeoip-<version>.tar.gz`, which
   is `git archive` of the tag, and a `SHA256SUMS` signed by the release key
@@ -171,7 +176,7 @@ and every package built from it carried the text twice or was flagged for it.
 
 | Format | State |
 |---|---|
-| deb | `debian/`, written 2026-09-22, first tagged in `v0.4.2`. Built end to end on 2026-09-29, both with the network and offline from a vendored component tarball. Built again on 2026-10-05, with the network, from the tree that became `v0.4.4`: 294 tests passed, the package holds the manifest's eight files and two directories, and the only licence text in it is `debian/copyright`. lintian 2.117 no longer reports `extra-license-file`. |
+| deb | `debian/`, written 2026-09-22, first tagged in `v0.4.2`, a tag since deleted. Built end to end on 2026-09-29, both with the network and offline from a vendored component tarball. Built again on 2026-10-05, with the network, from the tree that became `v0.4.4`: 294 tests passed, the package holds the manifest's eight files and two directories, and the only licence text in it is `debian/copyright`. lintian 2.117 no longer reports `extra-license-file`. |
 | pacman | `arch/PKGBUILD`, written 2026-10-02 and built 2026-10-04 in an `archlinux:base-devel` container by `.github/workflows/packaging.yml` (run 37234035970, at commit 2b6bd68), with rustc 1.99.0, GCC 16.2.1 and makepkg 7.1.0. makepkg passed both checksums and the release key's signature on `SHA256SUMS`, built with `--frozen`, and passed 292 tests; the package holds the manifest's 11 rows at their modes plus the licence; `pacman -U` installed it, `xtgeoip --version` ran, and `pacman -Qkk` found no altered file. namcap 3.6.0 gave two warnings, both left alone: the empty `/var/lib/xt_geoip`, which is intended, and an unused `ld-linux` reference. An earlier run (37231823079) is why `depends` names `libgcc` and not `gcc-libs`. A third (37234046715) built the same PKGBUILD without `!lto` and failed at the link, so `!lto` is measured on Arch and not inherited. **Not done**: an upgrade. Pins v0.4.3. |
 | rpm | `rpm/xtgeoip.spec`, written 2026-10-02 and built 2026-10-04 on Fedora Copr (build 11073816 of `hazensparkle/xtgeoip`) for `fedora-44-x86_64` and `opensuse-tumbleweed-x86_64`, both with rustc 1.98.1 and GCC 16. On each: `cargo build --release --locked` with network access, 292 tests passed, and the package holds the manifest's 11 rows at their modes plus the licence, with the logrotate file `%config(noreplace)`, the man page gzipped by `brp-compress`, `Conflicts: xtables-geoip`, `Recommends: xtables-addons`, and a 20 MB debuginfo package. On Fedora `%openpgpverify` checked the release key's signature (1 of 1 valid); on Tumbleweed only the checksum ran, as designed. **Not built**: `--with vendor`. Not installed, and `rpmlint` not run. Distribution-neutral; `Version` tracks `Cargo.toml`, so it says 0.4.4 from that release, and the spec has not been built since it did. |
 | xbps | `void/srcpkgs/xtgeoip/template`, written and built 2026-10-02 on Void x86_64 (glibc) by a delegated session: `xbps-src -Q pkg` passed with 292 tests, `xlint` clean, the binary stripped, the manifest's 9 files plus the licence. Installed on that machine on 2026-10-03 from the build's local repository, and run: `xtgeoip --version` prints 0.4.3, the files are where the template's loop puts them (the man page uncompressed, as Void wants), and a run wrote 253 `.iv4` and 253 `.iv6` files into `/usr/share/xt_geoip`. Reported on 2026-10-04 by the session on that machine, which checked it there; not seen from here. The report does not say whether `/var/lib/xt_geoip` came from the `make_dirs` trigger, so that is still not confirmed. Pins v0.4.3. |
@@ -180,9 +185,10 @@ and every package built from it carried the text twice or was flagged for it.
 
 Every recipe gained a `license)` arm on 2026-10-04. Only the deb build of
 2026-10-05 reaches it. The other four builds above read v0.4.3's manifest,
-which has no `license` row, and each of them shipped the licence twice. The
-PKGBUILD, the Void template and the ebuild still pin v0.4.3; the spec does not,
-and is unbuilt at 0.4.4.
+which has no `license` row, so each also installed `LICENSE` as a doc file:
+a second copy in the rpm, pacman and xbps packages, and the only copy in the
+Gentoo one. The PKGBUILD, the Void template and the ebuild still pin v0.4.3;
+the spec does not, and is unbuilt at 0.4.4.
 
 `debian/README.source` is the one to read before writing another: it is where
 what this recipe cost gets written down. Four things it surfaced that every

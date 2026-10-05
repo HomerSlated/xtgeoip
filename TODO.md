@@ -227,14 +227,15 @@ integration suite drives the release binary and is not covered by this.
     `/usr/share/doc/xtgeoip`, as the manifest says.
   The logs are kept in `private/copr/11073816/`. Copr deletes a build 14 days
   after a newer one of the same package replaces it.
-- **`LICENSE` ships twice in every package built from v0.4.3**, once at
-  `/usr/share/doc/xtgeoip/LICENSE` and once where the format wants it. Fixed
-  in the tree on 2026-10-04 and effective from v0.4.4: the licence is a
+- **`LICENSE` is a doc file in every package built from v0.4.3**, at
+  `/usr/share/doc/xtgeoip/LICENSE`: a second copy in the rpm, pacman and xbps
+  packages, a lintian tag on Debian, and on Gentoo the only copy, where
+  Gentoo wants none. Fixed in the tree on 2026-10-04 and effective from v0.4.4: the licence is a
   `license` row with no path (packaging.md §6.3), and every recipe has an arm
   for it. Seen on Debian on 2026-10-05, on a build of v0.4.4's tree: one
   licence text in the package, and lintian without `extra-license-file`. Owed
   for the other four, after the pin bump below: a rebuild of each, to see one
-  copy.
+  copy, and on Gentoo none.
 - **`contrib/void/` is built, installed and run.** Built on Void x86_64 glibc
   on 2026-10-02 by a delegated session, installed there the next day, and
   run; `contrib/README.md`'s status table has the detail, which is that
@@ -263,18 +264,23 @@ integration suite drives the release binary and is not covered by this.
   compares it with the program: the next change to the help text in
   `src/cli.rs` leaves it behind. A docgen test could diff the two.
 
-Recipes build from a git tag, since `publish = false`. `v0.4.2` is the first
-to carry a recipe; `v0.4.3` is the first with a published release (source
-tarball plus `SHA256SUMS` signed by the release key) and the first whose
-tarball leaves out `.github/`, `.gitignore` and `.gitattributes`; `v0.4.4` is
-the first whose manifest has the `license` row and whose `Cargo.toml` declares
-`rust-version`. Annotations at `private/TAG_MSG_v0.4.2`,
-`private/TAG_MSG_v0.4.3` and `private/TAG_MSG_v0.4.4`.
-The three before it were deleted from the remote and locally on 2026-10-02,
+Recipes build from a git tag, since `publish = false`. `v0.4.3` is the oldest
+tag on GitHub: the first with a published release (source tarball plus
+`SHA256SUMS` signed by the release key) and the first whose tarball leaves out
+`.github/`, `.gitignore` and `.gitattributes`. `v0.4.4` is the first whose
+manifest has the `license` row and whose `Cargo.toml` declares `rust-version`.
+Annotations at `private/TAG_MSG_v0.4.2`, `private/TAG_MSG_v0.4.3` and
+`private/TAG_MSG_v0.4.4`.
+Four names are gone and must never be reused: a clone made before a deletion
+still holds the old tag, and `git fetch` would not replace it. `v0.3.0`,
+`v0.4.0` and `v0.4.1` were deleted from the remote and locally on 2026-10-02,
 each unsuitable for a recipe: `v0.3.0` predated `.gitattributes`, `v0.4.0` the
 emitter audit's H-1 fix, and `v0.4.1` every recipe and the RUSTSEC-2026-0285
-`rustls` bump. Never reuse those names: a clone made before the deletion still
-holds the old tags, and `git fetch` would not replace them.
+`rustls` bump. `v0.4.2`, the first to carry a recipe, was deleted from GitHub
+the same day at 20:19 UTC, on purpose (confirmed 2026-10-05, when the docs
+still said to build from it). It is still a tag in this clone, `d7eea26` on
+`a1ed1d0`, so a `git push --tags` from here would put it back; the sync
+script pushes `main` only.
 
 ---
 

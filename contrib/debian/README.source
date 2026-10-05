@@ -19,8 +19,8 @@ undeliverable placeholder. Replace it before uploading anywhere.
 Rolling the orig tarball
 ------------------------
 
-Build from `v0.4.2` or later, the first tag that carries this recipe. The
-commands below use `v0.4.4`; `v0.4.3` was the first with a published release.
+Build from `v0.4.3` or later, the first tag with a published release. The
+commands below use `v0.4.4`.
 
     git archive --prefix=xtgeoip-0.4.4/ -o ../xtgeoip_0.4.4.orig.tar.gz v0.4.4
     tar xf ../xtgeoip_0.4.4.orig.tar.gz
