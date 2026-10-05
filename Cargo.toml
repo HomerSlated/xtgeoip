@@ -1,6 +1,6 @@
 [package]
 name = "xtgeoip"
-version = "0.4.3"
+version = "0.4.4"
 edition = "2024"
 # The oldest compiler this builds with, measured on 2026-10-04: 1.89.0 builds
 # and passes every test, and 1.88.0 is refused. It is not the edition's floor

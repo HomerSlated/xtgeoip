@@ -4,11 +4,11 @@
 # redhat-rpm-config, rpm's own brp-compress and macros.in, and Fedora's and
 # openSUSE's package archives. Built 2026-10-04 on Fedora Copr (build
 # 11073816 of hazensparkle/xtgeoip) for fedora-44-x86_64 and
-# opensuse-tumbleweed-x86_64, as it stood at commit e5f35a4. Since then:
-# comments, the changelog wording, the `license` arm in %%install, which no
-# row of v0.4.3's manifest reaches, and the rust floor, 1.85 then and 1.89
-# now (both chroots had 1.98.1). That build took the default path, with
-# network access. NOT BUILT: `--with vendor`. NOT DONE: an
+# opensuse-tumbleweed-x86_64, as it stood at commit e5f35a4 with Version
+# 0.4.3. That build took the default path, with network access. NOT BUILT
+# since: Version 0.4.4, the first whose manifest has the `license` row that
+# the arm in %%install answers, and the rust floor, 1.85 then and 1.89 now
+# (both chroots had 1.98.1). NOT BUILT at all: `--with vendor`. NOT DONE: an
 # install, an upgrade, rpmlint. Read contrib/README.md's status table before
 # relying on it.
 #
@@ -39,7 +39,7 @@
 %bcond_with vendor
 
 Name:           xtgeoip
-Version:        0.4.3
+Version:        0.4.4
 Release:        1%{?dist}
 Summary:        GeoLite2 database builder for the xt_geoip iptables match
 License:        MIT
@@ -63,7 +63,7 @@ Source10:       %{name}-%{version}-vendor.tar.xz
 %{?rust_arches:ExclusiveArch: %{rust_arches}}
 
 # The floor is the highest `rust-version` any locked crate declares, which at
-# v0.4.3 is 1.89 (aes 0.9.3, through zip). Not edition 2024's 1.85: cargo
+# v0.4.4 is 1.89 (aes 0.9.3, through zip). Not edition 2024's 1.85: cargo
 # refuses to build a crate with an older compiler than it declares. Upstream
 # declares the same number as `rust-version` in Cargo.toml from v0.4.4, and a
 # test there fails if this line disagrees. Recompute after a lockfile change:
@@ -193,5 +193,9 @@ done < manifest.rows
 %license LICENSE
 
 %changelog
+* Mon Oct 05 2026 xtgeoip packaging <packaging@example.invalid> - 0.4.4-1
+- Update to 0.4.4. The licence is installed once, by %%license: upstream's
+  manifest no longer lists it as a doc file.
+
 * Fri Oct 02 2026 xtgeoip packaging <packaging@example.invalid> - 0.4.3-1
 - Initial packaging, from contrib/rpm in the upstream tree.

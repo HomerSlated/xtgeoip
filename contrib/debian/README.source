@@ -20,11 +20,11 @@ Rolling the orig tarball
 ------------------------
 
 Build from `v0.4.2` or later, the first tag that carries this recipe. The
-commands below use `v0.4.3`, the first tag with a published release.
+commands below use `v0.4.4`; `v0.4.3` was the first with a published release.
 
-    git archive --prefix=xtgeoip-0.4.3/ -o ../xtgeoip_0.4.3.orig.tar.gz v0.4.3
-    tar xf ../xtgeoip_0.4.3.orig.tar.gz
-    cd xtgeoip-0.4.3
+    git archive --prefix=xtgeoip-0.4.4/ -o ../xtgeoip_0.4.4.orig.tar.gz v0.4.4
+    tar xf ../xtgeoip_0.4.4.orig.tar.gz
+    cd xtgeoip-0.4.4
     cp -r contrib/debian debian
     dpkg-buildpackage -us -uc
 
@@ -33,7 +33,7 @@ output, and verify it before renaming it to the orig name:
 
     gpg --verify SHA256SUMS.asc SHA256SUMS
     sha256sum -c SHA256SUMS
-    mv xtgeoip-0.4.3.tar.gz xtgeoip_0.4.3.orig.tar.gz
+    mv xtgeoip-0.4.4.tar.gz xtgeoip_0.4.4.orig.tar.gz
 
 The release key is `01282FB9C23478CF97A8D9041727776DA3AF9DF9`; its public
 half is `docs/release_public.asc`. Check the fingerprint against a second source
@@ -64,10 +64,10 @@ of them come from Debian. Two ways to feed the build:
     the dependencies into a second orig tarball, a `3.0 (quilt)` component
     named `vendor`, before building:
 
-        cd xtgeoip-0.4.3
+        cd xtgeoip-0.4.4
         cargo vendor --locked vendor
         tar --sort=name --owner=0 --group=0 --numeric-owner \
-            -czf ../xtgeoip_0.4.3.orig-vendor.tar.gz vendor
+            -czf ../xtgeoip_0.4.4.orig-vendor.tar.gz vendor
         dpkg-buildpackage -us -uc
 
     `dpkg-source` records both tarballs in the `.dsc` and unpacks the second
@@ -156,12 +156,6 @@ Measured with lintian 2.117.0ubuntu1.5 (Ubuntu 24.04) on 2026-09-30:
 under both the `debian` and the `ubuntu` profile. Every tag it still reports is
 expected, and each is listed here so that nobody chases it:
 
-  * `extra-license-file` (I). `/usr/share/doc/xtgeoip/LICENSE` duplicated
-    `debian/copyright`, because the manifest declared it as a file at that
-    path and this recipe installs what the manifest declares. Reported by
-    that run, and expected to be gone from a build of v0.4.4 or later: the
-    licence is now a `license` row with no path, for which `rules` installs
-    nothing. Not re-measured; lintian has not been run since the change.
   * `initial-upload-closes-no-bugs` (W). There is no ITP to close; see the top
     of this file.
   * `override_dh_auto_test-does-not-check-DEB_BUILD_OPTIONS` (I). A false
@@ -180,7 +174,15 @@ expected, and each is listed here so that nobody chases it:
     profile only. The changelog targets Debian unstable. For an Ubuntu upload,
     change the distribution.
 
-Two tags from an earlier run the same day, against the recipe before these
+One more tag from that run is gone. `extra-license-file` (I) was reported
+while the manifest declared `LICENSE` as a file at `/usr/share/doc/xtgeoip/`,
+where it duplicated `debian/copyright`. From v0.4.4 the licence is a `license`
+row with no path, for which `rules` installs nothing. Measured on 2026-10-05
+on a build of v0.4.4's tree: the package has `copyright` in that directory and
+no `LICENSE`, and the same lintian, under both profiles, reports the tags
+above and not this one.
+
+Two tags from an earlier run on 2026-09-30, against the recipe before these
 changes, were acted on:
 
   * `copyright-without-copyright-notice`. lintian wants a four-digit year

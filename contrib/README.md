@@ -27,6 +27,7 @@ A recipe's install step is then a loop, not a list. `contrib/debian/rules` is
 the worked example; this is its shape:
 
 ```sh
+set -e
 sed -e '/^#/d' -e '/^$/d' docs/generated/install-manifest.tsv \
 | while IFS="$(printf '\t')" read -r kind src transform dest mode; do
     case "$transform" in
@@ -44,7 +45,16 @@ sed -e '/^#/d' -e '/^$/d' docs/generated/install-manifest.tsv \
 done
 ```
 
-Four details that are not incidental:
+Five details that are not incidental:
+
+- **`set -e`, or no pipe.** The loop is the right-hand side of a pipe, so it
+  runs in a subshell, and `exit 1` there ends the subshell and nothing else.
+  Without `set -e` the script prints `unknown kind` and carries on to its next
+  command with status 0, which is the silent skip the `*)` arm is there to
+  prevent (measured under dash and bash). `debian/rules` opens with `set -e`.
+  The rpm spec takes the other way out: it writes the rows to a file and
+  reads them with `done < manifest.rows`, so the loop is in the shell that
+  has to stop.
 
 - **`--` before the operands.** GNU `install` permutes options among operands,
   so a `source` beginning with `-` is read as a flag: `install -D -m 0755
@@ -103,8 +113,9 @@ whether it is a file at all, so the manifest does not pretend to know:
 
 The row exists so that your recipe has to answer the question. MIT requires
 the text to accompany every copy, and your loop's `*)` arm will stop the build
-until it has a `license)` arm. In all five recipes here that arm does nothing
-and the format's own mechanism, outside the loop, installs the file. Until
+until it has a `license)` arm, given the `set -e` above. In all five recipes
+here that arm does nothing and the format's own mechanism, outside the loop,
+installs the file. Until
 v0.4.4 the licence was an ordinary `file` row at `/usr/share/doc/xtgeoip/`,
 and every package built from it carried the text twice or was flagged for it.
 
@@ -160,16 +171,18 @@ and every package built from it carried the text twice or was flagged for it.
 
 | Format | State |
 |---|---|
-| deb | `debian/`, written 2026-09-22, first tagged in `v0.4.2`. Built end to end on 2026-09-29, both with the network and offline from a vendored component tarball. |
+| deb | `debian/`, written 2026-09-22, first tagged in `v0.4.2`. Built end to end on 2026-09-29, both with the network and offline from a vendored component tarball. Built again on 2026-10-05, with the network, from the tree that became `v0.4.4`: 294 tests passed, the package holds the manifest's eight files and two directories, and the only licence text in it is `debian/copyright`. lintian 2.117 no longer reports `extra-license-file`. |
 | pacman | `arch/PKGBUILD`, written 2026-10-02 and built 2026-10-04 in an `archlinux:base-devel` container by `.github/workflows/packaging.yml` (run 37234035970, at commit 2b6bd68), with rustc 1.99.0, GCC 16.2.1 and makepkg 7.1.0. makepkg passed both checksums and the release key's signature on `SHA256SUMS`, built with `--frozen`, and passed 292 tests; the package holds the manifest's 11 rows at their modes plus the licence; `pacman -U` installed it, `xtgeoip --version` ran, and `pacman -Qkk` found no altered file. namcap 3.6.0 gave two warnings, both left alone: the empty `/var/lib/xt_geoip`, which is intended, and an unused `ld-linux` reference. An earlier run (37231823079) is why `depends` names `libgcc` and not `gcc-libs`. A third (37234046715) built the same PKGBUILD without `!lto` and failed at the link, so `!lto` is measured on Arch and not inherited. **Not done**: an upgrade. Pins v0.4.3. |
-| rpm | `rpm/xtgeoip.spec`, written 2026-10-02 and built 2026-10-04 on Fedora Copr (build 11073816 of `hazensparkle/xtgeoip`) for `fedora-44-x86_64` and `opensuse-tumbleweed-x86_64`, both with rustc 1.98.1 and GCC 16. On each: `cargo build --release --locked` with network access, 292 tests passed, and the package holds the manifest's 11 rows at their modes plus the licence, with the logrotate file `%config(noreplace)`, the man page gzipped by `brp-compress`, `Conflicts: xtables-geoip`, `Recommends: xtables-addons`, and a 20 MB debuginfo package. On Fedora `%openpgpverify` checked the release key's signature (1 of 1 valid); on Tumbleweed only the checksum ran, as designed. **Not built**: `--with vendor`. Not installed, and `rpmlint` not run. Distribution-neutral; `Version` tracks `Cargo.toml`. |
+| rpm | `rpm/xtgeoip.spec`, written 2026-10-02 and built 2026-10-04 on Fedora Copr (build 11073816 of `hazensparkle/xtgeoip`) for `fedora-44-x86_64` and `opensuse-tumbleweed-x86_64`, both with rustc 1.98.1 and GCC 16. On each: `cargo build --release --locked` with network access, 292 tests passed, and the package holds the manifest's 11 rows at their modes plus the licence, with the logrotate file `%config(noreplace)`, the man page gzipped by `brp-compress`, `Conflicts: xtables-geoip`, `Recommends: xtables-addons`, and a 20 MB debuginfo package. On Fedora `%openpgpverify` checked the release key's signature (1 of 1 valid); on Tumbleweed only the checksum ran, as designed. **Not built**: `--with vendor`. Not installed, and `rpmlint` not run. Distribution-neutral; `Version` tracks `Cargo.toml`, so it says 0.4.4 from that release, and the spec has not been built since it did. |
 | xbps | `void/srcpkgs/xtgeoip/template`, written and built 2026-10-02 on Void x86_64 (glibc) by a delegated session: `xbps-src -Q pkg` passed with 292 tests, `xlint` clean, the binary stripped, the manifest's 9 files plus the licence. Installed on that machine on 2026-10-03 from the build's local repository, and run: `xtgeoip --version` prints 0.4.3, the files are where the template's loop puts them (the man page uncompressed, as Void wants), and a run wrote 253 `.iv4` and 253 `.iv6` files into `/usr/share/xt_geoip`. Reported on 2026-10-04 by the session on that machine, which checked it there; not seen from here. The report does not say whether `/var/lib/xt_geoip` came from the `make_dirs` trigger, so that is still not confirmed. Pins v0.4.3. |
 | ebuild | `gentoo/net-firewall/xtgeoip/xtgeoip-0.4.3.ebuild`, written 2026-10-02 and built 2026-10-04 in a `gentoo/stage3` container by `.github/workflows/packaging.yml` (run 37240800966, at commit 9cd7980), with rust-bin 1.97.1. `ebuild ... manifest` fetched the tarball and all 306 crates and wrote a 307-line Manifest; `clean test install` built with `cargo build --release --locked`, passed 292 tests, and left an image holding the manifest's 11 rows at their modes, with docs under `xtgeoip-0.4.3/`, the man page and docs compressed by Portage, and a `.keep` file in each directory; `qmerge` installed it and `xtgeoip --version` ran. `pkgcheck scan` reported one thing, `MissingRemoteId`: there is no `metadata.xml`. Portage raised one QA notice: 306 crates is enough that it asks for a crate tarball in their place. An earlier run (37235252391) raised a second, which is why `RUST_MIN_VER` is 1.89 (finding 12). **Not done**: `RDEPEND`, since `ebuild` resolves no dependencies and that one is a kernel module; the crates' licences in `LICENSE`; the namespace sandboxes, which the container cannot provide. No Manifest is kept here. Pins v0.4.3. |
 | apk, nix, SlackBuild | not started |
 
-Every recipe gained a `license)` arm on 2026-10-04, after each build recorded
-above. The builds do not cover it: they read v0.4.3's manifest, which has no
-`license` row, so the arm was never reached.
+Every recipe gained a `license)` arm on 2026-10-04. Only the deb build of
+2026-10-05 reaches it. The other four builds above read v0.4.3's manifest,
+which has no `license` row, and each of them shipped the licence twice. The
+PKGBUILD, the Void template and the ebuild still pin v0.4.3; the spec does not,
+and is unbuilt at 0.4.4.
 
 `debian/README.source` is the one to read before writing another: it is where
 what this recipe cost gets written down. Four things it surfaced that every

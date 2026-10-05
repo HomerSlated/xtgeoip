@@ -6,10 +6,10 @@ Open work only. Everything closed up to 2026-09-05 is archived in
 close here move to the end of `DONE.md`, under *Closed after the archive*;
 there is no `TODO_tldr.md` any more.
 
-Opened 2026-09-06, brought up to date 2026-10-04. What is here now: the open
+Opened 2026-09-06, brought up to date 2026-10-05. What is here now: the open
 packaging work (three recipes unwritten, every written one built), one wording
-correction waiting for its file to change, the informational findings from two
-guardian audits, one policy question, and the three lists that are normative
+correction waiting for its file to change, the informational findings from
+three guardian audits, one policy question, and the three lists that are normative
 rather than historical.
 
 ---
@@ -44,12 +44,16 @@ constraints before implementation begins.
 
 ### Guardian re-signing
 
-**The queue is empty as of 2026-10-01T04:10Z**, across 36 rows, and all
+**The queue is empty as of 2026-10-05T12:01Z**, across 38 rows, and all
 seventeen signed source files verify GOOD. The last run
-(`guardian_report_20261001_034655.md`) re-signed `src/fetch.rs` and
-`src/bin/xtgeoip-docgen.rs` after two test-only changes, and raised one
-MEDIUM in a dependency, RUSTSEC-2026-0285 in `rustls`, closed by the 0.4.2
-lockfile bump.
+(`guardian_report_20261005_112412.md`) re-signed `src/bin/xtgeoip-docgen.rs`
+after the licence row of 2026-10-04, which changed its validator and its
+emitter and went a day without a queue row: the stale signature was found
+while preparing v0.4.4, not by the queue. It raised nothing at MEDIUM or
+above, one LOW in `contrib/README.md`, fixed with that release, and six
+informational notes, which are below under *GUARDIAN FINDINGS —
+`xtgeoip-docgen.rs`, 2026-10-05*. A change to a signed file gets its queue row
+in the commit that makes it.
 
 One wording correction is owed to `src/conf.rs`, deliberately **not** made:
 `set_credentials`'s comment says that once the config is 0600 "only root can
@@ -227,8 +231,10 @@ integration suite drives the release binary and is not covered by this.
   `/usr/share/doc/xtgeoip/LICENSE` and once where the format wants it. Fixed
   in the tree on 2026-10-04 and effective from v0.4.4: the licence is a
   `license` row with no path (packaging.md §6.3), and every recipe has an arm
-  for it. Owed after v0.4.4: a rebuild of each recipe that has been built, to
-  see one copy, and lintian without `extra-license-file`.
+  for it. Seen on Debian on 2026-10-05, on a build of v0.4.4's tree: one
+  licence text in the package, and lintian without `extra-license-file`. Owed
+  for the other four, after the pin bump below: a rebuild of each, to see one
+  copy.
 - **`contrib/void/` is built, installed and run.** Built on Void x86_64 glibc
   on 2026-10-02 by a delegated session, installed there the next day, and
   run; `contrib/README.md`'s status table has the detail, which is that
@@ -244,8 +250,10 @@ integration suite drives the release binary and is not covered by this.
 - **After every release**, the PKGBUILD's `pkgver` and `sha256sums` and the Void
   template's `version` and `checksum` move to the new tarball in a follow-up
   commit, and the ebuild is renamed with its `CRATES` regenerated from the new
-  `Cargo.lock`. They cannot move before it: each file ships inside the tarball
-  it pins. The rpm spec's `Version` and `%changelog` move *with* the release
+  `Cargo.lock`. Renamed, not copied: with two ebuilds in the directory,
+  `recipes_state_the_declared_compiler_floor` checks whichever `read_dir`
+  returns first (I-2 below). They cannot move before it: each file ships
+  inside the tarball it pins. The rpm spec's `Version` and `%changelog` move *with* the release
   instead, and nothing checks them against `Cargo.toml` yet, as
   `debian_changelog_version_matches_crate` does for Debian.
 - **sid's lintian 2.141 has not been run.** `Standards-Version: 4.7.4` rests on
@@ -258,13 +266,68 @@ integration suite drives the release binary and is not covered by this.
 Recipes build from a git tag, since `publish = false`. `v0.4.2` is the first
 to carry a recipe; `v0.4.3` is the first with a published release (source
 tarball plus `SHA256SUMS` signed by the release key) and the first whose
-tarball leaves out `.github/`, `.gitignore` and `.gitattributes`. Annotations
-at `private/TAG_MSG_v0.4.2` and `private/TAG_MSG_v0.4.3`.
+tarball leaves out `.github/`, `.gitignore` and `.gitattributes`; `v0.4.4` is
+the first whose manifest has the `license` row and whose `Cargo.toml` declares
+`rust-version`. Annotations at `private/TAG_MSG_v0.4.2`,
+`private/TAG_MSG_v0.4.3` and `private/TAG_MSG_v0.4.4`.
 The three before it were deleted from the remote and locally on 2026-10-02,
 each unsuitable for a recipe: `v0.3.0` predated `.gitattributes`, `v0.4.0` the
 emitter audit's H-1 fix, and `v0.4.1` every recipe and the RUSTSEC-2026-0285
 `rustls` bump. Never reuse those names: a clone made before the deletion still
 holds the old tags, and `git fetch` would not replace them.
+
+---
+
+## GUARDIAN FINDINGS — `xtgeoip-docgen.rs`, 2026-10-05
+
+From `private/guardian/guardian_report_20261005_112412.md`, the re-audit of the
+licence row before v0.4.4. The file **passed** and was re-signed: 0 CRITICAL,
+0 HIGH, 0 MEDIUM. The licence `source` is checked exactly as a file's is, it
+is the only licence field the emitter writes, and no value of `source`,
+`producer` or `summary` forges, splits or reshapes a manifest row (254,050
+generated values a field, and 47 edited copies of `install.yaml` through the
+real binary). All nine loops that read the manifest, the five recipes' among
+them, gave the same call log for seven hostile licence rows as for the real
+one, and each exits non-zero on an unknown kind.
+
+L-1 is closed: the reference loop in `contrib/README.md` is the right-hand
+side of a pipe and failed open without `set -e`, which it now has and
+explains. What remains is informational. I-1, I-2 and I-6 are edits to the
+signed file, so they wait for the next change that touches it; it will need
+re-signing either way.
+
+- **I-1** — `every_recipe_has_an_arm_for_every_kind` matches the substring
+  `{kind})`, not an arm. Removing each of the 18 arms in turn, two survive:
+  the ebuild's `dir)`, masked by `$(cargo_target_dir)`, and the README's
+  `license)`, masked by prose. A commented-out arm also survives. The `*)`
+  arm at build time is unaffected. *Match a line that starts with the arm,
+  and skip comments.*
+- **I-2** — `recipes_state_the_declared_compiler_floor` checks the first
+  ebuild `read_dir` returns, and `contains` accepts a commented-out
+  restatement beside a stale live line. *Check every ebuild, as the arm test
+  does. Until then, never keep two ebuilds in the directory.*
+- **I-3** — nothing reads the licence row's `source`: each recipe installs a
+  literal `LICENSE`. Pointing the row at `README.md` changes the manifest and
+  fails no test. This is the design (the row asks the question, the format
+  answers it), but three recipe comments say the row "names this file" and
+  nothing checks that. *No action.*
+- **I-4** — four licence-specific mutations survive `cargo test`: dropping
+  `no_control` on `producer` (equivalent, the allowlist subsumes it);
+  dropping the licence `PRODUCERS` check (no case sets a bad one, and
+  `producer` is never emitted); removing `deny_unknown_fields` from
+  `InstallLicense` (untested, though the binary does refuse `dest:` there);
+  and an emitter that writes `none` in the third field, which only
+  `docgen-check` catches. *Add cases when the file is next open.*
+- **I-5** — the emitter's second layer checks `\n`, `\r` and the tab count,
+  not control characters in general; the first layer does that. U+2028 and
+  U+2029 pass both, since `char::is_control` is category `Cc` only. dash and
+  bash read such a row as one row of five fields. Not new with this change.
+  *Re-check if a consumer ever splits lines the Unicode way.*
+- **I-6** — the comment on `InstallLicense::producer` says nothing requires a
+  licence to be `tracked`, and `install_set_sources_exist` requires exactly
+  that; two `read_dir` loops use `filter_map(Result::ok)`, which skips an
+  unreadable entry in silence; and `packaging.yml`'s two checking loops are
+  not on the arm test's list of recipes.
 
 ---
 
