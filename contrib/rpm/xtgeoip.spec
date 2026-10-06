@@ -2,15 +2,14 @@
 #
 # Written 2026-10-02 from Fedora's cargo-rpm-macros 28.5 and
 # redhat-rpm-config, rpm's own brp-compress and macros.in, and Fedora's and
-# openSUSE's package archives. Built 2026-10-04 on Fedora Copr (build
-# 11073816 of hazensparkle/xtgeoip) for fedora-44-x86_64 and
-# opensuse-tumbleweed-x86_64, as it stood at commit e5f35a4 with Version
-# 0.4.3. That build took the default path, with network access. NOT BUILT
-# since: Version 0.4.4, the first whose manifest has the `license` row that
-# the arm in %%install answers, and the rust floor, 1.85 then and 1.89 now
-# (both chroots had 1.98.1). NOT BUILT at all: `--with vendor`. NOT DONE: an
-# install, an upgrade, rpmlint. Read contrib/README.md's status table before
-# relying on it.
+# openSUSE's package archives. Built 2026-10-06 on Fedora Copr (build
+# 11085503 of hazensparkle/xtgeoip) for fedora-44-x86_64 and
+# opensuse-tumbleweed-x86_64, at Version 0.4.4: the first build whose
+# manifest has the `license` row, and each package holds one licence file.
+# Only this comment has changed since. That build took the default path,
+# with network access. NOT BUILT: `--with vendor`. NOT DONE: an install, an
+# upgrade, rpmlint. Read contrib/README.md's status table before relying on
+# it.
 #
 # Distribution-neutral on purpose: Fedora, openSUSE and RHEL each have their
 # own Rust macros, and the one this file would otherwise use is unsafe here.

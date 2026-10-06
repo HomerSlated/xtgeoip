@@ -212,9 +212,11 @@ integration suite drives the release binary and is not covered by this.
   that needs a newer compiler, a security fix included; raising
   `rust-version` to take it is a decision to make then.
 - **`contrib/rpm/xtgeoip.spec` is built but not installed.** Fedora Copr
-  build 11073816 (`hazensparkle/xtgeoip`, 2026-10-04) succeeded for
-  `fedora-44-x86_64` and `opensuse-tumbleweed-x86_64`; `contrib/README.md`'s
-  status table says what that proved. Still owed:
+  builds 11073816 (`hazensparkle/xtgeoip`, 2026-10-04, v0.4.3) and 11085503
+  (2026-10-06, v0.4.4) succeeded for `fedora-44-x86_64` and
+  `opensuse-tumbleweed-x86_64`; `contrib/README.md`'s status table says what
+  each proved. The second was submitted with `copr-cli`, which is set up on
+  the VPS. Still owed:
   - `--with vendor`, the offline path. Copr built with network access.
   - An install and an upgrade: `%config(noreplace)` on the logrotate file,
     and `Conflicts: xtables-geoip` against the real package on openSUSE.
@@ -226,20 +228,22 @@ integration suite drives the release binary and is not covered by this.
   - A decision the Tumbleweed package makes visible: openSUSE files docs
     under `/usr/share/doc/packages/`, and the package has them in
     `/usr/share/doc/xtgeoip`, as the manifest says.
-  The logs are kept in `private/copr/11073816/`. Copr deletes a build 14 days
-  after a newer one of the same package replaces it.
+  The logs are kept in `private/copr/11073816/` and, with both packages,
+  `private/copr/11085503/`. Copr deletes a build 14 days after a newer one of
+  the same package replaces it, so 11073816 goes around 2026-10-20.
 - **`LICENSE` is a doc file in every package built from v0.4.3**, at
   `/usr/share/doc/xtgeoip/LICENSE`: a second copy in the rpm, pacman and xbps
   packages, a lintian tag on Debian, and on Gentoo the only copy, where
-  Gentoo wants none. Fixed in the tree on 2026-10-04 and effective from v0.4.4: the licence is a
-  `license` row with no path (packaging.md §6.3), and every recipe has an arm
-  for it. Seen on Debian on 2026-10-05, on a build of v0.4.4's tree: one
+  Gentoo wants none. Fixed in the tree on 2026-10-04 and effective from
+  v0.4.4: the licence is a `license` row with no path (packaging.md §6.3),
+  and every recipe has an arm for it. Seen on Debian on 2026-10-05, on a build of v0.4.4's tree: one
   licence text in the package, and lintian without `extra-license-file`. Owed
   Seen on Arch and Gentoo on 2026-10-06 (run 37487856506): one licence file
   in the Arch package, none in the Gentoo image, and `packaging.yml` now
-  fails either job on any other count. Still owed: rpm, by resubmitting the
-  spec on Copr, and xbps, on the Void machine. For those two the count has
-  to be read from the package listing.
+  fails either job on any other count. Seen on Fedora and Tumbleweed the
+  same day (Copr build 11085503): one licence file in each rpm, read from
+  the package headers. Still owed: xbps, on the Void machine, where the
+  count has to be read from the package listing.
 - **`contrib/void/` is built, installed and run.** Built on Void x86_64 glibc
   on 2026-10-02 by a delegated session, installed there the next day, and
   run; `contrib/README.md`'s status table has the detail, which is that
@@ -259,9 +263,9 @@ integration suite drives the release binary and is not covered by this.
   `Cargo.lock`. Renamed, not copied: with two ebuilds in the directory,
   `recipes_state_the_declared_compiler_floor` checks whichever `read_dir`
   returns first (I-2 below). They cannot move before it: each file ships
-  inside the tarball it pins. The rpm spec's `Version` and `%changelog` move *with* the release
-  instead, and nothing checks them against `Cargo.toml` yet, as
-  `debian_changelog_version_matches_crate` does for Debian.
+  inside the tarball it pins. The rpm spec's `Version` and `%changelog` move
+  *with* the release instead, and nothing checks them against `Cargo.toml`
+  yet, as `debian_changelog_version_matches_crate` does for Debian.
 - **sid's lintian 2.141 has not been run.** `Standards-Version: 4.7.4` rests on
   the upgrading checklist and a lintian that knows Policy only to 4.6.2.
 - **README's usage block has no drift check.** Since 2026-10-02 it is the
