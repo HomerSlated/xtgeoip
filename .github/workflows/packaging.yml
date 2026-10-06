@@ -117,6 +117,11 @@ jobs:
           done < <(sed -e '/^#/d' -e '/^$/d' "$manifest")
           echo "$rows manifest rows present at their modes"
           [ -f "$root/usr/share/licenses/xtgeoip/LICENSE" ]
+          # And nowhere else. Until v0.4.4 the manifest also listed it as a
+          # doc file, and the package carried two.
+          found=$(find "$root" -type f -iname 'LICENSE*')
+          [ "$found" = "$root/usr/share/licenses/xtgeoip/LICENSE" ] ||
+            { echo "licence files: $found"; exit 1; }
           gzip -t "$root/usr/share/man/man1/xtgeoip.1.gz"
       # The image's pacman.conf has NoExtract lines for usr/share/doc and
       # usr/share/man, to keep it small. With them, the install below skips
@@ -223,6 +228,10 @@ jobs:
             [ "0$got" = "$mode" ] || { echo "$found is 0$got, not $mode"; exit 1; }
           done < <(sed -e '/^#/d' -e '/^$/d' "$manifest")
           echo "$rows manifest rows present at their modes"
+          # LICENSE= names the text in the Gentoo repository. Until v0.4.4
+          # the manifest listed it as a doc file, and the image had one.
+          found=$(find "$image" -type f -iname 'LICENSE*')
+          [ -z "$found" ] || { echo "licence file in the image: $found"; exit 1; }
       # noclean keeps the build directory, and with it the log, past the merge.
       - name: Merge it and run it
         run: |

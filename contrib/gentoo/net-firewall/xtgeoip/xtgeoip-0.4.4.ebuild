@@ -1,15 +1,19 @@
-# xtgeoip-0.4.3.ebuild — build xtgeoip as a Gentoo package.
+# xtgeoip-0.4.4.ebuild — build xtgeoip as a Gentoo package.
 #
 # Written 2026-10-02 from cargo.eclass (gentoo.git master), the devmanual and
 # the net-firewall/xtables-addons ebuild. Built 2026-10-04 in a gentoo/stage3
 # container by .github/workflows/packaging.yml (run 37240800966, at commit
 # 9cd7980): `ebuild ... manifest`, then `clean test install`, `qmerge` and
-# `pkgcheck scan`, with rust-bin 1.97.1. Only comments have changed since.
-# `ebuild` resolves no dependencies, so RDEPEND was not exercised. Read
-# contrib/README.md's status table before relying on it.
+# `pkgcheck scan`, with rust-bin 1.97.1. That build was of v0.4.3, under
+# that name. Since then: comments, and on 2026-10-06 the rename to 0.4.4;
+# CRATES is unchanged, because the two lockfiles differ only in xtgeoip's
+# own version. NOT BUILT at 0.4.4, the first release whose manifest has the
+# `license` row that the arm in src_install answers. `ebuild` resolves no
+# dependencies, so RDEPEND was not exercised. Read contrib/README.md's
+# status table before relying on it.
 #
 # Not in ::gentoo or any overlay. Copy it into an overlay as
-# net-firewall/xtgeoip/ and run `ebuild xtgeoip-0.4.3.ebuild manifest` there;
+# net-firewall/xtgeoip/ and run `ebuild xtgeoip-0.4.4.ebuild manifest` there;
 # no Manifest is kept here, because it would restate every crate's hash and
 # the tarball's.
 #
@@ -21,7 +25,7 @@
 #
 # Portage builds with no network, so every crate is a distfile. CRATES is
 # generated from Cargo.lock, never edited by hand: 306 registry crates, no git
-# crates, at v0.4.3.
+# crates, at v0.4.4.
 
 EAPI=8
 
@@ -335,7 +339,7 @@ CRATES="
 "
 
 # The floor is the highest `rust-version` any locked crate declares, which at
-# v0.4.3 is 1.89 (aes 0.9.3, through zip). Not edition 2024's 1.85: cargo
+# v0.4.4 is 1.89 (aes 0.9.3, through zip). Not edition 2024's 1.85: cargo
 # refuses to build a crate with an older compiler than it declares. Upstream
 # declares the same number as `rust-version` in Cargo.toml from v0.4.4, and a
 # test there fails if this line disagrees. Recompute after a lockfile change:

@@ -234,8 +234,10 @@ integration suite drives the release binary and is not covered by this.
   `license` row with no path (packaging.md §6.3), and every recipe has an arm
   for it. Seen on Debian on 2026-10-05, on a build of v0.4.4's tree: one
   licence text in the package, and lintian without `extra-license-file`. Owed
-  for the other four, after the pin bump below: a rebuild of each, to see one
-  copy, and on Gentoo none.
+  for the other four, which all name v0.4.4 since the pin bump of 2026-10-06:
+  a rebuild of each, to see one copy, and on Gentoo none. `packaging.yml` now
+  fails on the wrong count for Arch and Gentoo; for rpm and xbps it has to be
+  read from the package listing.
 - **`contrib/void/` is built, installed and run.** Built on Void x86_64 glibc
   on 2026-10-02 by a delegated session, installed there the next day, and
   run; `contrib/README.md`'s status table has the detail, which is that
@@ -278,9 +280,8 @@ each unsuitable for a recipe: `v0.3.0` predated `.gitattributes`, `v0.4.0` the
 emitter audit's H-1 fix, and `v0.4.1` every recipe and the RUSTSEC-2026-0285
 `rustls` bump. `v0.4.2`, the first to carry a recipe, was deleted from GitHub
 the same day at 20:19 UTC, on purpose (confirmed 2026-10-05, when the docs
-still said to build from it). It is still a tag in this clone, `d7eea26` on
-`a1ed1d0`, so a `git push --tags` from here would put it back; the sync
-script pushes `main` only.
+still said to build from it), and from this clone on 2026-10-06. It was tag
+object `d7eea26` on commit `a1ed1d0`, which is still in `main`'s history.
 
 ---
 

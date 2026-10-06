@@ -3,10 +3,11 @@
 # Written 2026-10-02 against Arch's makepkg.conf and pacman source as of that
 # date. Built 2026-10-04 in an archlinux:base-devel container by
 # .github/workflows/packaging.yml (run 37234035970, at commit 2b6bd68):
-# makepkg, namcap, `pacman -U` and `pacman -Qkk`, all passing. Only comments
-# have changed since. package() has a `license` arm that no row of v0.4.3's
-# manifest reaches, so that build did not exercise it. Read
-# contrib/README.md's status table before relying on it.
+# makepkg, namcap, `pacman -U` and `pacman -Qkk`, all passing. That build
+# was of v0.4.3. Since then: comments, and on 2026-10-06 the pin, to v0.4.4.
+# NOT BUILT at 0.4.4, the first release whose manifest has the `license` row
+# that the arm in package() answers. Read contrib/README.md's status table
+# before relying on it.
 #
 # Not in the AUR, and the Maintainer line below is a placeholder. Whoever
 # submits it owns that line; it is not upstream.
@@ -24,7 +25,7 @@
 # than listing files here.
 
 pkgname=xtgeoip
-pkgver=0.4.3
+pkgver=0.4.4
 pkgrel=1
 pkgdesc='GeoLite2 database builder for the xt_geoip iptables match'
 arch=('x86_64')
@@ -70,8 +71,8 @@ _url="https://github.com/HomerSlated/xtgeoip/releases/download/v$pkgver"
 source=("$_url/$pkgname-$pkgver.tar.gz"
         "$pkgname-$pkgver-SHA256SUMS::$_url/SHA256SUMS"
         "$pkgname-$pkgver-SHA256SUMS.asc::$_url/SHA256SUMS.asc")
-sha256sums=('4b30e8975625b5e19f9bb585fdd4cb6eec1968f1b90ba4c0d65664b5bb510769'
-            'f9b27c12750386c6a7edbb15821cac0b367d35fbb84db2f9f2def7f6f81d75e3'
+sha256sums=('6b294d406b3fd68af7e0579693c0d730b6309834db5aea18ff658f5b2a192317'
+            '0131b1a53e38fd6f06a969f832aebd44aa6556d4f3cd921e5909636365a6b70d'
             'SKIP')
 # The release key's primary fingerprint. It signs with a subkey, and makepkg
 # compares the primary's (VALIDSIG field 10). The key is not on a keyserver:

@@ -9,7 +9,7 @@
 # SHA256SUMS is signed by 01282FB9C23478CF97A8D9041727776DA3AF9DF9
 # (docs/release_public.asc); verify it by hand when moving the pin.
 pkgname=xtgeoip
-version=0.4.3
+version=0.4.4
 revision=1
 # The cargo style's do_build is `cargo auditable build --release --locked
 # --target ${RUST_TARGET}`, fetching from crates.io into /host/cargo: it
@@ -30,7 +30,7 @@ maintainer="xtgeoip packaging <packaging@example.invalid>"
 license="MIT"
 homepage="https://github.com/HomerSlated/xtgeoip"
 distfiles="https://github.com/HomerSlated/xtgeoip/releases/download/v${version}/xtgeoip-${version}.tar.gz"
-checksum=4b30e8975625b5e19f9bb585fdd4cb6eec1968f1b90ba4c0d65664b5bb510769
+checksum=6b294d406b3fd68af7e0579693c0d730b6309834db5aea18ff658f5b2a192317
 # The operator's rotation policy. /etc/xtgeoip.conf is deliberately not
 # shipped: the program creates it and rewrites it in place.
 conf_files="/etc/logrotate.d/xtgeoip"
