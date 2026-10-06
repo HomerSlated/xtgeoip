@@ -1,13 +1,12 @@
 # PKGBUILD — build xtgeoip as an Arch Linux package.
 #
 # Written 2026-10-02 against Arch's makepkg.conf and pacman source as of that
-# date. Built 2026-10-04 in an archlinux:base-devel container by
-# .github/workflows/packaging.yml (run 37234035970, at commit 2b6bd68):
-# makepkg, namcap, `pacman -U` and `pacman -Qkk`, all passing. That build
-# was of v0.4.3. Since then: comments, and on 2026-10-06 the pin, to v0.4.4.
-# NOT BUILT at 0.4.4, the first release whose manifest has the `license` row
-# that the arm in package() answers. Read contrib/README.md's status table
-# before relying on it.
+# date. Built 2026-10-06 in an archlinux:base-devel container by
+# .github/workflows/packaging.yml (run 37487856506, at commit 7e9645b):
+# makepkg, namcap, `pacman -U` and `pacman -Qkk`, all passing, at v0.4.4.
+# That is the first build whose manifest has the `license` row, and the
+# package holds one licence file. Only this comment has changed since. Read
+# contrib/README.md's status table before relying on it.
 #
 # Not in the AUR, and the Maintainer line below is a placeholder. Whoever
 # submits it owns that line; it is not upstream.

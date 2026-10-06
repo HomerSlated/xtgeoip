@@ -1,16 +1,14 @@
 # xtgeoip-0.4.4.ebuild — build xtgeoip as a Gentoo package.
 #
 # Written 2026-10-02 from cargo.eclass (gentoo.git master), the devmanual and
-# the net-firewall/xtables-addons ebuild. Built 2026-10-04 in a gentoo/stage3
-# container by .github/workflows/packaging.yml (run 37240800966, at commit
-# 9cd7980): `ebuild ... manifest`, then `clean test install`, `qmerge` and
-# `pkgcheck scan`, with rust-bin 1.97.1. That build was of v0.4.3, under
-# that name. Since then: comments, and on 2026-10-06 the rename to 0.4.4;
-# CRATES is unchanged, because the two lockfiles differ only in xtgeoip's
-# own version. NOT BUILT at 0.4.4, the first release whose manifest has the
-# `license` row that the arm in src_install answers. `ebuild` resolves no
-# dependencies, so RDEPEND was not exercised. Read contrib/README.md's
-# status table before relying on it.
+# the net-firewall/xtables-addons ebuild. Built 2026-10-06 in a gentoo/stage3
+# container by .github/workflows/packaging.yml (run 37487856506, at commit
+# 7e9645b): `ebuild ... manifest`, then `clean test install`, `qmerge` and
+# `pkgcheck scan`, with rust-bin 1.97.1, at v0.4.4. That is the first build
+# whose manifest has the `license` row, and the image holds no licence file.
+# Only this comment has changed since. `ebuild` resolves no dependencies, so
+# RDEPEND was not exercised. Read contrib/README.md's status table before
+# relying on it.
 #
 # Not in ::gentoo or any overlay. Copy it into an overlay as
 # net-firewall/xtgeoip/ and run `ebuild xtgeoip-0.4.4.ebuild manifest` there;

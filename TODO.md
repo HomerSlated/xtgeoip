@@ -190,9 +190,10 @@ integration suite drives the release binary and is not covered by this.
 - **Three recipes unwritten**: apk, nix, SlackBuild.
   `contrib/README.md` lists the eleven findings the first five produced.
 - **The ebuild is built and merged, in a container.** `packaging.yml` run
-  37240800966 (2026-10-04); `contrib/README.md`'s status table says what it
-  proved. The Manifest it generated is in `private/gh-runs/37240800966/`, and
-  is not kept in the tree. Owed before it could go to an overlay:
+  37240800966 (2026-10-04) at v0.4.3 and run 37487856506 (2026-10-06) at
+  v0.4.4; `contrib/README.md`'s status table says what each proved. The
+  Manifest each generated is under `private/gh-runs/`, and is not kept in
+  the tree. Owed before it could go to an overlay:
   - the crates' licences in `LICENSE` (pycargoebuild);
   - a `metadata.xml`, which is all `pkgcheck scan` asked for;
   - Portage's QA notice asking for a crate tarball in place of 306 `CRATES`,
@@ -234,10 +235,11 @@ integration suite drives the release binary and is not covered by this.
   `license` row with no path (packaging.md §6.3), and every recipe has an arm
   for it. Seen on Debian on 2026-10-05, on a build of v0.4.4's tree: one
   licence text in the package, and lintian without `extra-license-file`. Owed
-  for the other four, which all name v0.4.4 since the pin bump of 2026-10-06:
-  a rebuild of each, to see one copy, and on Gentoo none. `packaging.yml` now
-  fails on the wrong count for Arch and Gentoo; for rpm and xbps it has to be
-  read from the package listing.
+  Seen on Arch and Gentoo on 2026-10-06 (run 37487856506): one licence file
+  in the Arch package, none in the Gentoo image, and `packaging.yml` now
+  fails either job on any other count. Still owed: rpm, by resubmitting the
+  spec on Copr, and xbps, on the Void machine. For those two the count has
+  to be read from the package listing.
 - **`contrib/void/` is built, installed and run.** Built on Void x86_64 glibc
   on 2026-10-02 by a delegated session, installed there the next day, and
   run; `contrib/README.md`'s status table has the detail, which is that
@@ -245,11 +247,12 @@ integration suite drives the release binary and is not covered by this.
   `make_dirs` trigger (not confirmed either way), `conf_files` handling on
   upgrade, and musl.
 - **`contrib/arch/PKGBUILD` is built and installed, in a container.**
-  `packaging.yml` run 37234035970 (2026-10-04) passed every step;
-  `contrib/README.md`'s status table says what it proved. `!lto` is settled:
-  run 37234046715 built without it and failed at the link. Still owed: an
-  upgrade, for `backup=`. The logs and packages of all three runs are in
-  `private/gh-runs/`.
+  `packaging.yml` run 37234035970 (2026-10-04) passed every step at v0.4.3,
+  and run 37487856506 (2026-10-06) at v0.4.4; `contrib/README.md`'s status
+  table says what each proved. `!lto` is settled: run 37234046715 built
+  without it and failed at the link. Still owed: an upgrade, for `backup=`,
+  which the two packages now kept would allow. The logs and packages of all
+  four runs are in `private/gh-runs/`.
 - **After every release**, the PKGBUILD's `pkgver` and `sha256sums` and the Void
   template's `version` and `checksum` move to the new tarball in a follow-up
   commit, and the ebuild is renamed with its `CRATES` regenerated from the new

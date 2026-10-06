@@ -104,7 +104,6 @@ jobs:
           manifest=$(ls src/xtgeoip-*/docs/generated/install-manifest.tsv)
           rows=0
           while IFS=$'\t' read -r kind src transform dest mode; do
-            rows=$((rows + 1))
             case "$kind" in
               file) [ -f "$root$dest" ] || { echo "missing file $dest"; exit 1; } ;;
               dir) [ -d "$root$dest" ] || { echo "missing dir $dest"; exit 1; } ;;
@@ -114,8 +113,9 @@ jobs:
             esac
             got=$(stat -c '%a' "$root$dest")
             [ "0$got" = "$mode" ] || { echo "$dest is 0$got, not $mode"; exit 1; }
+            rows=$((rows + 1))
           done < <(sed -e '/^#/d' -e '/^$/d' "$manifest")
-          echo "$rows manifest rows present at their modes"
+          echo "$rows file and directory rows present at their modes"
           [ -f "$root/usr/share/licenses/xtgeoip/LICENSE" ]
           # And nowhere else. Until v0.4.4 the manifest also listed it as a
           # doc file, and the package carried two.
@@ -206,7 +206,6 @@ jobs:
           manifest=$(ls "$work"/work/xtgeoip-*/docs/generated/install-manifest.tsv)
           rows=0
           while IFS=$'\t' read -r kind src transform dest mode; do
-            rows=$((rows + 1))
             case "$dest" in
               /usr/share/doc/xtgeoip/*) dest="/usr/share/doc/$pf/${dest#/usr/share/doc/xtgeoip/}" ;;
             esac
@@ -226,8 +225,9 @@ jobs:
             esac
             got=$(stat -c '%a' "$found")
             [ "0$got" = "$mode" ] || { echo "$found is 0$got, not $mode"; exit 1; }
+            rows=$((rows + 1))
           done < <(sed -e '/^#/d' -e '/^$/d' "$manifest")
-          echo "$rows manifest rows present at their modes"
+          echo "$rows file and directory rows present at their modes"
           # LICENSE= names the text in the Gentoo repository. Until v0.4.4
           # the manifest listed it as a doc file, and the image had one.
           found=$(find "$image" -type f -iname 'LICENSE*')
