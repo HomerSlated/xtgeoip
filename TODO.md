@@ -237,19 +237,25 @@ integration suite drives the release binary and is not covered by this.
   Gentoo wants none. Fixed in the tree on 2026-10-04 and effective from
   v0.4.4: the licence is a `license` row with no path (packaging.md §6.3),
   and every recipe has an arm for it. Seen on Debian on 2026-10-05, on a build of v0.4.4's tree: one
-  licence text in the package, and lintian without `extra-license-file`. Owed
+  licence text in the package, and lintian without `extra-license-file`.
   Seen on Arch and Gentoo on 2026-10-06 (run 37487856506): one licence file
   in the Arch package, none in the Gentoo image, and `packaging.yml` now
   fails either job on any other count. Seen on Fedora and Tumbleweed the
   same day (Copr build 11085503): one licence file in each rpm, read from
-  the package headers. Still owed: xbps, on the Void machine, where the
-  count has to be read from the package listing.
+  the package headers. Seen on Void the same day, in the listing of
+  `xtgeoip-0.4.4_1.x86_64.xbps`: one licence file, under
+  `/usr/share/licenses/xtgeoip/`. That is all five recipes; nothing is owed
+  here.
 - **`contrib/void/` is built, installed and run.** Built on Void x86_64 glibc
   on 2026-10-02 by a delegated session, installed there the next day, and
   run; `contrib/README.md`'s status table has the detail, which is that
-  session's report and was not seen from here. Still not exercised: the
-  `make_dirs` trigger (not confirmed either way), `conf_files` handling on
-  upgrade, and musl.
+  session's report and was not seen from here. Rebuilt at v0.4.4 on
+  2026-10-06 by the session on that machine (294 tests, `xlint` clean, one
+  licence file), and not installed. The package is 3,182,375 bytes, sha256
+  `cce91b43…8223`; its logs are on the Void machine under
+  `~/Reports/xtgeoip/`, not here. Still not exercised: the `make_dirs`
+  trigger (not confirmed either way), `conf_files` handling on upgrade,
+  which the 0.4.3 install and this package would now allow, and musl.
 - **`contrib/arch/PKGBUILD` is built and installed, in a container.**
   `packaging.yml` run 37234035970 (2026-10-04) passed every step at v0.4.3,
   and run 37487856506 (2026-10-06) at v0.4.4; `contrib/README.md`'s status
