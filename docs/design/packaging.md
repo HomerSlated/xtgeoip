@@ -3,7 +3,7 @@
 Status: **analysis, with §6 settled and the first recipe written**. Written
 2026-09-13; §6's four decisions taken 2026-09-19, and §4's exclusions extended
 2026-09-20. `contrib/debian/` landed 2026-09-22, built against the derived
-install manifest; of the other seven of §5, four have been written since and
+install manifest; the other four of §5 have been written since and
 `contrib/README.md` has their state. `v0.4.3` is the
 first tag recipes can build from and the first with a published release, and
 `v0.4.4` the first whose manifest gives the licence a row of its own (§6.3);
@@ -32,8 +32,8 @@ Measurements are from the 0.3.0 release build on 2026-09-13, x86-64, glibc.
 3. Three build facts constrain every recipe: `aws-lc-rs` needs a C toolchain,
    the lockfile has 306 crates, and `publish = false` means there is no
    crates.io tarball to build from. §3.
-4. Eight recipes cover effectively every distribution anyone will ask about,
-   and they share one shape. §5.
+4. Five recipes cover most distributions anyone will ask about, and they
+   share one shape. §5.
 5. Release assets are **source only** — no binary tarball. A program that
    cannot run without a distribution-supplied kernel module is served by
    recipes, not by a static binary. The source tarball is **self-published**;
@@ -106,7 +106,7 @@ existed: this note previously said the completions were small enough to leave
 the totals unchanged to three significant figures, and they are not — 8.85
 becomes 8.87. The binary is still 99.7% of the package.
 
-Nine files across eight recipes is 72 restatements that nothing verifies,
+Nine files across five recipes is 45 restatements that nothing verifies,
 which is what makes §6.3's derive-don't-restate worth building.
 
 ### Deliberately not installed
@@ -262,8 +262,8 @@ first one disagreed with it:
   the lockfile's. Hosting our copy carries no extra guarantee.
 - No recipe consumes it. The Debian recipe has the packager vendor into a
   `3.0 (quilt)` component tarball that unpacks to `vendor/`, a shape a single
-  combined archive does not have. Arch, Gentoo, Nix and Alpine fetch locked
-  crates with their own mechanisms.
+  combined archive does not have. Arch and Gentoo fetch locked crates with
+  their own mechanisms.
 - It costs about 50 MB per release against a source tarball of about 370 KB,
   and makes upstream the redistributor of all 306 crates. It also freezes
   them: a crate that gets an advisory after the release (as `rustls` did
@@ -384,7 +384,7 @@ reverses, start here rather than re-deriving it.
 
 ## 5. Recipes
 
-Eight formats cover effectively every distribution in DistroWatch's top 20.
+Five formats cover most distributions in DistroWatch's top 20.
 The ranking itself moves and could not be verified here (DistroWatch returns
 403 to scripted requests), so this maps formats to families rather than
 claiming an order.
@@ -396,11 +396,8 @@ claiming an order.
 | pacman | `PKGBUILD` | Arch, Manjaro, EndeavourOS, Garuda, CachyOS |
 | xbps | `srcpkgs/xtgeoip/template`, `build_style=cargo` | Void |
 | ebuild | `xtgeoip-0.3.0.ebuild`, `cargo.eclass`, `CRATES=` | Gentoo |
-| apk | `APKBUILD` | Alpine |
-| nix | `rustPlatform.buildRustPackage` with `cargoHash` | NixOS |
-| SlackBuild | shell script | Slackware |
 
-Every one of them is the same package expressed eight ways:
+Every one of them is the same package expressed five ways:
 
 1. build `cargo build --release --locked`;
 2. install the files of §1 and create the two directories;
@@ -412,8 +409,8 @@ one declaration rather than each recipe restating it. `conf/` already mirrors
 the target filesystem and is the natural seed for that declaration.
 
 **Where to start: deb and PKGBUILD.** They are the least ceremonious of the
-eight and cover the most users, and writing them will surface whatever the
-other six also need — most likely the `aws-lc-sys` build dependency. Note that
+five and cover the most users, and writing them will surface whatever the
+other three also need — most likely the `aws-lc-sys` build dependency. Note that
 cmake is *not* among the build dependencies: `aws-lc-sys` takes its
 pregenerated-source `cc` path (§4).
 
@@ -428,7 +425,7 @@ prevent, and for the one class of crate where a silent re-resolve is not
 recoverable. It would also need all 307 lockfile crates packaged in Debian at
 the pinned versions, which they are not. Plain `dh` with an
 `override_dh_auto_build` calling `cargo` directly. The same question is waiting
-in the rpm, ebuild and apk recipes, each of which has its own Rust helper.
+in the rpm and ebuild recipes, each of which has its own Rust helper.
 
 The second is the `aws-lc-sys` prediction, which was right about the fact and
 wrong about the consequence. A C compiler is needed, and on Debian it needs no
@@ -439,7 +436,7 @@ one line the recipe does not contain.
 
 What the recipe actually cost is written down in `contrib/debian/README.source`
 and summarised in `contrib/README.md`'s status table; the two findings likely
-to bind on the other seven are that a packaging system may already *be* the
+to bind on the other four are that a packaging system may already *be* the
 `transform` column (Debian's `dh_strip` and `dh_compress` are exactly `strip`
 and `gzip`, so `debian/rules` performs neither), and that this package's
 `-dbgsym` is empty because `Cargo.toml` sets no `[profile.release]` — which
@@ -550,7 +547,7 @@ which is useful to every recipe in §5.
 recipe that lives only in a distribution's tree and is never built here drifts
 from §1 with nothing reporting it.
 
-Derive the file list from one declaration rather than restating it eight times.
+Derive the file list from one declaration rather than restating it five times.
 **The declaration half-exists already**: `conf/` mirrors the target filesystem
 (`conf/etc/logrotate.d/xtgeoip`, `conf/usr/share/xt_geoip/xtgeoip.conf.example`),
 so a recipe walking it gets paths and layout for free. What is missing is that
@@ -560,7 +557,7 @@ two created directories live.
 This is the generated-vs-hand-written problem the spec work exists to solve,
 in a new place, and it should be solved the same way. Note that 6.1 sharpens
 it: completions take the install set from six files to nine, and nine files
-restated across eight recipes is 72 statements that nothing verifies.
+restated across five recipes is 45 statements that nothing verifies.
 
 **Done.** `docs/spec/install.yaml` declares the nine files and two directories
 once; docgen emits `docs/generated/install-manifest.tsv` from it, which picks
@@ -575,8 +572,8 @@ not files on disk in the form they ship**. So each carries a `producer`
 recipe that ignores the `transform` column installs an unstripped binary and
 an uncompressed man page: both work, and both are flagged in review.
 
-One neutral manifest, not eight format fragments. No recipe existed to check a
-`debian/install` or an rpm `%files` block against, and generating eight
+One neutral manifest, not five format fragments. No recipe existed to check a
+`debian/install` or an rpm `%files` block against, and generating five
 dialects against zero real consumers is guessing with a build step attached.
 
 **`debian/` is now written, and it wants no emitter.** Its install step reads

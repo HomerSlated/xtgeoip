@@ -7,7 +7,7 @@ close here move to the end of `DONE.md`, under *Closed after the archive*;
 there is no `TODO_tldr.md` any more.
 
 Opened 2026-09-06, brought up to date 2026-10-05. What is here now: the open
-packaging work (three recipes unwritten, every written one built), one wording
+packaging work (all five recipes written and built), one wording
 correction waiting for its file to change, the informational findings from
 three guardian audits, one policy question, and the three lists that are normative
 rather than historical.
@@ -69,9 +69,9 @@ is meant.
 
 Early, but no longer unexamined: `docs/design/packaging.md` (2026-09-13)
 measures the install set and settles the shape. Nine files and two
-directories, 8.87 MiB once the shell completions landed on 2026-09-19; eight
-recipes cover the top 20 distributions and are the same package eight times
-over; deb and `PKGBUILD` first.
+directories, 8.87 MiB once the shell completions landed on 2026-09-19; five
+recipes cover most of the top 20 distributions and are the same package five
+times over; deb and `PKGBUILD` first.
 
 **The decision in it worth knowing without reading it**: `/etc/xtgeoip.conf`
 must *not* be a packaged file. `conf --set-credentials` rewrites it in place
@@ -88,11 +88,11 @@ create the real one on demand via `ensure_system_config_exists`, while
    run without a distribution-supplied kernel module is served by recipes, not
    by a static binary. The probe was still worth running: it proved **cmake is
    not a build dependency** (`aws-lc-sys` takes its pregenerated-source `cc`
-   path), which simplifies all eight recipes.
+   path), which simplifies every recipe.
 2. **Shell completions** via `clap_complete` in docgen, behind a contradiction
    test pinning `Cli::command()` to the spec's declared surface.
 3. **Recipes in `contrib/`**, with the install set derived from one declaration
-   rather than restated eight times.
+   rather than restated in each recipe.
 4. **`extra/ export-ignore`**, keeping the vendored GPL-2 xtables-addons
    tarball out of the published MIT source artefact.
 
@@ -187,8 +187,7 @@ integration suite drives the release binary and is not covered by this.
 
 **Still open:**
 
-- **Three recipes unwritten**: apk, nix, SlackBuild.
-  `contrib/README.md` lists the eleven findings the first five produced.
+- `contrib/README.md` lists the findings the five recipes produced.
 - **The ebuild is built and merged, in a container.** `packaging.yml` run
   37240800966 (2026-10-04) at v0.4.3 and run 37487856506 (2026-10-06) at
   v0.4.4; `contrib/README.md`'s status table says what each proved. The

@@ -3,7 +3,7 @@
 # Read by `xtgeoip-docgen`, which emits `docs/generated/install-manifest.tsv`.
 # Recipes in `contrib/` consume that manifest instead of restating this list,
 # so the nine files and two directories are written down in exactly one place.
-# Nine files across eight recipe formats would otherwise be 72 restatements
+# Nine files across five recipe formats would otherwise be 45 restatements
 # that nothing verifies. Rationale: `docs/design/packaging.md` §6.3.
 #
 # Eight of the nine are under `files:`, each with the path it installs to. The
