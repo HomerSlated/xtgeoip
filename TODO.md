@@ -251,11 +251,14 @@ integration suite drives the release binary and is not covered by this.
   run; `contrib/README.md`'s status table has the detail, which is that
   session's report and was not seen from here. Rebuilt at v0.4.4 on
   2026-10-06 by the session on that machine (294 tests, `xlint` clean, one
-  licence file), and not installed. The package is 3,182,375 bytes, sha256
+  licence file). Upgraded there from 0.4.3_1 the same day and run: the
+  upgrade removed the doc copy of `LICENSE` and `xtgeoip run` rebuilt 253
+  countries. The package is 3,182,375 bytes, sha256
   `cce91b43…8223`; its logs are on the Void machine under
   `~/Reports/xtgeoip/`, not here. Still not exercised: the `make_dirs`
-  trigger (not confirmed either way), `conf_files` handling on upgrade,
-  which the 0.4.3 install and this package would now allow, and musl.
+  trigger (not confirmed either way), `conf_files` keeping an edited
+  logrotate file across an upgrade (the report of this one does not say
+  whether the file had been edited), and musl.
 - **`contrib/arch/PKGBUILD` is built and installed, in a container.**
   `packaging.yml` run 37234035970 (2026-10-04) passed every step at v0.4.3,
   and run 37487856506 (2026-10-06) at v0.4.4; `contrib/README.md`'s status
