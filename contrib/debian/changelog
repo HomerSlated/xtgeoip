@@ -1,4 +1,4 @@
-xtgeoip (0.4.4-1) unstable; urgency=medium
+xtgeoip (0.4.5-1) unstable; urgency=medium
 
   * Initial packaging, from contrib/debian in the upstream tree. Not uploaded
     to Debian and no ITP filed; see debian/README.source.
@@ -12,4 +12,4 @@ xtgeoip (0.4.4-1) unstable; urgency=medium
   * No xtgeoip-dbgsym. Cargo's release profile carries no debug info, so the
     package would hold a symbol table and nothing else.
 
- -- xtgeoip packaging <packaging@example.invalid>  Mon, 05 Oct 2026 18:27:42 +0000
+ -- xtgeoip packaging <packaging@example.invalid>  Sun, 08 Nov 2026 12:33:13 +0000

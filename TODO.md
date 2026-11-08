@@ -286,8 +286,11 @@ tag on GitHub: the first with a published release (source tarball plus
 `SHA256SUMS` signed by the release key) and the first whose tarball leaves out
 `.github/`, `.gitignore` and `.gitattributes`. `v0.4.4` is the first whose
 manifest has the `license` row and whose `Cargo.toml` declares `rust-version`.
-Annotations at `private/TAG_MSG_v0.4.2`, `private/TAG_MSG_v0.4.3` and
-`private/TAG_MSG_v0.4.4`.
+`v0.4.5` changes nothing under `src/`: its `Cargo.lock` takes `rustls-webpki`
+0.103.16, which rejects the compromised eMudhra intermediates, and clears the
+zstd advisories. Annotations at `private/TAG_MSG_v0.4.2`,
+`private/TAG_MSG_v0.4.3`, `private/TAG_MSG_v0.4.4` and
+`private/TAG_MSG_v0.4.5`.
 Four names are gone and must never be reused: a clone made before a deletion
 still holds the old tag, and `git fetch` would not replace it. `v0.3.0`,
 `v0.4.0` and `v0.4.1` were deleted from the remote and locally on 2026-10-02,

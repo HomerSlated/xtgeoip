@@ -6,10 +6,11 @@
 # 11085503 of hazensparkle/xtgeoip) for fedora-44-x86_64 and
 # opensuse-tumbleweed-x86_64, at Version 0.4.4: the first build whose
 # manifest has the `license` row, and each package holds one licence file.
-# Only this comment has changed since. That build took the default path,
-# with network access. NOT BUILT: `--with vendor`. NOT DONE: an install, an
-# upgrade, rpmlint. Read contrib/README.md's status table before relying on
-# it.
+# That build took the default path, with network access. NOT BUILT since:
+# Version 0.4.5, whose build inputs differ from 0.4.4's only in Cargo.lock
+# and the version string. NOT BUILT at all: `--with vendor`. NOT DONE: an
+# install, an upgrade, rpmlint. Read contrib/README.md's status table before
+# relying on it.
 #
 # Distribution-neutral on purpose: Fedora, openSUSE and RHEL each have their
 # own Rust macros, and the one this file would otherwise use is unsafe here.
@@ -38,7 +39,7 @@
 %bcond_with vendor
 
 Name:           xtgeoip
-Version:        0.4.4
+Version:        0.4.5
 Release:        1%{?dist}
 Summary:        GeoLite2 database builder for the xt_geoip iptables match
 License:        MIT
@@ -192,6 +193,11 @@ done < manifest.rows
 %license LICENSE
 
 %changelog
+* Sun Nov 08 2026 xtgeoip packaging <packaging@example.invalid> - 0.4.5-1
+- Update to 0.4.5. Dependency updates only: rustls-webpki 0.103.16 rejects
+  the compromised eMudhra intermediates (RUSTSEC-2026-0382), and the zstd
+  crates clear fourteen advisories. The build steps are unchanged.
+
 * Mon Oct 05 2026 xtgeoip packaging <packaging@example.invalid> - 0.4.4-1
 - Update to 0.4.4. The licence is installed once, by %%license: upstream's
   manifest no longer lists it as a doc file.
